@@ -1,0 +1,9 @@
+[default]
+    default.locale = "en_us"
+
+    [default.extend-words]
+        ezbak = "ezbak"
+        nd    = "nd"
+
+[files]
+    extend-exclude = ["*_cache", ".cache", ".venv", "tmp"]
