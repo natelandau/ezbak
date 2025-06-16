@@ -18,7 +18,7 @@ class Settings:
     destinations: list[str | Path]
     tz: str
     log_level: str
-    log_file: str | None
+    log_file: str | Path | None
     compression_level: int
     time_based_policy: dict[str, int] | None = None
     max_backups: int | None = None

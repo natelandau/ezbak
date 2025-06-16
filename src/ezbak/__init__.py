@@ -18,7 +18,7 @@ def ezbak(  # noqa: PLR0913, PLR0917
     destinations: list[Path | str] | None = None,
     tz: str | None = None,
     log_level: str = "info",
-    log_file: str | None = None,
+    log_file: str | Path | None = None,
     compression_level: int | None = None,
     time_based_policy: dict[str, int] | None = None,
     max_backups: int | None = None,
@@ -65,7 +65,7 @@ def ezbak(  # noqa: PLR0913, PLR0917
         label_time_units=env.bool("LABEL_TIME_UNITS", None) or label_time_units,
     )
 
-    logger.configure(log_level=log_level, show_source_reference=False, log_file=log_file)
+    logger.configure(log_level=log_level, show_source_reference=False, log_file=str(log_file))
     logger.info(f"Starting ezbak for {settings.backup_name}")
 
     return BackupManager(settings=settings)
