@@ -6,7 +6,7 @@ A simple backup management tool that can be used both as a command-line interfac
 
 ## Features
 
--   Create compressed backups of files and directories
+-   Create compressed backups of files and directories in tgz format
 -   Support for multiple backup destinations
 -   Configurable compression levels
 -   Intelligent retention policies (time-based and count-based)

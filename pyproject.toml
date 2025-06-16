@@ -2,6 +2,7 @@
     authors = [{ name = "Nate Landau", email = "github@natenate.org" }]
     classifiers = [
         "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
@@ -13,7 +14,7 @@
     name = "ezbak"
     readme = "README.md"
     requires-python = ">=3.10, <3.14"
-    version = "0.1.0"
+    version = "0.2.0"
 
     [project.urls]
         Homepage   = "https://github.com/natelandau/ezbak"
@@ -62,11 +63,10 @@
         'if TYPE_CHECKING:',
     ]
     fail_under = 20
-    # omit = ["src/datefind/constants.py"]
-    precision    = 1
+    precision = 1
     show_missing = true
     skip_covered = true
-    skip_empty   = true
+    skip_empty = true
 
 [tool.coverage.run]
     branch       = true
