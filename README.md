@@ -1,4 +1,4 @@
-[![Tests](https://github.com/natelandau/ezbak/actions/workflows/test.yml/badge.svg)](https://github.com/natelandau/ezbak/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/natelandau/ezbak/graph/badge.svg?token=CXstf6zblD)](https://codecov.io/gh/natelandau/ezbak)
+[![Tests](https://github.com/natelandau/ezbak/actions/workflows/test.yml/badge.svg)](https://github.com/natelandau/ezbak/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/natelandau/ezbak/graph/badge.svg?token=lR581iFOIE)](https://codecov.io/gh/natelandau/ezbak)
 
 # ezbak
 
@@ -18,14 +18,106 @@ A simple backup management tool that can be used both as a command-line interfac
 ## Installation
 
 ```bash
+# with uv
+uv add ezbak
+
+# with pip
 pip install ezbak
 ```
 
 ## Usage
 
+### Python Package
+
+ezbak is primarily designed to be used as a Python package in your projects:
+
+```python
+from pathlib import Path
+from ezbak import ezbak
+
+# Initialize backup manager
+backup_manager = ezbak(
+    name="my-backup",
+    sources=[Path("/path/to/source")],
+    destinations=[Path("/path/to/destination")],
+    time_based_policy={
+        "yearly": 1,
+        "monthly": 12,
+        "weekly": 4,
+        "daily": 7,
+        "hourly": 24,
+        "minutely": 60,
+    },
+    log_level="INFO",
+    log_file=Path("/path/to/log.txt"),
+    exclude_regex=r"\.DS_Store$",
+    label_time_units=True,
+)
+
+# Create a backup
+backup_files = backup_manager.create_backup()
+
+# List existing backups
+backups = backup_manager.list_backups()
+
+# Prune old backups
+deleted_files = backup_manager.prune_backups()
+
+# Restore latest backup
+backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
+```
+
+#### Configuration Options
+
+-   `name (str)`: Backup name
+-   `sources (list[Path])`: List of source paths
+-   `destinations (list[Path])`: List of destination paths
+-   `compression_level (int)`: Compression level (1-9)
+-   `max_backups (int)`: Maximum number of backups to keep
+-   `time_based_policy (dict[str, int])`: Time-based retention policy (dictionary of time units and number of backups to keep)
+-   `timezone (str)`: Timezone for backup timestamps
+-   `log_level (str)`: Logging level
+-   `log_file (Path | str)`: Path to log file
+-   `exclude_regex (str)`: Regex pattern to exclude files
+-   `include_regex (str)`: Regex pattern to include files
+-   `label_time_units (bool)`: Whether to label time units in filenames
+
+#### Retention Policies
+
+If neither `max_backups` and `time_based_policy` are provided, all backups are kept. Keep in mind that these are mutually exclusive, and if both are provided, `max_backups` will be used.
+
+The time-based retention policy is a dictionary of time units and number of backups to keep. The time units are:
+
+-   `yearly`
+-   `monthly`
+-   `weekly`
+-   `daily`
+-   `hourly`
+-   `minutely`
+
+For example, the following policy will keep the most recent 2 yearly backups, 12 monthly backups, 4 weekly backups, 7 daily backups, 24 hourly backups, and 10 minutely backups:
+
+```python
+time_based_policy = {
+    "yearly": 2,
+    "monthly": 12,
+    "weekly": 4,
+    "daily": 7,
+    "hourly": 24,
+    "minutely": 10,
+}
+```
+
+#### Backup Naming
+
+    - Backup files are named in the format: `{name}-{timestamp}-{period}.{extension}`
+    - When `label_time_units` is False, the period is omitted
+    - If a backup with the same name exists, a UUID is appended to prevent conflicts
+    - The timestamp format is ISO 8601: `YYYYMMDDTHHMMSS`
+
 ### Command Line Interface
 
-ezbak provides a command-line interface with several subcommands:
+For convenience, ezbak also provides a command-line interface with several subcommands:
 
 #### Create a Backup
 
@@ -65,43 +157,6 @@ Time-based retention options:
 
 ```bash
 ezbak restore --destination /path/to/restore
-```
-
-### Python Package
-
-ezbak can also be used as a Python package in your projects:
-
-```python
-from pathlib import Path
-from ezbak import ezbak
-
-# Initialize backup manager
-backup_manager = ezbak(
-    name="my-backup",
-    sources=[Path("/path/to/source")],
-    destinations=[Path("/path/to/destination")],
-    compression_level=6,
-    time_based_policy={
-        "yearly": 1,
-        "monthly": 12,
-        "weekly": 4,
-        "daily": 7,
-        "hourly": 24,
-        "minutely": 60
-    }
-)
-
-# Create a backup
-backup_files = backup_manager.create_backup()
-
-# List existing backups
-backups = backup_manager.list_backups()
-
-# Prune old backups
-deleted_files = backup_manager.prune_backups()
-
-# Restore latest backup
-backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
 ```
 
 ### Environment Variables
