@@ -7,7 +7,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import cappa
-import pytest
 import time_machine
 
 from ezbak.cli import EZBakCLI, initialize_ezbak
