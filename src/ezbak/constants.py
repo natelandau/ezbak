@@ -8,7 +8,7 @@ VERSION = "0.1.0"
 DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
 TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
 BACKUP_NAME_REGEX = re.compile(
-    r"(?P<name>.+)-(?P<timestamp>\d{8}T\d{6})-(?P<period>[a-z]+)-?(?P<uuid>[0-9a-z]{5})?\.(?P<extension>.+)",
+    r"(?P<name>.+)-(?P<timestamp>\d{8}T\d{6})(?:-(?P<period>(?:yearly|monthly|weekly|daily|hourly|minutely)))?-?(?P<uuid>[0-9a-z]{5,6})?\.(?P<extension>.+)",
     re.IGNORECASE,
 )
 DEFAULT_COMPRESSION_LEVEL = 9

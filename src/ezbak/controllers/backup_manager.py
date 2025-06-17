@@ -21,6 +21,15 @@ from ezbak.constants import (
 from ezbak.models import Backup, Settings
 
 
+@dataclass
+class FileForRename:
+    """Temporary class used for renaming backups."""
+
+    old_path: Path
+    new_path: Path
+    do_rename: bool = False
+
+
 class BackupManager:
     """Manage and control backup operations for specified sources and destinations."""
 
@@ -221,6 +230,77 @@ class BackupManager:
             chown_group=self.chown_group,
         )
 
+    def _rename_no_labels(self, path: Path) -> list[FileForRename]:
+        """Rename a backup file without time unit labels.
+
+        Args:
+            path (Path): The path to rename.
+
+        Returns:
+            list[FileForRename]: A list of FileForRename objects.
+        """
+        backups = self._load_all_backups(path=path)
+        files_for_rename: list[FileForRename] = []
+        for backup in backups:
+            new_backup_name = backup.path.name
+            name_parts = BACKUP_NAME_REGEX.finditer(backup.path.name)
+            for match in name_parts:
+                matches = match.groupdict()
+                found_period = matches.get("period", None)
+                found_uuid = matches.get("uuid", None)
+            if found_period:
+                new_backup_name = re.sub(rf"-{found_period}", "", new_backup_name)
+            if found_uuid:
+                new_backup_name = re.sub(rf"-{found_uuid}", "", new_backup_name)
+
+            files_for_rename.append(
+                FileForRename(
+                    old_path=backup.path,
+                    new_path=backup.path.with_name(new_backup_name),
+                    do_rename=backup.path.with_name(new_backup_name) != backup.path,
+                )
+            )
+
+        return files_for_rename
+
+    def _rename_with_labels(self, path: Path) -> list[FileForRename]:
+        """Rename a backup file with time unit labels.
+
+        Args:
+            path (Path): The path to rename.
+
+        Returns:
+            list[FileForRename]: A list of FileForRename objects.
+        """
+        backup_dict, _ = self._group_backups_by_period(path=path)
+
+        files_for_rename: list[FileForRename] = []
+        for backup_type, backups in backup_dict.items():
+            for backup in backups:
+                name_parts = BACKUP_NAME_REGEX.finditer(backup.path.name)
+                for match in name_parts:
+                    matches = match.groupdict()
+                    found_period = matches.get("period", None)
+                if found_period and found_period == backup_type.value:
+                    files_for_rename.append(
+                        FileForRename(old_path=backup.path, new_path=backup.path, do_rename=False)
+                    )
+                    continue
+
+                new_name = BACKUP_NAME_REGEX.sub(
+                    repl=f"{matches.get('name')}-{matches.get('timestamp')}-{backup_type.value}.{BACKUP_EXTENSION}",
+                    string=backup.path.name,
+                )
+                files_for_rename.append(
+                    FileForRename(
+                        old_path=backup.path,
+                        new_path=backup.path.with_name(new_name),
+                        do_rename=True,
+                    )
+                )
+
+        return files_for_rename
+
     def get_latest_backup(self) -> Path:
         """Find the most recently created backup file for restoration or verification purposes.
 
@@ -359,42 +439,10 @@ class BackupManager:
         Args:
             path (Path | None, optional): The directory path containing backups to rename. If None, processes all configured destinations. Defaults to None.
         """
-        if not self.label_time_units:
-            logger.info("Will not rename backups because label_time_units is False")
-            return
-
-        @dataclass
-        class FileForRename:
-            old_path: Path
-            new_path: Path
-            do_rename: bool = False
-
-        backup_dict, _ = self._group_backups_by_period(path=path)
-
-        files_for_rename: list[FileForRename] = []
-        for backup_type, backups in backup_dict.items():
-            for backup in backups:
-                name_parts = BACKUP_NAME_REGEX.finditer(backup.path.name)
-                for match in name_parts:
-                    matches = match.groupdict()
-                    found_period = matches.get("period", None)
-                if not found_period or found_period == backup_type.value:
-                    files_for_rename.append(
-                        FileForRename(old_path=backup.path, new_path=backup.path, do_rename=False)
-                    )
-                    continue
-
-                new_name = BACKUP_NAME_REGEX.sub(
-                    repl=f"{matches.get('name')}-{matches.get('timestamp')}-{backup_type.value}.{BACKUP_EXTENSION}",
-                    string=backup.path.name,
-                )
-                files_for_rename.append(
-                    FileForRename(
-                        old_path=backup.path,
-                        new_path=backup.path.with_name(new_name),
-                        do_rename=True,
-                    )
-                )
+        if self.label_time_units:
+            files_for_rename = self._rename_with_labels(path=path)
+        else:
+            files_for_rename = self._rename_no_labels(path=path)
 
         for file in files_for_rename:
             if file.do_rename:

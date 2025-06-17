@@ -117,13 +117,6 @@ def test_without_labels(debug, clean_stderr, filesystem, tmp_path):
     assert re.search(rf"dest1/test-{frozen_time_str}-[a-z0-9]{{5}}\.tgz", output)
     assert re.search(rf"dest2/test-{frozen_time_str}-[a-z0-9]{{5}}\.tgz", output)
 
-    backup_manager.rename_backups()
-    output = clean_stderr()
-    # debug(output)
-    # debug(tmp_path)
-
-    assert "INFO     | Will not rename backups" in output
-
 
 @time_machine.travel(frozen_time, tick=False)
 def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
@@ -195,7 +188,7 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
     assert i == len(list(src_dir.rglob("*")))
 
 
-def test_rename_backups(debug, clean_stderr, tmp_path):
+def test_rename_backups_with_labels(debug, clean_stderr, tmp_path):
     """Verify that backups are renamed correctly."""
     # Given: Source and destination directories from fixture
 
@@ -205,7 +198,7 @@ def test_rename_backups(debug, clean_stderr, tmp_path):
         "test-20250609T095737-daily.tgz",
         "test-20250609T095751-minutely.tgz",
         "test-20250609T090932-yearly.tgz",
-        "test-20250609T095737-hourly.tgz",
+        "test-20250609T095737.tgz",
         "test-20250609T095804-minutely-p2we3r.tgz",
         "test-20250609T095625-monthly.tgz",
         "test-20250609T095737-minutely.tgz",
@@ -224,7 +217,8 @@ def test_rename_backups(debug, clean_stderr, tmp_path):
         name="test",
         sources=[tmp_path],
         destinations=[tmp_path],
-        log_level="debug",
+        log_level="trace",
+        label_time_units=True,
     )
     backup_manager.rename_backups()
     output = clean_stderr()
@@ -234,7 +228,7 @@ def test_rename_backups(debug, clean_stderr, tmp_path):
     assert "test-20250609T095730-weekly-pl9kj.tgz -> test-20250609T095730-daily.tgz" in output
     assert "test-20250609T095737-daily.tgz -> test-20250609T095737-hourly.tgz" in output
     assert re.search(
-        r"test-20250609T095737-hourly\.tgz -> test-20250609T095737-minutely-[a-z0-9]{5}\.tgz",
+        r"test-20250609T095737\.tgz -> test-20250609T095737-minutely-[a-z0-9]{5}\.tgz",
         output,
         re.IGNORECASE,
     )
@@ -254,6 +248,59 @@ def test_rename_backups(debug, clean_stderr, tmp_path):
         "test-20250609T095804-minutely-p2we3r.tgz",
         "test-20240609T090932-yearly.tgz",
         "test-20250609T095625-monthly.tgz",
+    ]
+    for filename in renamed_files:
+        assert Path(tmp_path / filename).exists()
+
+
+def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
+    """Verify that backups are renamed correctly."""
+    # Given: A backup manager configured with test parameters
+    filenames = [
+        "test-20240609T090932-yearly.tgz",
+        "test-20250609T095737-daily.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T090932-yearly.tgz",
+        "test-20250609T095737.tgz",
+        "test-20250609T095804-minutely-p2we3r.tgz",
+    ]
+    for filename in filenames:
+        Path(tmp_path / filename).touch()
+
+    # Given: A backup manager configured with test parameters
+    backup_manager = ezbak(
+        name="test",
+        sources=[tmp_path],
+        destinations=[tmp_path],
+        log_level="trace",
+        label_time_units=False,
+    )
+    backup_manager.rename_backups()
+    output = clean_stderr()
+    debug(output)
+    debug(tmp_path)
+
+    assert "Renamed: test-20240609T090932-yearly.tgz -> test-20240609T090932.tgz" in output
+    assert "Renamed: test-20250609T090932-yearly.tgz -> test-20250609T090932.tgz" in output
+    assert "Renamed: test-20250609T095751-minutely.tgz -> test-20250609T095751.tgz" in output
+    assert (
+        "DEBUG    | Renamed: test-20250609T095804-minutely-p2we3r.tgz -> test-20250609T095804.tgz"
+        in output
+    )
+    assert re.search(
+        r"test-20250609T095737-daily\.tgz -> test-20250609T095737-[a-z0-9]{5,6}\.tgz",
+        output,
+        re.IGNORECASE,
+    )
+
+    ###################################
+
+    renamed_files = [
+        "test-20250609T095751.tgz",
+        "test-20250609T095804.tgz",
+        "test-20250609T090932.tgz",
+        "test-20240609T090932.tgz",
+        "test-20250609T095737.tgz",
     ]
     for filename in renamed_files:
         assert Path(tmp_path / filename).exists()
