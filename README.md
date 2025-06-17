@@ -68,17 +68,17 @@ backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
 -   `name (str)`: Backup name
 -   `sources (list[Path])`: List of source paths
 -   `destinations (list[Path])`: List of destination paths
--   `compression_level (int, optional)`: Compression level (1-9)
--   `max_backups (int, optional)`: Maximum number of backups to keep
--   `time_based_policy (dict[str, int], optional)`: Time-based retention policy (dictionary of time units and number of backups to keep)
--   `timezone (str, optional)`: Timezone for backup timestamps
--   `log_level (str, optional)`: Logging level
--   `log_file (Path | str, optional)`: Path to log file
--   `exclude_regex (str, optional)`: Regex pattern to exclude files
--   `include_regex (str, optional)`: Regex pattern to include files
--   `label_time_units (bool, optional)`: Whether to label time units in filenames
--   `chown_user (int, optional)`: User ID to change the ownership of restored files to
--   `chown_group (int, optional)`: Group ID to change the ownership of restored files to
+-   `compression_level (int, optional)`: Compression level (1-9). Defaults to `9`.
+-   `max_backups (int, optional)`: Maximum number of backups to keep. Defaults to `None`.
+-   `time_based_policy (dict[str, int], optional)`: Time-based retention policy (dictionary of time units and number of backups to keep). Defaults to `None`.
+-   `timezone (str, optional)`: Timezone for backup timestamps. Defaults to system timezone.
+-   `log_level (str, optional)`: Logging level. Defaults to `INFO`.
+-   `log_file (Path | str, optional)`: Path to log file. Defaults to `None`.
+-   `exclude_regex (str, optional)`: Regex pattern to exclude files. Defaults to `None`.
+-   `include_regex (str, optional)`: Regex pattern to include files. Defaults to `None`.
+-   `label_time_units (bool, optional)`: Whether to label time units in filenames. Defaults to `True`.
+-   `chown_user (int, optional)`: User ID to change the ownership of restored files to. Defaults to `None`.
+-   `chown_group (int, optional)`: Group ID to change the ownership of restored files to. Defaults to `None`.
 
 #### Retention Policies
 
