@@ -41,6 +41,8 @@ class BackupManager:
         self.label_time_units = settings.label_time_units
         self.exclude_regex = settings.exclude_regex
         self.include_regex = settings.include_regex
+        self.chown_user = settings.chown_user
+        self.chown_group = settings.chown_group
 
     def _include_file_in_backup(self, path: Path) -> bool:
         """Determine whether a file should be included in the backup based on configured regex filters.
@@ -215,6 +217,8 @@ class BackupManager:
             path=path,
             timestamp=timestamp,
             zoned_datetime=dt,
+            chown_user=self.chown_user,
+            chown_group=self.chown_group,
         )
 
     def get_latest_backup(self) -> Path:

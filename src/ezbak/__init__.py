@@ -24,6 +24,8 @@ def ezbak(  # noqa: PLR0913, PLR0917
     max_backups: int | None = None,
     exclude_regex: str | None = None,
     include_regex: str | None = None,
+    chown_user: int | None = None,
+    chown_group: int | None = None,
     *,
     label_time_units: bool = DEFAULT_LABEL_TIME_UNITS,
 ) -> BackupManager:
@@ -44,6 +46,8 @@ def ezbak(  # noqa: PLR0913, PLR0917
         tz (str, optional): Timezone for timestamp formatting.
         log_level (str, optional): Logging level for the backup operation. Defaults to "info".
         log_file (str | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
+        chown_user (int | None, optional): User ID to change the ownership of the files to. Defaults to None.
+        chown_group (int | None, optional): Group ID to change the ownership of the files to. Defaults to None.
 
     Returns:
         BackupManager: The backup manager instance.
@@ -63,9 +67,15 @@ def ezbak(  # noqa: PLR0913, PLR0917
         exclude_regex=env.str("EXCLUDE_REGEX", None) or exclude_regex,
         include_regex=env.str("INCLUDE_REGEX", None) or include_regex,
         label_time_units=env.bool("LABEL_TIME_UNITS", None) or label_time_units,
+        chown_user=env.int("CHOWN_USER", None) or chown_user,
+        chown_group=env.int("CHOWN_GROUP", None) or chown_group,
     )
 
-    logger.configure(log_level=log_level, show_source_reference=False, log_file=str(log_file))
+    logger.configure(
+        log_level=log_level,
+        show_source_reference=False,
+        log_file=str(log_file) if log_file else None,
+    )
     logger.info(f"Starting ezbak for {settings.backup_name}")
 
     return BackupManager(settings=settings)

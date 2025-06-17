@@ -27,6 +27,8 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
     no_label = getattr(ezbak_cli.command, "no_label", None)
     label_time_units = not no_label
     max_backups = getattr(ezbak_cli.command, "max_backups", None)
+    uid = getattr(ezbak_cli.command, "uid", None)
+    gid = getattr(ezbak_cli.command, "gid", None)
 
     time_based_policy = {
         "yearly": getattr(ezbak_cli.command, "yearly", None),
@@ -49,6 +51,8 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
         log_level=log_level or None,
         log_file=log_file,
         time_based_policy=time_based_policy,
+        chown_user=uid,
+        chown_group=gid,
     )
     ezbak_cli.backup_manager = backup_manager
 
@@ -171,6 +175,24 @@ class RestoreCommand:
             help="The directory to restore to.",
         ),
     ]
+
+    uid: Annotated[
+        int,
+        cappa.Arg(
+            long="uid",
+            short="u",
+            help="The UID to restore to.",
+        ),
+    ] = None
+
+    gid: Annotated[
+        int,
+        cappa.Arg(
+            long="gid",
+            short="g",
+            help="The GID to restore to.",
+        ),
+    ] = None
 
 
 @cappa.command(name="prune", invoke="ezbak.cli_commands.prune.main")

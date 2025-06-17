@@ -5,7 +5,7 @@ from pathlib import Path
 
 from nclutils import logger
 
-from ezbak.constants import BackupType, RetentionPolicyType
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, BackupType, RetentionPolicyType
 from ezbak.controllers.retention_policy_manager import RetentionPolicyManager
 
 
@@ -19,12 +19,14 @@ class Settings:
     tz: str
     log_level: str
     log_file: str | Path | None
-    compression_level: int
+    compression_level: int = DEFAULT_COMPRESSION_LEVEL
     time_based_policy: dict[str, int] | None = None
     max_backups: int | None = None
     exclude_regex: str | None = None
     include_regex: str | None = None
     label_time_units: bool = True
+    chown_user: int | None = None
+    chown_group: int | None = None
     _source_paths: list[Path] | None = None
     _destination_paths: list[Path] | None = None
     _retention_policy: RetentionPolicyManager | None = None
