@@ -11,6 +11,7 @@ from nclutils import copy_file, find_files, logger, new_uid
 from whenever import Instant, PlainDateTime, TimeZoneNotFoundError
 
 from ezbak.constants import (
+    ALWAYS_EXCLUDE_FILENAMES,
     BACKUP_EXTENSION,
     BACKUP_NAME_REGEX,
     DEFAULT_DATE_FORMAT,
@@ -64,6 +65,10 @@ class BackupManager:
         Returns:
             bool: True if the file should be included in the backup, False if it should be excluded.
         """
+        if path.name in ALWAYS_EXCLUDE_FILENAMES:
+            logger.trace(f"Excluded file: {path.name}")
+            return False
+
         if self.include_regex and re.search(rf"{self.include_regex}", str(path)) is None:
             logger.trace(f"Exclude by include regex: {path.name}")
             return False
