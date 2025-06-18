@@ -157,6 +157,17 @@ Time-based retention options:
 ezbak restore --destination /path/to/restore
 ```
 
+#### Excluded Files
+
+Importantly, some file and directory names are always excluded from backups. These are:
+
+-   `.DS_Store`
+-   `@eaDir`
+-   `.Trashes`
+-   `__pycache__`
+-   `Thumbs.db`
+-   `IconCache.db`
+
 ### Environment Variables
 
 ezbak can be configured using environment variables with the `EZBAK_` prefix:

@@ -16,6 +16,14 @@ DEFAULT_RETENTION = 1
 DEFAULT_LABEL_TIME_UNITS = True
 ENVAR_PREFIX = "EZBAK_"
 BACKUP_EXTENSION = "tgz"
+ALWAYS_EXCLUDE_FILENAMES = (
+    ".DS_Store",
+    "@eaDir",
+    ".Trashes",
+    "__pycache__",
+    "Thumbs.db",
+    "IconCache.db",
+)
 
 
 class CLILogLevel(Enum):

@@ -22,7 +22,9 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
     test_file = tmp_path / "test_file.txt"
+    test_exclude_file = src_dir / ".DS_Store"
     test_file.touch()
+    test_exclude_file.touch()
 
     # Given: Expected backup filenames for different time units
     filenames = [
@@ -49,7 +51,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # When: Capturing stderr output
     output = clean_stderr()
-    # debug(output)
+    debug(output)
 
     # Then: All expected backup files exist in both destinations
     for filename in filenames:
@@ -57,6 +59,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
         assert Path(dest2 / filename).exists()
         assert f"INFO     | Created: …/dest1/{filename}" in output
         assert f"INFO     | Created: …/dest2/{filename}" in output
+        assert "Excluded file: .DS_Store" in output
 
     # Then: Minutely backups have UUID suffixes
     for dest in [dest1, dest2]:
@@ -85,7 +88,11 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
+        if file.name == test_exclude_file.name:
+            assert not (restore_dir / src_dir.name / file.name).exists()
+            continue
         assert (restore_dir / src_dir.name / file.name).exists()
+
     assert (restore_dir / test_file.name).exists()
 
 

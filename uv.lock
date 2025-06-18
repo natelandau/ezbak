@@ -305,7 +305,7 @@ wheels = [
 
 [[package]]
 name = "ezbak"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "cappa" },
@@ -339,21 +339,21 @@ dev = [
 requires-dist = [
     { name = "cappa", specifier = ">=0.28.0" },
     { name = "environs", specifier = ">=14.2.0" },
-    { name = "nclutils", specifier = ">=0.4.0" },
+    { name = "nclutils", specifier = ">=0.5.0" },
     { name = "whenever", specifier = ">=0.8.5" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "commitizen", specifier = ">=4.8.3" },
-    { name = "coverage", specifier = ">=7.8.2" },
+    { name = "coverage", specifier = ">=7.9.1" },
     { name = "duty", specifier = ">=1.6.0" },
     { name = "freezegun", specifier = ">=1.5.2" },
-    { name = "mypy", specifier = ">=1.16.0" },
+    { name = "mypy", specifier = ">=1.16.1" },
     { name = "pre-commit", specifier = ">=4.2.0" },
-    { name = "pytest", specifier = ">=8.4.0" },
+    { name = "pytest", specifier = ">=8.4.1" },
     { name = "pytest-clarity", specifier = ">=1.0.1" },
-    { name = "pytest-cov", specifier = ">=6.1.1" },
+    { name = "pytest-cov", specifier = ">=6.2.1" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "pytest-pretty-terminal", specifier = ">=1.1.0" },
     { name = "pytest-sugar", specifier = ">=1.0.0" },
@@ -596,7 +596,7 @@ wheels = [
 
 [[package]]
 name = "nclutils"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "loguru" },
@@ -604,9 +604,9 @@ dependencies = [
     { name = "rich" },
     { name = "sh" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/77/db3387abc78206c522018b636d5a9e4d7a4a66969423f87d08b6f4bd7d9e/nclutils-0.4.0.tar.gz", hash = "sha256:5458bb2ec8a572c86cb4267e8f9ccd837dbb1d5298e2cbd64372f56bae14b394", size = 96522, upload-time = "2025-06-06T12:52:59.739Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/19/fa364a7e9147c43d636f69226cf0ade73c08dd2a51504d83e46389c1d4c0/nclutils-0.5.0.tar.gz", hash = "sha256:4471e7fdfa12003165deaa79130ef15c742a6f619dbceb1fa52b2f94537c8595", size = 95049, upload-time = "2025-06-18T13:46:25.937Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/4e/5b255d06d8c75c1c539916c56020f4187acfbf77ea6d6fea700fee9d37a4/nclutils-0.4.0-py3-none-any.whl", hash = "sha256:a4b8096e5b1e7018564dff0d160ce00c00a95abb12e4305969d345c5cc0e05bd", size = 35823, upload-time = "2025-06-06T12:52:58.31Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/69/627e74a104454b5e2734d50132fa1c65120f5aa059d4efa5e0a488f22975/nclutils-0.5.0-py3-none-any.whl", hash = "sha256:9747c72c5b78e00fd06899ba100f37f72253f2f728b972067c4a1e65eacb4ddb", size = 36156, upload-time = "2025-06-18T13:46:24.779Z" },
 ]
 
 [[package]]
@@ -711,7 +711,7 @@ wheels = [
 
 [[package]]
 name = "pytest"
-version = "8.4.0"
+version = "8.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
@@ -722,9 +722,9 @@ dependencies = [
     { name = "pygments" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fb/aa/405082ce2749be5398045152251ac69c0f3578c7077efc53431303af97ce/pytest-8.4.0.tar.gz", hash = "sha256:14d920b48472ea0dbf68e45b96cd1ffda4705f33307dcc86c676c1b5104838a6", size = 1515232, upload-time = "2025-06-02T17:36:30.03Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/ba/45911d754e8eba3d5a841a5ce61a65a685ff1798421ac054f85aa8747dfb/pytest-8.4.1.tar.gz", hash = "sha256:7c67fd69174877359ed9371ec3af8a3d2b04741818c51e5e99cc1742251fa93c", size = 1517714, upload-time = "2025-06-18T05:48:06.109Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/de/afa024cbe022b1b318a3d224125aa24939e99b4ff6f22e0ba639a2eaee47/pytest-8.4.0-py3-none-any.whl", hash = "sha256:f40f825768ad76c0977cbacdf1fd37c6f7a468e460ea6a0636078f8972d4517e", size = 363797, upload-time = "2025-06-02T17:36:27.859Z" },
+    { url = "https://files.pythonhosted.org/packages/29/16/c8a903f4c4dffe7a12843191437d7cd8e32751d5de349d45d3fe69544e87/pytest-8.4.1-py3-none-any.whl", hash = "sha256:539c70ba6fcead8e78eebbf1115e8b589e7565830d7d006a8723f19ac8a0afb7", size = 365474, upload-time = "2025-06-18T05:48:03.955Z" },
 ]
 
 [[package]]
