@@ -15,44 +15,25 @@ from ezbak.controllers import BackupManager  # noqa: TC001
 
 def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
     """Initialize the EZBak CLI."""
-    name = ezbak_cli.name
-    log_level = ezbak_cli.verbosity.name
-    log_file = str(ezbak_cli.log_file) if ezbak_cli.log_file else None
-
-    sources = getattr(ezbak_cli.command, "sources", [Path.cwd()])
-    destinations = getattr(ezbak_cli.command, "destinations", [Path.cwd()])
-    include_regex = getattr(ezbak_cli.command, "include_regex", None)
-    exclude_regex = getattr(ezbak_cli.command, "exclude_regex", None)
-    compression_level = getattr(ezbak_cli.command, "compression_level", None)
-    no_label = getattr(ezbak_cli.command, "no_label", None)
-    label_time_units = not no_label
-    max_backups = getattr(ezbak_cli.command, "max_backups", None)
-    uid = getattr(ezbak_cli.command, "uid", None)
-    gid = getattr(ezbak_cli.command, "gid", None)
-
-    time_based_policy = {
-        "yearly": getattr(ezbak_cli.command, "yearly", None),
-        "monthly": getattr(ezbak_cli.command, "monthly", None),
-        "weekly": getattr(ezbak_cli.command, "weekly", None),
-        "daily": getattr(ezbak_cli.command, "daily", None),
-        "hourly": getattr(ezbak_cli.command, "hourly", None),
-        "minutely": getattr(ezbak_cli.command, "minutely", None),
-    }
-
     backup_manager = ezbak(
-        name=name,
-        sources=sources,
-        destinations=destinations,
-        include_regex=include_regex,
-        exclude_regex=exclude_regex,
-        compression_level=compression_level,
-        label_time_units=label_time_units,
-        max_backups=max_backups,
-        log_level=log_level or None,
-        log_file=log_file,
-        time_based_policy=time_based_policy,
-        chown_user=uid,
-        chown_group=gid,
+        name=ezbak_cli.name,
+        sources=getattr(ezbak_cli.command, "sources", [Path.cwd()]),
+        destinations=getattr(ezbak_cli.command, "destinations", [Path.cwd()]),
+        include_regex=getattr(ezbak_cli.command, "include_regex", None),
+        exclude_regex=getattr(ezbak_cli.command, "exclude_regex", None),
+        compression_level=getattr(ezbak_cli.command, "compression_level", None),
+        label_time_units=not getattr(ezbak_cli.command, "no_label", None),
+        max_backups=getattr(ezbak_cli.command, "max_backups", None),
+        log_level=ezbak_cli.verbosity.name or None,
+        log_file=str(ezbak_cli.log_file) if ezbak_cli.log_file else None,
+        retention_yearly=getattr(ezbak_cli.command, "yearly", None),
+        retention_monthly=getattr(ezbak_cli.command, "monthly", None),
+        retention_weekly=getattr(ezbak_cli.command, "weekly", None),
+        retention_daily=getattr(ezbak_cli.command, "daily", None),
+        retention_hourly=getattr(ezbak_cli.command, "hourly", None),
+        retention_minutely=getattr(ezbak_cli.command, "minutely", None),
+        chown_user=getattr(ezbak_cli.command, "uid", None),
+        chown_group=getattr(ezbak_cli.command, "gid", None),
     )
     ezbak_cli.backup_manager = backup_manager
 

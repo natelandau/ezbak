@@ -51,7 +51,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # When: Capturing stderr output
     output = clean_stderr()
-    debug(output)
+    # debug(output)
 
     # Then: All expected backup files exist in both destinations
     for filename in filenames:
@@ -284,8 +284,8 @@ def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
     )
     backup_manager.rename_backups()
     output = clean_stderr()
-    debug(output)
-    debug(tmp_path)
+    # debug(output)
+    # debug(tmp_path)
 
     assert "Renamed: test-20240609T090932-yearly.tgz -> test-20240609T090932.tgz" in output
     assert "Renamed: test-20250609T090932-yearly.tgz -> test-20250609T090932.tgz" in output
@@ -385,14 +385,12 @@ def test_prune_policy(debug, clean_stderr, tmp_path):
         sources=[tmp_path],
         destinations=[tmp_path],
         log_level="debug",
-        time_based_policy={
-            "yearly": 1,
-            "monthly": 4,
-            "weekly": 4,
-            "daily": 4,
-            "hourly": 4,
-            "minutely": 4,
-        },
+        retention_yearly=1,
+        retention_monthly=4,
+        retention_weekly=4,
+        retention_daily=4,
+        retention_hourly=4,
+        retention_minutely=4,
     )
     backup_manager.prune_backups()
     output = clean_stderr()

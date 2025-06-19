@@ -19,7 +19,7 @@ from ezbak.constants import (
     BackupType,
     RetentionPolicyType,
 )
-from ezbak.models import Backup, Settings
+from ezbak.models import Backup, settings
 
 
 @dataclass
@@ -34,7 +34,7 @@ class FileForRename:
 class BackupManager:
     """Manage and control backup operations for specified sources and destinations."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self) -> None:
         """Initialize a backup manager to automate backup creation, management, and cleanup operations.
 
         Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple destinations, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.

@@ -1,13 +1,14 @@
 """Configuration for pytest."""
 
-import os
 import shutil
 from collections.abc import Generator
 from pathlib import Path
-from unittest import mock
 
 import pytest
 from nclutils.pytest_fixtures import clean_stderr, clean_stdout, debug  # noqa: F401
+
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL
+from ezbak.models.settings import settings
 
 
 @pytest.fixture
@@ -42,17 +43,29 @@ def filesystem(tmp_path: Path) -> Generator[Path, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def mock_env(monkeypatch):
-    """Mock environment variables for testing."""
-    with mock.patch.dict(os.environ, clear=True):
-        monkeypatch.setenv("EZBAK_NAME", "")
-        monkeypatch.setenv("EZBAK_DESTINATIONS", "")
-        monkeypatch.setenv("EZBAK_EXCLUDE_REGEX", "")
-        monkeypatch.setenv("EZBAK_INCLUDE_REGEX", "")
-        monkeypatch.setenv("EZBAK_LOG_FILE", "")
-        monkeypatch.setenv("EZBAK_LOG_LEVEL", "")
-        monkeypatch.setenv("EZBAK_NAME", "")
-        monkeypatch.setenv("EZBAK_SOURCES", "")
-        monkeypatch.setenv("EZBAK_TIME_BASED_POLICY", "")
-        monkeypatch.setenv("EZBAK_TZ", "")
-        yield
+def reset_settings() -> None:
+    """Reset the settings singleton."""
+    for key in settings.__dict__:
+        if key == "compression_level":
+            setattr(settings, key, DEFAULT_COMPRESSION_LEVEL)
+        elif key == "log_level":
+            setattr(settings, key, "INFO")
+        else:
+            setattr(settings, key, None)
+
+
+# @pytest.fixture(autouse=True)
+# def mock_env(monkeypatch):
+#     """Mock environment variables for testing."""
+#     with mock.patch.dict(os.environ, clear=True):
+#         monkeypatch.setenv("EZBAK_NAME", "")
+#         monkeypatch.setenv("EZBAK_DESTINATIONS", "")
+#         monkeypatch.setenv("EZBAK_EXCLUDE_REGEX", "")
+#         monkeypatch.setenv("EZBAK_INCLUDE_REGEX", "")
+#         monkeypatch.setenv("EZBAK_LOG_FILE", "")
+#         monkeypatch.setenv("EZBAK_LOG_LEVEL", "")
+#         monkeypatch.setenv("EZBAK_NAME", "")
+#         monkeypatch.setenv("EZBAK_SOURCES", "")
+#         monkeypatch.setenv("EZBAK_TIME_BASED_POLICY", "")
+#         monkeypatch.setenv("EZBAK_TZ", "")
+#         yield
