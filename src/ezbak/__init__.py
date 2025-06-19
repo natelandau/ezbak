@@ -1,4 +1,4 @@
-"""ezbak package."""
+"""EZBak package for automated backup operations with retention policies and compression."""
 
 from pathlib import Path
 
@@ -31,33 +31,36 @@ def ezbak(  # noqa: PLR0913
     chown_group: int | None = None,
     label_time_units: bool = DEFAULT_LABEL_TIME_UNITS,
 ) -> BackupManager:
-    """Perform automated backups of specified sources to destination locations.
+    """Execute automated backups with configurable retention policies and compression.
 
-    Creates a backup of the specified source directories/files to the destination locations with timestamped folders. The backup process is managed by the BackupManager class which handles the actual backup operations.
+    Creates timestamped backups of specified source directories/files to destination locations
+    using the BackupManager. Supports flexible retention policies (count-based or time-based),
+    file filtering with regex patterns, compression, and ownership changes. Ideal for automated
+    backup scripts and scheduled backup operations.
 
     Args:
-        name (str): Identifier for the backup operation.
-        sources (list[Path | str]): List of source paths to backup. Can be either Path objects or strings.
-        destinations (list[Path | str]): List of destination paths where backups will be stored. Can be either Path objects or strings.
-        exclude_regex (str | None, optional): Regex pattern to exclude files from the backup. Defaults to None.
-        include_regex (str | None, optional): Regex pattern to include files in the backup. Defaults to None.
-        compression_level (int, optional): The compression level for the backup file.
-        label_time_units (bool, optional): Whether to label the time units in the backup filename. Defaults to True.
-        max_backups (int | None, optional): Maximum number of backups to keep. Defaults to None.
-        retention_yearly (int | None, optional): Maximum number of yearly backups to keep. Defaults to None.
-        retention_monthly (int | None, optional): Maximum number of monthly backups to keep. Defaults to None.
-        retention_weekly (int | None, optional): Maximum number of weekly backups to keep. Defaults to None.
-        retention_daily (int | None, optional): Maximum number of daily backups to keep. Defaults to None.
-        retention_hourly (int | None, optional): Maximum number of hourly backups to keep. Defaults to None.
-        retention_minutely (int | None, optional): Maximum number of minutely backups to keep. Defaults to None.
-        tz (str, optional): Timezone for timestamp formatting.
-        log_level (str, optional): Logging level for the backup operation. Defaults to "info".
-        log_file (str | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
-        chown_user (int | None, optional): User ID to change the ownership of the files to. Defaults to None.
-        chown_group (int | None, optional): Group ID to change the ownership of the files to. Defaults to None.
+        name (str | None, optional): Unique identifier for the backup operation. Used for logging and backup labeling. Defaults to None.
+        sources (list[Path | str] | None, optional): Source paths to backup. Can be files or directories. Defaults to None.
+        destinations (list[Path | str] | None, optional): Destination paths where backups will be stored. Defaults to None.
+        tz (str | None, optional): Timezone for timestamp formatting in backup names. Defaults to None.
+        log_level (str, optional): Logging verbosity level. Defaults to "info".
+        log_file (str | Path | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
+        compression_level (int | None, optional): Compression level (1-9) for backup archives. Defaults to None.
+        max_backups (int | None, optional): Maximum number of backups to retain (count-based retention). Defaults to None.
+        retention_yearly (int | None, optional): Number of yearly backups to retain. Defaults to None.
+        retention_monthly (int | None, optional): Number of monthly backups to retain. Defaults to None.
+        retention_weekly (int | None, optional): Number of weekly backups to retain. Defaults to None.
+        retention_daily (int | None, optional): Number of daily backups to retain. Defaults to None.
+        retention_hourly (int | None, optional): Number of hourly backups to retain. Defaults to None.
+        retention_minutely (int | None, optional): Number of minutely backups to retain. Defaults to None.
+        exclude_regex (str | None, optional): Regex pattern to exclude files from backup. Defaults to None.
+        include_regex (str | None, optional): Regex pattern to include only matching files. Defaults to None.
+        chown_user (int | None, optional): User ID to set ownership of backup files. Defaults to None.
+        chown_group (int | None, optional): Group ID to set ownership of backup files. Defaults to None.
+        label_time_units (bool, optional): Include time units in backup filenames. Defaults to True.
 
     Returns:
-        BackupManager: The backup manager instance.
+        BackupManager: Configured backup manager instance ready to execute backup operations.
     """
     settings.update(
         {

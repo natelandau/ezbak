@@ -1,4 +1,4 @@
-"""Settings model."""
+"""Settings model for EZBak backup configuration and management."""
 
 import sys
 from dataclasses import dataclass
@@ -18,7 +18,12 @@ err_console = Console(stderr=True)
 
 @dataclass
 class Settings:
-    """Settings model for EZBak."""
+    """Configuration settings for EZBak backup operations.
+
+    Stores all configuration parameters needed for backup operations including source/destination paths,
+    retention policies, compression settings, and operational flags. Provides validation and property
+    accessors for computed values like resolved paths and retention policy objects.
+    """
 
     action: str | None = None
     name: str | None = None
@@ -51,7 +56,10 @@ class Settings:
     _backup_name: str | None = None
 
     def validate(self) -> None:
-        """Validate the settings.
+        """Validate that required settings are provided for backup operations.
+
+        Ensures that a backup name, source paths, and destination paths are specified before
+        attempting any backup operations. Raises ValueError if any required settings are missing.
 
         Raises:
             ValueError: If settings are invalid.
@@ -73,15 +81,16 @@ class Settings:
 
     @property
     def backup_name(self) -> str:
-        """Get the backup name.
+        """Get the backup name for identifying this backup operation.
 
-        If no backup name is provided, generate a random name.
+        Returns the configured backup name or generates a random name if none is provided.
+        Used throughout the backup process to identify and label backup files and logs.
 
         Returns:
-            str: The backup name.
+            str: The backup name to use for this operation.
 
         Raises:
-            ValueError: If no backup name is provided.
+            ValueError: If no backup name is provided and cannot be generated.
         """
         if self._backup_name:
             return self._backup_name
@@ -95,10 +104,13 @@ class Settings:
 
     @property
     def destination_paths(self) -> list[Path]:
-        """Validate the destination paths.
+        """Get validated and resolved destination paths for backup storage.
+
+        Converts destination strings to Path objects, resolves them to absolute paths,
+        and creates directories if they don't exist. Caches the result for performance.
 
         Returns:
-            list[Path]: The validated destination paths.
+            list[Path]: List of absolute Path objects representing backup destinations.
 
         Raises:
             ValueError: If no destination paths are provided.
@@ -124,10 +136,13 @@ class Settings:
 
     @property
     def source_paths(self) -> list[Path]:
-        """Validate the source paths.
+        """Get validated and resolved source paths for backup operations.
+
+        Converts source strings to Path objects, resolves them to absolute paths,
+        and validates that all paths exist. Caches the result for performance.
 
         Returns:
-            list[Path]: The validated source paths.
+            list[Path]: List of absolute Path objects representing backup sources.
 
         Raises:
             FileNotFoundError: If any of the source paths do not exist.
@@ -153,10 +168,14 @@ class Settings:
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
-        """Get the retention policy.
+        """Get the retention policy manager for this backup configuration.
+
+        Creates and returns a RetentionPolicyManager based on the configured retention settings.
+        Supports count-based, time-based, or keep-all policies depending on the settings provided.
+        Caches the result for performance.
 
         Returns:
-            RetentionPolicyManager: The retention policy.
+            RetentionPolicyManager: The retention policy manager for this backup configuration.
         """
         if self._retention_policy:
             return self._retention_policy
@@ -196,13 +215,13 @@ class Settings:
         return self._retention_policy
 
     def update(self, updates: dict[str, str | int | Path | bool | list[Path | str]]) -> None:
-        """Update settings with provided key-value pairs.
+        """Update settings with provided key-value pairs and reset cached properties.
 
-        Validate that all keys exist as attributes on the settings object before
-        updating. If any key doesn't exist, prints an error and exits.
+        Validates that all keys exist as attributes on the settings object before updating.
+        Resets cached properties when their underlying data changes to ensure consistency.
 
         Args:
-            updates: Dictionary of setting keys and their new values.
+            updates (dict[str, str | int | Path | bool | list[Path | str]]): Dictionary of setting keys and their new values.
         """
         for key, value in updates.items():
             try:
@@ -237,26 +256,37 @@ class Settings:
             self._retention_policy = None
 
     def model_dump(self) -> dict[str, int | str | bool | list[Path | str] | None]:
-        """Return a dictionary of the settings.
+        """Serialize settings to a dictionary representation.
+
+        Converts all settings attributes to a dictionary format for serialization,
+        logging, or configuration export purposes.
 
         Returns:
-            dict[str, int | str | bool | None]: A dictionary of the settings.
+            dict[str, int | str | bool | list[Path | str] | None]: Dictionary representation of all settings.
         """
         return self.__dict__
 
 
 @dataclass
 class SettingsManager:
-    """Settings model for EZBak."""
+    """Singleton manager for EZBak settings initialization and CLI overrides.
+
+    Provides centralized management of the Settings singleton, handling initialization
+    from environment variables and applying CLI argument overrides while maintaining
+    the singleton pattern for consistent settings access throughout the application.
+    """
 
     _instance: Settings | None = None
 
     @classmethod
     def initialize(cls) -> Settings:
-        """Initialize settings from environment variables if not already initialized.
+        """Initialize settings from environment variables using the singleton pattern.
+
+        Creates a Settings instance from environment variables if not already initialized,
+        ensuring consistent settings access throughout the application lifecycle.
 
         Returns:
-            Settings: The settings.
+            Settings: The initialized settings singleton instance.
         """
         if cls._instance is not None:
             return cls._instance
@@ -313,13 +343,14 @@ class SettingsManager:
     def apply_cli_settings(
         cls, cli_settings: dict[str, str | int | Path | bool | list[Path | str]]
     ) -> None:
-        """Override existing settings with non-None values from a dictionary.
+        """Override existing settings with non-None values from CLI arguments.
 
-        Update the settings singleton with any non-None values provided via command line arguments, preserving existing values for unspecified settings.
+        Updates the settings singleton with any non-None values provided via command line arguments,
+        preserving existing values for unspecified settings. Filters out None values to avoid
+        overriding existing settings with None.
 
         Args:
-            cli_settings (dict[str, Any]): Dictionary of settings from CLI arguments to apply as overrides.
-
+            cli_settings (dict[str, str | int | Path | bool | list[Path | str]]): Dictionary of settings from CLI arguments to apply as overrides.
         """
         settings = cls._instance
         if settings is None:  # pragma: no cover
