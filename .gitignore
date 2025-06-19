@@ -15,6 +15,7 @@ wheels/
 .cursor/
 tmp/
 .development/
+.dev
 
 # macOS
 .DS_Store

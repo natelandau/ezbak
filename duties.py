@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,7 +18,39 @@ if TYPE_CHECKING:
 PY_SRC_PATHS = (Path(x) for x in ("src/", "tests/", "duties.py", "scripts/") if Path(x).exists())
 PY_SRC_LIST = tuple(str(x) for x in PY_SRC_PATHS)
 CI = os.environ.get("CI", "0") in {"1", "true", "yes", ""}
-DEV_DIR = Path(__file__).parent / "tmp" / "fixtures"
+PROJECT_ROOT = Path(__file__).parent
+DEV_DIR = PROJECT_ROOT / ".dev"
+TEMPLATES_DIR = PROJECT_ROOT / "dev-templates"
+
+
+def replace_in_file(file_path: str | Path, replacements: dict[str, str]) -> bool:
+    """Replace text in a file with a dictionary of replacements.
+
+    Args:
+        file_path (str): Path to the file to replace text in.
+        replacements (dict[str, str]): Dictionary of old text to new text.
+
+    Returns:
+        bool: True if the replacements were successful, False otherwise.
+    """
+    path = Path(file_path) if not isinstance(file_path, Path) else file_path
+    try:
+        if not path.exists():
+            console.print(f"File {file_path} does not exist")
+            return False
+
+        content = path.read_text(encoding="utf-8")
+
+        for old_text, new_text in replacements.items():
+            content = content.replace(old_text, new_text)
+
+        path.write_text(content, encoding="utf-8")
+
+    except Exception as e:  # noqa: BLE001
+        console.print(f"Error processing {file_path}: {e}")
+        return False
+
+    return True
 
 
 def strip_ansi(text: str) -> str:
@@ -142,28 +175,50 @@ def test(ctx: Context, *cli_args: str) -> None:
 
 
 @duty()
-def dev_clean(ctx: Context) -> None:
+def dev_clean(ctx: Context) -> None:  # noqa: ARG001
     """Clean the development environment."""
     if DEV_DIR.exists():
-        ctx.run(["rm", "-rf", str(DEV_DIR)], title="Clean dev env")
+        shutil.rmtree(DEV_DIR)
+
+    console.print(f"✓ Cleaned dev env in '{DEV_DIR.name}/'")
 
 
 @duty(pre=[dev_clean])
 def dev_setup(ctx: Context) -> None:  # noqa: ARG001
     """Provision a mock development environment."""
-    destinations = [DEV_DIR / "dest1", DEV_DIR / "dest2"]
-    for destination in destinations:
-        if not destination.exists():
-            destination.mkdir(parents=True)
+    project_1 = DEV_DIR / "source" / "project1"
+    project_2 = DEV_DIR / "source" / "project2"
+    directories = [
+        project_1 / "some_dir",
+        project_2 / "some_dir",
+        DEV_DIR / "backups",
+        DEV_DIR / "logs",
+        DEV_DIR / "restore",
+    ]
+    for directory in directories:
+        if not directory.exists():
+            directory.mkdir(parents=True)
 
-    sources = [DEV_DIR / "source1", DEV_DIR / "source2"]
-    for source in sources:
-        if not source.exists():
-            source.mkdir(parents=True)
+    filenames = ["foo.txt", "bar.txt", "baz.txt"]
+    for directory in [project_1, project_2, project_1 / "some_dir", project_2 / "some_dir"]:
+        for filename in filenames:
+            file = directory / filename
+            if not file.exists():
+                file.touch()
+    console.print(f"✓ Development env set up in '{DEV_DIR.name}/'")
 
-    for source in sources:
-        files = [source / "foo.txt", source / "bar.txt", source / "baz.txt"]
-        for file in files:
-            file.touch()
+    # copy docker-compose.override.yml to .dev/docker-compose.override.yml
+    docker_compose_template = TEMPLATES_DIR / "docker-compose.template.yml"
+    docker_compose = DEV_DIR / "docker-compose.yml"
+    shutil.copy2(docker_compose_template, docker_compose)
+    console.print(f"✓ Docker compose file created in '{DEV_DIR.name}/{docker_compose.name}'")
+    replacements = {"_ROOT_DIR_": str(PROJECT_ROOT)}
 
-    console.print(f"✓ Development env set up in {DEV_DIR}")
+    if not replace_in_file(docker_compose, replacements):
+        console.print(f"Error replacing text in '{DEV_DIR.name}/{docker_compose.name}'")
+        return
+    console.print(f"✓ Replaced text in '{DEV_DIR.name}/{docker_compose.name}'")
+
+    console.print(
+        f"✓ Development environment setup complete. Start the development environment with:\n\n    [code]docker compose -f {DEV_DIR.name}/{docker_compose.name} up --build[/code]"
+    )
