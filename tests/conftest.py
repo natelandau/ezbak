@@ -1,10 +1,8 @@
 """Configuration for pytest."""
 
-import os
 import shutil
 from collections.abc import Generator
 from pathlib import Path
-from unittest import mock
 
 import pytest
 from nclutils.pytest_fixtures import clean_stderr, clean_stdout, debug  # noqa: F401

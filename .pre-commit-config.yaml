@@ -64,7 +64,6 @@ repos:
     rev: "v0.12.0"
     hooks:
       - id: ruff-check
-        exclude: tests/
         args: [--no-fix]
       - id: ruff-format
         args: [--check]

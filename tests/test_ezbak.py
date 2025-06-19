@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import pytest
 import time_machine
 
 from ezbak import ezbak
