@@ -1,6 +1,6 @@
 """Models for ezbak."""
 
 from .backup import Backup
-from .settings import Settings
+from .settings import settings
 
-__all__ = ["Backup", "Settings"]
+__all__ = ["Backup", "settings"]
