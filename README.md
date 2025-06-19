@@ -80,6 +80,13 @@ backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
 -   `chown_user (int, optional)`: User ID to change the ownership of restored files to. Defaults to `None`.
 -   `chown_group (int, optional)`: Group ID to change the ownership of restored files to. Defaults to `None`.
 
+#### Backup Naming
+
+-   Backup files are named in the format: `{name}-{timestamp}-{period}.{extension}`
+-   When `label_time_units` is False, the period is omitted
+-   If a backup with the same name exists, a UUID is appended to prevent conflicts
+-   The timestamp format is ISO 8601: `YYYYMMDDTHHMMSS`
+
 #### Retention Policies
 
 If neither `max_backups` and `time_based_policy` are provided, all backups are kept. Keep in mind that these are mutually exclusive, and if both are provided, `max_backups` will be used.
@@ -105,13 +112,6 @@ time_based_policy = {
     "minutely": 10,
 }
 ```
-
-#### Backup Naming
-
-    - Backup files are named in the format: `{name}-{timestamp}-{period}.{extension}`
-    - When `label_time_units` is False, the period is omitted
-    - If a backup with the same name exists, a UUID is appended to prevent conflicts
-    - The timestamp format is ISO 8601: `YYYYMMDDTHHMMSS`
 
 ### Command Line Interface
 

@@ -29,6 +29,39 @@ We use [Duty](https://pawamoy.github.io/duty/) as our task runner. Common tasks:
 -   `duty --list` - List all available tasks
 -   `duty lint` - Run all linters
 -   `duty test` - Run all tests
+-   `duty dev-clean` - Clean the development environment
+-   `duty dev-setup` - Set up the development environment
+
+## Local Development Environment
+
+To set up a local development environment, run `duty dev-setup`. This will create a development environment in the `.dev` directory.
+
+```
+.dev
+├── backups
+├── docker-compose.yml
+├── logs
+├── restore
+└── source
+    ├── project1
+    │   ├── bar.txt
+    │   ├── baz.txt
+    │   ├── foo.txt
+    │   └── some_dir
+    │       ├── bar.txt
+    │       ├── baz.txt
+    │       └── foo.txt
+    └── project2
+        ├── bar.txt
+        ├── baz.txt
+        ├── foo.txt
+        └── some_dir
+            ├── bar.txt
+            ├── baz.txt
+            └── foo.txt
+```
+
+Use the directory structure to test the development environment.
 
 ## Development Guidelines
 
