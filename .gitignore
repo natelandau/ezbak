@@ -16,6 +16,7 @@ wheels/
 tmp/
 .development/
 .dev
+.env
 
 # macOS
 .DS_Store

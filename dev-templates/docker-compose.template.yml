@@ -8,12 +8,17 @@ services:
             dockerfile: Dockerfile
         container_name: ezbak
         environment:
+            - TZ=America/New_York
+            - EZBAK_ACTION=backup
             - EZBAK_NAME=test
-            - EZBAK_HOST_NAME=dev-ezbak
-            - EZBAK_ACTION=restore
             - EZBAK_STORAGE_PATHS=/backups
-            - EZBAK_SOURCE_PATHS=/files/project1,/files/project2
-            - EZBAK_RESTORE_DIR=/restore
+            - EZBAK_SOURCE_PATHS=/source/project1,/source/project2
+            - EZBAK_RESTORE_PATH=/restore
+            - EZBAK_EXCLUDE_REGEX=
+            - EZBAK_INCLUDE_REGEX=
+            - EZBAK_COMPRESSION_LEVEL=6
+            - EZBAK_LABEL_TIME_UNITS=true
+            - EZBAK_RENAME_FILES=true
             - EZBAK_MAX_BACKUPS=4
             - EZBAK_RETENTION_YEARLY=4
             - EZBAK_RETENTION_MONTHLY=4
@@ -21,21 +26,14 @@ services:
             - EZBAK_RETENTION_DAILY=4
             - EZBAK_RETENTION_HOURLY=4
             - EZBAK_RETENTION_MINUTELY=4
-            - EZBAK_LABEL_TIME_UNITS=true
+            # - EZBAK_CRON=*/1 * * * *
+            - EZBAK_TZ=America/New_York
             - EZBAK_LOG_LEVEL=TRACE
             - EZBAK_LOG_FILE=/logs/ezbak.log
-            # - EZBAK_COMPRESSION_LEVEL=6
-            # - EZBAK_CRON=*/1 * * * *
-            - EZBAK_RENAME_FILES=true
             - EZBAK_CLEAN_BEFORE_RESTORE=false
+            - EZBAK_HOSTNAME=docker
             # - EZBAK_CHOWN_USER=
             # - EZBAK_CHOWN_GROUP=
-            # - EZBAK_POSTGRES_HOST=
-            # - EZBAK_POSTGRES_PORT=
-            # - EZBAK_POSTGRES_USER=
-            # - EZBAK_POSTGRES_PASSWORD=
-            # - EZBAK_POSTGRES_DB=
-            # - EZBAK_USE_POSTGRES=
         volumes:
             - ./source:/source
             - ./backups:/backups
