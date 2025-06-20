@@ -76,7 +76,7 @@ jobs:
               run: docker compose -f .dev/docker-compose.yml up --build
 
             - name: Confirm backup was created
-              shell: bask
+              shell: bash
               run: ls -l .dev/backups/*-yearly.tgz
 
     lint-project:
