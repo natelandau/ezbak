@@ -15,7 +15,7 @@ def main(command: EZBakCLI) -> None:
         console.print("No backups found")
         return
 
-    for destination in command.backup_manager.destinations:
+    for destination in command.backup_manager.storage_paths:
         files = [str(x) for x in backups if x.parent == destination]
         if len(files) == 0:
             continue

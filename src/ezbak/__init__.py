@@ -12,8 +12,8 @@ from ezbak.models import settings
 def ezbak(  # noqa: PLR0913
     name: str | None = None,
     *,
-    sources: list[Path | str] | None = None,
-    destinations: list[Path | str] | None = None,
+    source_paths: list[Path | str] | None = None,
+    storage_paths: list[Path | str] | None = None,
     tz: str | None = None,
     log_level: str = "info",
     log_file: str | Path | None = None,
@@ -40,8 +40,8 @@ def ezbak(  # noqa: PLR0913
 
     Args:
         name (str | None, optional): Unique identifier for the backup operation. Used for logging and backup labeling. Defaults to None.
-        sources (list[Path | str] | None, optional): Source paths to backup. Can be files or directories. Defaults to None.
-        destinations (list[Path | str] | None, optional): Destination paths where backups will be stored. Defaults to None.
+        source_paths (list[Path | str] | None, optional): Source paths to backup. Can be files or directories. Defaults to None.
+        storage_paths (list[Path | str] | None, optional): Destination paths where backups will be stored. Defaults to None.
         tz (str | None, optional): Timezone for timestamp formatting in backup names. Defaults to None.
         log_level (str, optional): Logging verbosity level. Defaults to "info".
         log_file (str | Path | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
@@ -65,8 +65,8 @@ def ezbak(  # noqa: PLR0913
     settings.update(
         {
             "name": name or None,
-            "sources": sources or None,
-            "destinations": destinations or None,
+            "source_paths": source_paths or None,
+            "storage_paths": storage_paths or None,
             "tz": tz or None,
             "log_level": log_level or None,
             "log_file": log_file or None,
@@ -91,7 +91,7 @@ def ezbak(  # noqa: PLR0913
         show_source_reference=False,
         log_file=str(log_file) if log_file else None,
     )
-    logger.info(f"Starting ezbak for {settings.backup_name}")
+    logger.info(f"Starting ezbak for {settings.name}")
 
     settings.validate()
 

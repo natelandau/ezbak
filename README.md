@@ -38,16 +38,14 @@ from ezbak import ezbak
 # Initialize backup manager
 backup_manager = ezbak(
     name="my-backup",
-    sources=[Path("/path/to/source")],
-    destinations=[Path("/path/to/destination")],
-    time_based_policy={
-        "yearly": 1,
-        "monthly": 12,
-        "weekly": 4,
-        "daily": 7,
-        "hourly": 24,
-        "minutely": 60,
-    },
+    source_paths=[Path("/path/to/source")],
+    storage_paths=[Path("/path/to/destination")],
+    retention_yearly=1,
+    retention_monthly=12,
+    retention_weekly=4,
+    retention_daily=7,
+    retention_hourly=24,
+    retention_minutely=60,
 )
 
 # Create a backup
@@ -66,11 +64,16 @@ backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
 #### Configuration Options
 
 -   `name (str)`: Backup name
--   `sources (list[Path])`: List of source paths
--   `destinations (list[Path])`: List of destination paths
+-   `source_paths (list[Path])`: List of paths containing the content to backup
+-   `storage_paths (list[Path])`: List of paths where backups will be stored
 -   `compression_level (int, optional)`: Compression level (1-9). Defaults to `9`.
 -   `max_backups (int, optional)`: Maximum number of backups to keep. Defaults to `None`.
--   `time_based_policy (dict[str, int], optional)`: Time-based retention policy (dictionary of time units and number of backups to keep). Defaults to `None`.
+-   `retention_yearly (int, optional)`: Number of yearly backups to keep. Defaults to `None`.
+-   `retention_monthly (int, optional)`: Number of monthly backups to keep. Defaults to `None`.
+-   `retention_weekly (int, optional)`: Number of weekly backups to keep. Defaults to `None`.
+-   `retention_daily (int, optional)`: Number of daily backups to keep. Defaults to `None`.
+-   `retention_hourly (int, optional)`: Number of hourly backups to keep. Defaults to `None`.
+-   `retention_minutely (int, optional)`: Number of minutely backups to keep. Defaults to `None`.
 -   `timezone (str, optional)`: Timezone for backup timestamps. Defaults to system timezone.
 -   `log_level (str, optional)`: Logging level. Defaults to `INFO`.
 -   `log_file (Path | str, optional)`: Path to log file. Defaults to `None`.
@@ -89,29 +92,9 @@ backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
 
 #### Retention Policies
 
-If neither `max_backups` and `time_based_policy` are provided, all backups are kept. Keep in mind that these are mutually exclusive, and if both are provided, `max_backups` will be used.
-
-The time-based retention policy is a dictionary of time units and number of backups to keep. The time units are:
-
--   `yearly`
--   `monthly`
--   `weekly`
--   `daily`
--   `hourly`
--   `minutely`
+If neither `max_backups` or any of the time-based retention policies are provided, all backups are kept. Keep in mind that `max_backups` and the time-based retention policies are mutually exclusive, and if both are provided, `max_backups` will be used.
 
 For example, the following policy will keep the most recent 2 yearly backups, 12 monthly backups, 4 weekly backups, 7 daily backups, 24 hourly backups, and 10 minutely backups:
-
-```python
-time_based_policy = {
-    "yearly": 2,
-    "monthly": 12,
-    "weekly": 4,
-    "daily": 7,
-    "hourly": 24,
-    "minutely": 10,
-}
-```
 
 ### Command Line Interface
 
@@ -172,18 +155,26 @@ Importantly, some file and directory names are always excluded from backups. The
 
 ezbak can be configured using environment variables with the `EZBAK_` prefix:
 
--   `EZBAK_NAME`: Backup name
--   `EZBAK_SOURCES`: Comma-separated list of source paths
--   `EZBAK_DESTINATIONS`: Comma-separated list of destination paths
--   `EZBAK_TZ`: Timezone for backup timestamps
--   `EZBAK_LOG_LEVEL`: Logging level
--   `EZBAK_LOG_FILE`: Path to log file
--   `EZBAK_COMPRESSION_LEVEL`: Compression level (1-9)
--   `EZBAK_TIME_BASED_POLICY`: JSON string of time-based retention policy
--   `EZBAK_MAX_BACKUPS`: Maximum number of backups to keep
--   `EZBAK_EXCLUDE_REGEX`: Regex pattern to exclude files
--   `EZBAK_INCLUDE_REGEX`: Regex pattern to include files
--   `EZBAK_LABEL_TIME_UNITS`: Whether to label time units in filenames
+-   `EZBAK_ACTION` (str): The action to perform. One of `backup` or `restore`
+-   `EZBAK_NAME` (str): The name of the backup
+-   `EZBAK_SOURCE_PATHS` (str): The paths to backup (Comma-separated list of paths)
+-   `EZBAK_STORAGE_PATHS` (str): The paths to store the backups (Comma-separated list of paths)
+-   `EZBAK_INCLUDE_REGEX` (str): The regex pattern to include files
+-   `EZBAK_COMPRESSION_LEVEL` (int): The compression level. One of `1` to `9`
+-   `EZBAK_LABEL_TIME_UNITS` (bool): Whether to label time units in filenames
+-   `EZBAK_RENAME_FILES` (bool): Whether to rename files
+-   `EZBAK_RETENTION_YEARLY` (int): The number of yearly backups to keep
+-   `EZBAK_RETENTION_MONTHLY` (int): The number of monthly backups to keep
+-   `EZBAK_RETENTION_WEEKLY` (int): The number of weekly backups to keep
+-   `EZBAK_RETENTION_DAILY` (int): The number of daily backups to keep
+-   `EZBAK_RETENTION_HOURLY` (int): The number of hourly backups to keep
+-   `EZBAK_RETENTION_MINUTELY` (int): The number of minutely backups to keep
+-   `EZBAK_TZ` (str): The timezone to use for the backup
+-   `EZBAK_LOG_LEVEL` (str): The logging level. One of `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`
+-   `EZBAK_LOG_FILE` (str): The path to the log file
+-   `EZBAK_CLEAN_BEFORE_RESTORE` (bool): Whether to clean the restore path before restoring
+-   `EZBAK_CHOWN_USER` (int): The user ID to change the ownership of restored files to
+-   `EZBAK_CHOWN_GROUP` (int): The group ID to change the ownership of restored files to
 
 ## Contributing
 

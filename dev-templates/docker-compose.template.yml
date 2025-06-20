@@ -11,8 +11,8 @@ services:
             - EZBAK_NAME=test
             - EZBAK_HOST_NAME=dev-ezbak
             - EZBAK_ACTION=restore
-            - EZBAK_DESTINATIONS=/backups
-            - EZBAK_SOURCES=/files/project1,/files/project2
+            - EZBAK_STORAGE_PATHS=/backups
+            - EZBAK_SOURCE_PATHS=/files/project1,/files/project2
             - EZBAK_RESTORE_DIR=/restore
             - EZBAK_MAX_BACKUPS=4
             - EZBAK_RETENTION_YEARLY=4

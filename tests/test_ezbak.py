@@ -39,8 +39,8 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir, test_file],
-        destinations=[dest1, dest2],
+        source_paths=[src_dir, test_file],
+        storage_paths=[dest1, dest2],
         label_time_units=True,
         log_level="trace",
     )
@@ -53,7 +53,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     output = clean_stderr()
     # debug(output)
 
-    # Then: All expected backup files exist in both destinations
+    # Then: All expected backup files exist in both storage paths
     for filename in filenames:
         assert Path(dest1 / filename).exists()
         assert Path(dest2 / filename).exists()
@@ -105,8 +105,8 @@ def test_without_labels(debug, clean_stderr, filesystem, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[dest1, dest2],
+        source_paths=[src_dir],
+        storage_paths=[dest1, dest2],
         label_time_units=False,
         log_level="info",
     )
@@ -137,8 +137,8 @@ def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[dest1],
+        source_paths=[src_dir],
+        storage_paths=[dest1],
         exclude_regex=r"foo\.txt$",
     )
 
@@ -172,8 +172,8 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[dest1],
+        source_paths=[src_dir],
+        storage_paths=[dest1],
         include_regex=r"foo\.txt$",
     )
 
@@ -222,8 +222,8 @@ def test_rename_backups_with_labels(debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[tmp_path],
-        destinations=[tmp_path],
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
         log_level="trace",
         label_time_units=True,
     )
@@ -277,8 +277,8 @@ def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[tmp_path],
-        destinations=[tmp_path],
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
         log_level="trace",
         label_time_units=False,
     )
@@ -337,8 +337,8 @@ def test_prune_max_backups(debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[tmp_path],
-        destinations=[tmp_path],
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
         log_level="debug",
         max_backups=3,
     )
@@ -382,8 +382,8 @@ def test_prune_policy(debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[tmp_path],
-        destinations=[tmp_path],
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
         log_level="debug",
         retention_yearly=1,
         retention_monthly=4,
@@ -434,8 +434,8 @@ def test_prune_no_policy(debug, clean_stderr, tmp_path):
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
-        sources=[tmp_path],
-        destinations=[tmp_path],
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
         log_level="debug",
     )
     backup_manager.prune_backups()
