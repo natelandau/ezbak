@@ -76,7 +76,7 @@ def test_restore_no_dest(filesystem, tmp_path, debug, clean_stderr):
         storage_paths=[dest1],
     )
     backup_manager.create_backup()
-    assert not backup_manager.restore_latest_backup(tmp_path / "new_dest")
+    assert not backup_manager.restore_backup(tmp_path / "new_dest")
     output = clean_stderr()
     # debug(output)
     assert "ERROR    | Restore destination does not exist:" in output
@@ -95,7 +95,7 @@ def test_restore_dest_not_dir(filesystem, tmp_path, debug, clean_stderr):
         storage_paths=[dest1],
     )
     backup_manager.create_backup()
-    assert not backup_manager.restore_latest_backup(new_dest)
+    assert not backup_manager.restore_backup(new_dest)
     output = clean_stderr()
     # debug(output)
     assert "ERROR    | Restore destination is not a directory" in output
@@ -111,7 +111,7 @@ def test_restore_no_backup(filesystem, tmp_path, debug, clean_stderr):
         storage_paths=[dest1],
     )
     # backup_manager.create_backup()
-    assert not backup_manager.restore_latest_backup(tmp_path)
+    assert not backup_manager.restore_backup(tmp_path)
     output = clean_stderr()
     # debug(output)
     assert "ERROR    | No backup found to restore" in output
@@ -127,7 +127,7 @@ def test_no_restore_destination(filesystem, tmp_path, debug, clean_stderr):
         storage_paths=[dest1],
     )
     backup_manager.create_backup()
-    assert not backup_manager.restore_latest_backup(None)
+    assert not backup_manager.restore_backup(None)
     output = clean_stderr()
     # debug(output)
     assert "ERROR    | No destination provided and no restore directory configured" in output
