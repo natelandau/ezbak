@@ -11,45 +11,45 @@ def test_no_name(filesystem):
     with pytest.raises(ValueError, match="No backup name provided"):
         ezbak(
             # name="test",
-            sources=[src_dir],
-            destinations=[dest1],
+            source_paths=[src_dir],
+            storage_paths=[dest1],
         )
 
 
-def test_sources(filesystem):
+def test_source_paths(filesystem):
     """Test EZBak errors."""
     _, dest1, _ = filesystem
     with pytest.raises(ValueError, match="No source paths provided"):
         ezbak(
             name="test",
-            sources=[],
-            destinations=[dest1],
+            source_paths=[],
+            storage_paths=[dest1],
         )
 
 
-def test_sources_not_found(filesystem):
+def test_source_paths_not_found(filesystem):
     """Test EZBak errors."""
     src_dir, dest1, _ = filesystem
     with pytest.raises(FileNotFoundError, match="Source does not exist"):
         ezbak(
             name="test",
-            sources=[src_dir / "not_found"],
-            destinations=[dest1],
+            source_paths=[src_dir / "not_found"],
+            storage_paths=[dest1],
         )
 
 
-def test_destinations(filesystem):
+def test_storage_paths(filesystem):
     """Test EZBak errors."""
     src_dir, _, _ = filesystem
-    with pytest.raises(ValueError, match="No destination paths provided"):
+    with pytest.raises(ValueError, match="No storage paths provided"):
         ezbak(
             name="test",
-            sources=[src_dir],
-            destinations=[],
+            source_paths=[src_dir],
+            storage_paths=[],
         )
 
 
-def test_create_destination_dir(filesystem):
+def test_create_storage_path_dir(filesystem):
     """Test EZBak errors."""
     src_dir, dest1, _ = filesystem
 
@@ -58,8 +58,8 @@ def test_create_destination_dir(filesystem):
 
     ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[new_dest],
+        source_paths=[src_dir],
+        storage_paths=[new_dest],
     )
 
     assert new_dest.exists()
@@ -72,8 +72,8 @@ def test_restore_no_dest(filesystem, tmp_path, debug, clean_stderr):
 
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[dest1],
+        source_paths=[src_dir],
+        storage_paths=[dest1],
     )
     backup_manager.create_backup()
     assert not backup_manager.restore_latest_backup(tmp_path / "new_dest")
@@ -91,8 +91,8 @@ def test_restore_dest_not_dir(filesystem, tmp_path, debug, clean_stderr):
 
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[dest1],
+        source_paths=[src_dir],
+        storage_paths=[dest1],
     )
     backup_manager.create_backup()
     assert not backup_manager.restore_latest_backup(new_dest)
@@ -107,8 +107,8 @@ def test_restore_no_backup(filesystem, tmp_path, debug, clean_stderr):
 
     backup_manager = ezbak(
         name="test",
-        sources=[src_dir],
-        destinations=[dest1],
+        source_paths=[src_dir],
+        storage_paths=[dest1],
     )
     # backup_manager.create_backup()
     assert not backup_manager.restore_latest_backup(tmp_path)

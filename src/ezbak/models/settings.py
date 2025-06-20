@@ -20,15 +20,19 @@ err_console = Console(stderr=True)
 class Settings:
     """Configuration settings for EZBak backup operations.
 
-    Stores all configuration parameters needed for backup operations including source/destination paths,
-    retention policies, compression settings, and operational flags. Provides validation and property
-    accessors for computed values like resolved paths and retention policy objects.
+    Stores all configuration parameters needed for backup operations including source/destination paths, retention policies, compression settings, and operational flags. Provides validation and property accessors for computed values like resolved paths and retention policy objects.
     """
 
     action: str | None = None
     name: str | None = None
-    sources: list[str | Path] | None = None
-    destinations: list[str | Path] | None = None
+    source_paths: list[Path] | None = None
+    storage_paths: list[Path] | None = None
+
+    exclude_regex: str | None = None
+    include_regex: str | None = None
+    compression_level: int = DEFAULT_COMPRESSION_LEVEL
+    label_time_units: bool = True
+    rename_files: bool = False
 
     max_backups: int | None = None
     retention_yearly: int | None = None
@@ -38,133 +42,17 @@ class Settings:
     retention_hourly: int | None = None
     retention_minutely: int | None = None
 
+    cron: str | None = None
     tz: str | None = None
     log_level: str = "INFO"
     log_file: str | Path | None = None
-    compression_level: int = DEFAULT_COMPRESSION_LEVEL
 
-    exclude_regex: str | None = None
-    include_regex: str | None = None
-    label_time_units: bool = True
+    restore_path: str | Path | None = None
+    clean_before_restore: bool = False
     chown_user: int | None = None
     chown_group: int | None = None
-    cron: str | None = None
-    rename_files: bool = False
-    _source_paths: list[Path] | None = None
-    _destination_paths: list[Path] | None = None
+
     _retention_policy: RetentionPolicyManager | None = None
-    _backup_name: str | None = None
-
-    def validate(self) -> None:
-        """Validate that required settings are provided for backup operations.
-
-        Ensures that a backup name, source paths, and destination paths are specified before
-        attempting any backup operations. Raises ValueError if any required settings are missing.
-
-        Raises:
-            ValueError: If settings are invalid.
-        """
-        if not self.name:
-            msg = "No backup name provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        if not self.sources:
-            msg = "No source paths provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        if not self.destinations:
-            msg = "No destination paths provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-    @property
-    def backup_name(self) -> str:
-        """Get the backup name for identifying this backup operation.
-
-        Returns the configured backup name or generates a random name if none is provided.
-        Used throughout the backup process to identify and label backup files and logs.
-
-        Returns:
-            str: The backup name to use for this operation.
-
-        Raises:
-            ValueError: If no backup name is provided and cannot be generated.
-        """
-        if self._backup_name:
-            return self._backup_name
-
-        if not self.name:
-            msg = "No backup name provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        return self.name
-
-    @property
-    def destination_paths(self) -> list[Path]:
-        """Get validated and resolved destination paths for backup storage.
-
-        Converts destination strings to Path objects, resolves them to absolute paths,
-        and creates directories if they don't exist. Caches the result for performance.
-
-        Returns:
-            list[Path]: List of absolute Path objects representing backup destinations.
-
-        Raises:
-            ValueError: If no destination paths are provided.
-        """
-        if self._destination_paths:
-            return self._destination_paths
-
-        if not self.destinations:
-            msg = "No destination paths provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self._destination_paths = list(
-            {Path(destination).expanduser().resolve() for destination in self.destinations}
-        )
-
-        for destination in self._destination_paths:
-            if not destination.exists():
-                logger.info(f"Create destination: {destination}")
-                destination.mkdir(parents=True, exist_ok=True)
-
-        return self._destination_paths
-
-    @property
-    def source_paths(self) -> list[Path]:
-        """Get validated and resolved source paths for backup operations.
-
-        Converts source strings to Path objects, resolves them to absolute paths,
-        and validates that all paths exist. Caches the result for performance.
-
-        Returns:
-            list[Path]: List of absolute Path objects representing backup sources.
-
-        Raises:
-            FileNotFoundError: If any of the source paths do not exist.
-            ValueError: If no source paths are provided.
-        """
-        if self._source_paths:
-            return self._source_paths
-
-        if not self.sources:
-            msg = "No source paths provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self._source_paths = list({Path(source).expanduser().resolve() for source in self.sources})
-
-        for source in self._source_paths:
-            if not isinstance(source, Path) or not source.exists():
-                msg = f"Source does not exist: {source}"
-                logger.error(msg)
-                raise FileNotFoundError(msg)
-
-        return self._source_paths
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
@@ -214,6 +102,17 @@ class Settings:
 
         return self._retention_policy
 
+    def model_dump(self) -> dict[str, int | str | bool | list[Path | str] | None]:
+        """Serialize settings to a dictionary representation.
+
+        Converts all settings attributes to a dictionary format for serialization,
+        logging, or configuration export purposes.
+
+        Returns:
+            dict[str, int | str | bool | list[Path | str] | None]: Dictionary representation of all settings.
+        """
+        return self.__dict__
+
     def update(self, updates: dict[str, str | int | Path | bool | list[Path | str]]) -> None:
         """Update settings with provided key-value pairs and reset cached properties.
 
@@ -237,13 +136,6 @@ class Settings:
         # Reset cached properties
         update_keys = updates.keys()
 
-        if "sources" in update_keys:
-            self._source_paths = None
-        if "destinations" in update_keys:
-            self._destination_paths = None
-        if "name" in update_keys:
-            self._backup_name = None
-
         retention_keys = {
             "retention_yearly",
             "retention_monthly",
@@ -255,25 +147,63 @@ class Settings:
         if retention_keys & update_keys:
             self._retention_policy = None
 
-    def model_dump(self) -> dict[str, int | str | bool | list[Path | str] | None]:
-        """Serialize settings to a dictionary representation.
+    def validate(self) -> None:
+        """Validate that required settings are provided for backup operations.
 
-        Converts all settings attributes to a dictionary format for serialization,
-        logging, or configuration export purposes.
+        Ensures that a backup name, source paths, and destination paths are specified before attempting any backup operations. Raises ValueError if any required settings are missing.
 
-        Returns:
-            dict[str, int | str | bool | list[Path | str] | None]: Dictionary representation of all settings.
+        Raises:
+            ValueError: If settings are invalid.
+            FileNotFoundError: If any of the paths do not exist.
         """
-        return self.__dict__
+        if not self.name:
+            msg = "No backup name provided"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        if not self.source_paths:
+            msg = "No source paths provided"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        for source in self.source_paths:
+            if not isinstance(source, Path) or not source.exists():
+                msg = f"Source does not exist: {source}"
+                logger.error(msg)
+                raise FileNotFoundError(msg) from None
+
+        if not self.storage_paths:
+            msg = "No storage paths provided"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        for destination in self.storage_paths:
+            if not destination.exists():
+                logger.info(f"Create destination: {destination}")
+                destination.mkdir(parents=True, exist_ok=True)
+
+
+@env.parser_for("list_paths")
+def list_paths_parser(value: str) -> list[Path]:
+    """Parse a comma-separated list of paths into a list of Path objects.
+
+    Args:
+        value (str): A comma-separated list of paths.
+
+    Returns:
+        list[Path]: A list of Path objects.
+    """
+    if not value:
+        return None
+
+    return list({Path(path).expanduser().resolve() for path in value.split(",")})
 
 
 @dataclass
 class SettingsManager:
     """Singleton manager for EZBak settings initialization and CLI overrides.
 
-    Provides centralized management of the Settings singleton, handling initialization
-    from environment variables and applying CLI argument overrides while maintaining
-    the singleton pattern for consistent settings access throughout the application.
+    Provides centralized management of the Settings singleton, handling initialization from environment variables and applying CLI argument overrides while maintaining the singleton pattern for consistent settings access throughout the application.
     """
 
     _instance: Settings | None = None
@@ -282,8 +212,7 @@ class SettingsManager:
     def initialize(cls) -> Settings:
         """Initialize settings from environment variables using the singleton pattern.
 
-        Creates a Settings instance from environment variables if not already initialized,
-        ensuring consistent settings access throughout the application lifecycle.
+        Creates a Settings instance from environment variables if not already initialized, ensuring consistent settings access throughout the application lifecycle.
 
         Returns:
             Settings: The initialized settings singleton instance.
@@ -292,9 +221,6 @@ class SettingsManager:
             return cls._instance
 
         settings = Settings(
-            name=env.str("NAME", None),
-            sources=env.list("SOURCES", None),
-            destinations=env.list("DESTINATIONS", None),
             action=env.str(
                 "ACTION",
                 default=None,
@@ -302,6 +228,29 @@ class SettingsManager:
                     ["backup", "restore", None], error="ACTION must be one of: {choices}"
                 ),
             ),
+            name=env.str("NAME", None),
+            source_paths=env.list_paths("SOURCE_PATHS", None),
+            storage_paths=env.list_paths("STORAGE_PATHS", None),
+            exclude_regex=env.str("EXCLUDE_REGEX", None),
+            include_regex=env.str("INCLUDE_REGEX", None),
+            compression_level=env.int(
+                "COMPRESSION_LEVEL",
+                default=DEFAULT_COMPRESSION_LEVEL,
+                validate=validate.OneOf(
+                    [1, 2, 3, 4, 5, 6, 7, 8, 9],
+                    error="COMPRESSION_LEVEL must be one of: {choices}",
+                ),
+            ),
+            label_time_units=env.bool("LABEL_TIME_UNITS", None),
+            rename_files=env.bool("RENAME_FILES", default=False),
+            max_backups=env.int("MAX_BACKUPS", None),
+            retention_yearly=env.int("RETENTION_YEARLY", None),
+            retention_monthly=env.int("RETENTION_MONTHLY", None),
+            retention_weekly=env.int("RETENTION_WEEKLY", None),
+            retention_daily=env.int("RETENTION_DAILY", None),
+            retention_hourly=env.int("RETENTION_HOURLY", None),
+            retention_minutely=env.int("RETENTION_MINUTELY", None),
+            cron=env.str("CRON", default=None),
             tz=env.str("TZ", None),
             log_level=env.str(
                 "LOG_LEVEL",
@@ -312,28 +261,10 @@ class SettingsManager:
                 ),
             ),
             log_file=env.str("LOG_FILE", None),
-            compression_level=env.int(
-                "COMPRESSION_LEVEL",
-                default=DEFAULT_COMPRESSION_LEVEL,
-                validate=validate.OneOf(
-                    [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                    error="COMPRESSION_LEVEL must be one of: {choices}",
-                ),
-            ),
-            cron=env.str("CRON", default=None),
-            max_backups=env.int("MAX_BACKUPS", None),
-            exclude_regex=env.str("EXCLUDE_REGEX", None),
-            include_regex=env.str("INCLUDE_REGEX", None),
-            label_time_units=env.bool("LABEL_TIME_UNITS", None),
+            restore_path=env.str("RESTORE_PATH", None),
+            clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
             chown_user=env.int("CHOWN_USER", None),
             chown_group=env.int("CHOWN_GROUP", None),
-            rename_files=env.bool("RENAME_FILES", default=False),
-            retention_yearly=env.int("RETENTION_YEARLY", default=None),
-            retention_monthly=env.int("RETENTION_MONTHLY", default=None),
-            retention_weekly=env.int("RETENTION_WEEKLY", default=None),
-            retention_daily=env.int("RETENTION_DAILY", default=None),
-            retention_hourly=env.int("RETENTION_HOURLY", default=None),
-            retention_minutely=env.int("RETENTION_MINUTELY", default=None),
         )
 
         cls._instance = settings
@@ -345,9 +276,7 @@ class SettingsManager:
     ) -> None:
         """Override existing settings with non-None values from CLI arguments.
 
-        Updates the settings singleton with any non-None values provided via command line arguments,
-        preserving existing values for unspecified settings. Filters out None values to avoid
-        overriding existing settings with None.
+        Updates the settings singleton with any non-None values provided via command line arguments, preserving existing values for unspecified settings. Filters out None values to avoid overriding existing settings with None.
 
         Args:
             cli_settings (dict[str, str | int | Path | bool | list[Path | str]]): Dictionary of settings from CLI arguments to apply as overrides.

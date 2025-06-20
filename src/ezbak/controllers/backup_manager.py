@@ -32,19 +32,19 @@ class FileForRename:
 
 
 class BackupManager:
-    """Manage and control backup operations for specified sources and destinations."""
+    """Manage and control backup operations for specified sources and storage_paths."""
 
     def __init__(self) -> None:
         """Initialize a backup manager to automate backup creation, management, and cleanup operations.
 
-        Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple destinations, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
+        Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
 
         Args:
             settings (Settings): The settings for the backup manager.
         """
-        self.destinations = settings.destination_paths
-        self.name = settings.backup_name
-        self.sources = settings.source_paths
+        self.storage_paths = settings.storage_paths
+        self.name = settings.name
+        self.source_paths = settings.source_paths
         self.tz = settings.tz
         self.compression_level = settings.compression_level
         self.retention_policy = settings.retention_policy
@@ -135,7 +135,7 @@ class BackupManager:
         Organize backups by time periods (yearly, monthly, weekly, daily, hourly, minutely) to enable selective retention where the oldest backup in each period is preserved. Use this to implement sophisticated retention policies that maintain historical coverage while controlling storage usage.
 
         Args:
-            path (Path | None, optional): The directory path to search for backups. If None, searches all configured destinations. Defaults to None.
+            path (Path | None, optional): The directory path to search for backups. If None, searches all configured storage_paths. Defaults to None.
 
         Returns:
             tuple[dict[BackupType, list[Backup]], dict[BackupType, list[str]]]: A tuple containing dictionaries of backups grouped by time period and the date values found for each period.
@@ -174,18 +174,18 @@ class BackupManager:
     def _load_all_backups(self, path: Path | None = None) -> list[Backup]:
         """Discover and load all backup files matching this configuration into structured Backup objects.
 
-        Scan configured destinations for backup files and convert them into Backup objects sorted by creation time. Use this to get a complete inventory of existing backups for operations like listing, pruning, or finding the latest backup.
+        Scan configured storage_paths for backup files and convert them into Backup objects sorted by creation time. Use this to get a complete inventory of existing backups for operations like listing, pruning, or finding the latest backup.
 
         Args:
-            path (Path | None, optional): The directory path to search for backups. If None, searches all configured destinations. Defaults to None.
+            path (Path | None, optional): The directory path to search for backups. If None, searches all configured storage_paths. Defaults to None.
 
         Returns:
             list[Backup]: A list of Backup objects sorted by creation time from oldest to newest.
         """
-        destinations = [path] if path else self.destinations
+        storage_paths = [path] if path else self.storage_paths
         found_backups: list[Path] = []
 
-        for destination in destinations:
+        for destination in storage_paths:
             found_backups.extend(
                 find_files(path=destination, globs=[f"*{self.name}*.{BACKUP_EXTENSION}"])
             )
@@ -322,7 +322,7 @@ class BackupManager:
         return max(backups, key=lambda x: x.stat().st_ctime)
 
     def create_backup(self) -> list[Path]:
-        """Create compressed backup archives of all configured sources and distribute them to all destinations.
+        """Create compressed backup archives of all configured sources and distribute them to all storage_paths.
 
         Generate new backup files by compressing all source files and directories into tar.gz archives, then copy these archives to each configured destination directory. Use this to perform the core backup operation that preserves your data with configurable compression and multi-destination redundancy.
 
@@ -339,7 +339,7 @@ class BackupManager:
             relative_path: Path | str
 
         files_to_add = []
-        for source in self.sources:
+        for source in self.source_paths:
             if source.is_dir():
                 files_to_add.extend(
                     [
@@ -371,7 +371,7 @@ class BackupManager:
                 return None
 
             created_files = []
-            for destination_dir in self.destinations:
+            for destination_dir in self.storage_paths:
                 backup_path = destination_dir / self._generate_filename(path=destination_dir)
                 if backup_path.exists():
                     backup_path = destination_dir / self._generate_filename(with_uuid=True)
@@ -389,7 +389,7 @@ class BackupManager:
         Get a complete list of backup file paths sorted by creation time to enable backup inventory management, cleanup operations, or user display of available backups. Use this when you need to work with backup file paths directly rather than Backup objects.
 
         Args:
-            path (Path | None, optional): The directory path to search for backups. If None, searches all configured destinations. Defaults to None.
+            path (Path | None, optional): The directory path to search for backups. If None, searches all configured storage_paths. Defaults to None.
 
         Returns:
             list[Path]: A list of backup file paths sorted by creation time from oldest to newest.
@@ -410,7 +410,7 @@ class BackupManager:
             return deleted_files
 
         if self.retention_policy.policy_type == RetentionPolicyType.COUNT_BASED:
-            for path in self.destinations:
+            for path in self.storage_paths:
                 backups = self._load_all_backups(path=path)
                 sorted_backups = sorted(backups, key=lambda x: x.zoned_datetime, reverse=True)
                 max_keep = self.retention_policy.get_retention(BackupType.NO_TYPE)
@@ -421,7 +421,7 @@ class BackupManager:
                         if isinstance(backup, Backup)
                     )
         else:
-            for path in self.destinations:
+            for path in self.storage_paths:
                 backups_by_type, _ = self._group_backups_by_period(path=path)
                 for backup_type, backups in backups_by_type.items():
                     sorted_backups = sorted(backups, key=lambda x: x.zoned_datetime, reverse=True)
@@ -442,7 +442,7 @@ class BackupManager:
         Rename existing backup files to ensure consistent filename formats when configuration changes or to apply time unit labels to previously unlabeled backups. Use this to maintain filename consistency across your backup collection after changing naming conventions.
 
         Args:
-            path (Path | None, optional): The directory path containing backups to rename. If None, processes all configured destinations. Defaults to None.
+            path (Path | None, optional): The directory path containing backups to rename. If None, processes all configured storage_paths. Defaults to None.
         """
         if self.label_time_units:
             files_for_rename = self._rename_with_labels(path=path)

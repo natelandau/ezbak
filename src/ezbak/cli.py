@@ -17,8 +17,8 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
     """Initialize the EZBak CLI."""
     backup_manager = ezbak(
         name=ezbak_cli.name,
-        sources=getattr(ezbak_cli.command, "sources", [Path.cwd()]),
-        destinations=getattr(ezbak_cli.command, "destinations", [Path.cwd()]),
+        source_paths=getattr(ezbak_cli.command, "sources", [Path.cwd()]),
+        storage_paths=getattr(ezbak_cli.command, "destinations", [Path.cwd()]),
         include_regex=getattr(ezbak_cli.command, "include_regex", None),
         exclude_regex=getattr(ezbak_cli.command, "exclude_regex", None),
         compression_level=getattr(ezbak_cli.command, "compression_level", None),
@@ -102,7 +102,7 @@ class CreateCommand:
             long="destinations",
             short="d",
             required=True,
-            help="The destinations to backup to.",
+            help="The storage paths to backup to.",
         ),
     ]
 
