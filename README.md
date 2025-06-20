@@ -57,8 +57,8 @@ backups = backup_manager.list_backups()
 # Prune old backups
 deleted_files = backup_manager.prune_backups()
 
-# Restore latest backup
-backup_manager.restore_latest_backup(destination=Path("/path/to/restore"))
+# Restore latest backup and clean the restore directory before restoring
+backup_manager.restore_latest_backup(destination=Path("/path/to/restore"), clean_before_restore=True)
 ```
 
 #### Configuration Options
