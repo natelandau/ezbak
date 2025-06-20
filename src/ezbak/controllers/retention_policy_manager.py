@@ -8,10 +8,7 @@ from ezbak.constants import DEFAULT_RETENTION, BackupType, RetentionPolicyType
 class RetentionPolicyManager:
     """Manage backup retention policies for automated storage cleanup and lifecycle management.
 
-    Handles different types of retention policies including count-based limits, time-based
-    categorization (yearly, monthly, weekly, daily, hourly, minutely), and keep-all policies.
-    Provides methods to determine retention limits for backup types and generate policy summaries
-    for configuration and logging purposes.
+    Handles different types of retention policies including count-based limits, time-based categorization (yearly, monthly, weekly, daily, hourly, minutely), and keep-all policies. Provides methods to determine retention limits for backup types and generate policy summaries for configuration and logging purposes.
     """
 
     def __init__(
@@ -34,9 +31,7 @@ class RetentionPolicyManager:
     def get_retention(self, backup_type: BackupType) -> int:
         """Get retention limit for a specific backup type based on current policy.
 
-        Determines how many backups of the specified type should be retained according to
-        the configured policy. Returns None for keep-all policies, count-based limits for
-        count-based policies, or time-based limits for time-based policies.
+        Determines how many backups of the specified type should be retained according to the configured policy. Returns None for keep-all policies, count-based limits for count-based policies, or time-based limits for time-based policies.
 
         Args:
             backup_type (BackupType): Backup type to get retention limit for.
@@ -59,9 +54,7 @@ class RetentionPolicyManager:
     def get_full_policy(self) -> dict[str, int]:
         """Generate complete policy configuration as a dictionary.
 
-        Creates a dictionary representation of the current retention policy for configuration
-        export, logging, or policy validation. Returns count-based policy as max_backups key
-        or time-based policy as individual backup type keys.
+        Creates a dictionary representation of the current retention policy for configuration export, logging, or policy validation. Returns count-based policy as max_backups key or time-based policy as individual backup type keys.
 
         Returns:
             dict[str, int]: Dictionary representation of the retention policy configuration.

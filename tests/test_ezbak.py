@@ -86,7 +86,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     restore_dir.mkdir()
     existing_file = restore_dir / "existing_file.txt"
     existing_file.touch()
-    backup_manager.restore_latest_backup(restore_dir)
+    backup_manager.restore_backup(restore_dir)
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
@@ -147,7 +147,7 @@ def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
 
     # When: Creating a backup
     backup_manager.create_backup()
-    backup_manager.restore_latest_backup(restore_dir)
+    backup_manager.restore_backup(restore_dir)
     # output = clean_stderr()
     # debug(output)
     # debug(restore_dir)
@@ -182,7 +182,7 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
 
     # When: Creating a backup
     backup_manager.create_backup()
-    backup_manager.restore_latest_backup(restore_dir)
+    backup_manager.restore_backup(restore_dir)
     # output = clean_stderr()
     # debug(output)
     # debug(restore_dir)
@@ -472,7 +472,7 @@ def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
     restore_dir.mkdir()
     test_file = restore_dir / "test_file.txt"
     test_file.touch()
-    backup_manager.restore_latest_backup(restore_dir, clean_before_restore=True)
+    backup_manager.restore_backup(restore_dir, clean_before_restore=True)
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):

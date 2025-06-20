@@ -466,7 +466,7 @@ class BackupManager:
         else:
             logger.info("No backups to rename")
 
-    def restore_latest_backup(
+    def restore_backup(
         self, destination: Path | str | None = None, *, clean_before_restore: bool = False
     ) -> bool:
         """Extract and restore the most recent backup to a specified destination directory.
