@@ -84,6 +84,8 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     # When: Restoring the latest backup
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
+    existing_file = restore_dir / "existing_file.txt"
+    existing_file.touch()
     backup_manager.restore_latest_backup(restore_dir)
 
     # Then: All source files are restored correctly
@@ -94,6 +96,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
         assert (restore_dir / src_dir.name / file.name).exists()
 
     assert (restore_dir / test_file.name).exists()
+    assert (restore_dir / existing_file.name).exists()
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -448,3 +451,31 @@ def test_prune_no_policy(debug, clean_stderr, tmp_path):
     assert len(existing_files) == 13
     for filename in filenames:
         assert Path(tmp_path / filename).exists()
+
+
+def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
+    """Verify that a backup directory is cleaned before restoring."""
+    # Given: Source and destination directories from fixture
+    src_dir, dest1, _ = filesystem
+
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        label_time_units=False,
+        log_level="info",
+    )
+    backup_manager.create_backup()
+
+    # When: Restoring the latest backup
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    test_file = restore_dir / "test_file.txt"
+    test_file.touch()
+    backup_manager.restore_latest_backup(restore_dir, clean_before_restore=True)
+
+    # Then: All source files are restored correctly
+    for file in src_dir.rglob("*"):
+        assert (restore_dir / src_dir.name / file.name).exists()
+
+    assert not (restore_dir / test_file.name).exists()

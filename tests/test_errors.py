@@ -115,3 +115,19 @@ def test_restore_no_backup(filesystem, tmp_path, debug, clean_stderr):
     output = clean_stderr()
     # debug(output)
     assert "ERROR    | No backup found to restore" in output
+
+
+def test_no_restore_destination(filesystem, tmp_path, debug, clean_stderr):
+    """Test EZBak errors."""
+    src_dir, dest1, _ = filesystem
+
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+    )
+    backup_manager.create_backup()
+    assert not backup_manager.restore_latest_backup(None)
+    output = clean_stderr()
+    # debug(output)
+    assert "ERROR    | No destination provided and no restore directory configured" in output

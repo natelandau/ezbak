@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from nclutils import copy_file, find_files, logger, new_uid
+from nclutils import clean_directory, copy_file, find_files, logger, new_uid
 from whenever import Instant, PlainDateTime, TimeZoneNotFoundError
 
 from ezbak.constants import (
@@ -466,18 +466,27 @@ class BackupManager:
         else:
             logger.info("No backups to rename")
 
-    def restore_latest_backup(self, destination: Path | str) -> bool:
+    def restore_latest_backup(
+        self, destination: Path | str | None = None, *, clean_before_restore: bool = False
+    ) -> bool:
         """Extract and restore the most recent backup to a specified destination directory.
 
         Decompress and extract the latest backup archive to recover files and directories to their original structure. Use this for disaster recovery, file restoration, or migrating backup contents to a new location.
 
         Args:
             destination (Path | str): The directory path where backup contents should be extracted and restored.
+            clean_before_restore (bool): Whether to clean the restore path before restoring
 
         Returns:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
         """
+        destination = destination or settings.restore_path
+        if not destination:
+            logger.error("No destination provided and no restore directory configured")
+            return False
+
         dest = Path(destination).expanduser().absolute()
+
         if not dest.exists():
             logger.error(f"Restore destination does not exist: {dest}")
             return False
@@ -485,6 +494,10 @@ class BackupManager:
         if not dest.is_dir():
             logger.error(f"Restore destination is not a directory: {dest}")
             return False
+
+        if clean_before_restore or settings.clean_before_restore:
+            clean_directory(dest)
+            logger.info(f"Cleaned all files: {dest.name}")
 
         most_recent_backup = self.get_latest_backup()
         if not most_recent_backup:

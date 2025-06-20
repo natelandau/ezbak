@@ -1,5 +1,6 @@
 """Configuration for pytest."""
 
+import os
 import shutil
 from collections.abc import Generator
 from pathlib import Path
@@ -54,18 +55,9 @@ def reset_settings() -> None:
             setattr(settings, key, None)
 
 
-# @pytest.fixture(autouse=True)
-# def mock_env(monkeypatch):
-#     """Mock environment variables for testing."""
-#     with mock.patch.dict(os.environ, clear=True):
-#         monkeypatch.setenv("EZBAK_NAME", "")
-#         monkeypatch.setenv("EZBAK_DESTINATIONS", "")
-#         monkeypatch.setenv("EZBAK_EXCLUDE_REGEX", "")
-#         monkeypatch.setenv("EZBAK_INCLUDE_REGEX", "")
-#         monkeypatch.setenv("EZBAK_LOG_FILE", "")
-#         monkeypatch.setenv("EZBAK_LOG_LEVEL", "")
-#         monkeypatch.setenv("EZBAK_NAME", "")
-#         monkeypatch.setenv("EZBAK_SOURCES", "")
-#         monkeypatch.setenv("EZBAK_TIME_BASED_POLICY", "")
-#         monkeypatch.setenv("EZBAK_TZ", "")
-#         yield
+@pytest.fixture(autouse=True)
+def mock_env(monkeypatch):
+    """Mock environment variables for testing."""
+    for k in os.environ:
+        if k.startswith("EZBAK_"):
+            monkeypatch.delenv(k, raising=False)
