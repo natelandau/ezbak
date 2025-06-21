@@ -2,21 +2,44 @@
 
 # ezbak
 
-A simple backup management tool that can be used both as a command-line interface and as a Python package. ezbak provides automated backup creation, management, and cleanup operations with support for multiple destinations, compression, and intelligent retention policies.
+A simple, powerful backup management tool for Python developers and system administrators. ezbak automates backup creation, management, and cleanup with support for multiple destinations, compression, and intelligent retention policies.
 
-## Features
+Use ezbak as a Python package in your code, run it from the command line, or deploy it as a Docker container.
 
--   Create compressed backups of files and directories in tgz (tar & gzip) format
--   Support for multiple backup storage locations
+**Core Functionality**
+
+-   Create compressed backups (tgz format) of files and directories
+-   Restore backups to any location
+-   Support for multiple backup storage destinations
+
+**Smart Management**
+
 -   Intelligent retention policies (time-based and count-based)
--   File filtering with regex patterns
+-   Automatic cleanup of old backups
 -   Time-based backup labeling (yearly, monthly, weekly, daily, hourly, minutely)
--   Restore functionality
--   Run as a python package, cli script, or docker container
+
+**Flexible Usage**
+
+-   Python package for integration into your projects
+-   Command-line interface for scripts and automation
+-   Docker container for containerized environments
+-   File filtering with regex patterns
+
+## Table of Contents
+
+-   [Installation](#installation)
+-   [Quick Start](#quick-start)
+-   [Usage](#usage)
+-   [Manual](#manual)
+-   [Common Use Cases](#common-use-cases)
+-   [Configuration Options](#configuration-options)
+-   [Contributing](#contributing)
 
 ## Installation
 
 ezbak can be used as a python package, cli script, or docker container.
+
+**Note:** ezbak requires Python 3.10 or higher.
 
 ### Python Package
 
@@ -38,6 +61,37 @@ uv tool install ezbak
 python -m pip install --user ezbak
 ```
 
+## Quick Start
+
+### Create your first backup
+
+```python
+from pathlib import Path
+from ezbak import ezbak
+
+# Simple backup with 7-day retention
+backup_manager = ezbak(
+    name="my-documents",
+    source_paths=[Path("~/Documents")],
+    storage_paths=[Path("~/Backups")],
+    retention_daily=7,
+)
+
+# Create the backup
+backup_files = backup_manager.create_backup()
+print(f"Created backup: {backup_files}")
+```
+
+### or, using the CLI
+
+```bash
+# Create a backup
+ezbak create --name my-documents --source ~/Documents --storage ~/Backups --daily 7
+
+# List your backups
+ezbak list --name my-documents --storage ~/Backups
+```
+
 ## Usage
 
 ### Python Package
@@ -48,11 +102,12 @@ ezbak is primarily designed to be used as a Python package in your projects:
 from pathlib import Path
 from ezbak import ezbak
 
-# Initialize backup manager
+# Initialize backup manager with retention policy
 backup_manager = ezbak(
     name="my-backup",
     source_paths=[Path("/path/to/source")],
     storage_paths=[Path("/path/to/destination")],
+    # Keep: 1 yearly, 12 monthly, 4 weekly, 7 daily, 24 hourly, 60 minutely
     retention_yearly=1,
     retention_monthly=12,
     retention_weekly=4,
@@ -63,90 +118,151 @@ backup_manager = ezbak(
 
 # Create a backup
 backup_files = backup_manager.create_backup()
+print(f"Backup created: {backup_files}")
 
 # List existing backups
 backups = backup_manager.list_backups()
+print(f"Found {len(backups)} backups")
 
-# Prune old backups
+# Clean up old backups based on retention policy
 deleted_files = backup_manager.prune_backups()
+print(f"Deleted {len(deleted_files)} old backups")
 
-# Restore latest backup and clean the restore directory before restoring
-backup_manager.restore_backup(destination=Path("/path/to/restore"), clean_before_restore=True)
+# Restore latest backup (with optional cleanup)
+backup_manager.restore_backup(
+    destination=Path("/path/to/restore"),
+    clean_before_restore=True
+)
 ```
 
 ### CLI Script
 
 ```bash
-# help
-ezbak [subcommand] --help
+# Get help for any command
+ezbak --help
+ezbak create --help
 
-# Create a backup
-ezbak create --name my-backup --source /path/to/source --storage /path/to/destination
+# Create a backup with 7-day retention
+ezbak create --name my-documents \
+    --source ~/Documents \
+    --storage ~/Backups \
+    --daily 7
 
-# List backups
-ezbak list --name my-backup --storage /path/to/backups
+# List all backups for a specific backup name
+ezbak list --name my-documents --storage ~/Backups
 
-# Prune backups
-ezbak prune --name my-backup --storage /path/to/backups --max-backups 10
+# Clean up old backups (keep only 10 most recent)
+ezbak prune --name my-documents \
+    --storage ~/Backups \
+    --max-backups 10
 
-# Restore a backup
-ezbak restore --name my-backup --storage /path/to/backups --destination /path/to/restore
+# Restore the latest backup
+ezbak restore --name my-documents \
+    --storage ~/Backups \
+    --destination ~/Restored \
+    --clean-before-restore  # Optional: clear destination before restore
+
 ```
 
 ### Docker Container
 
 ```bash
-docker run -it ghcr.io/natelandau/ezbak:latest \
+# Create a backup using Docker
+docker run -it \
+    -v /path/to/source:/source:ro \
+    -v /path/to/backups:/backups \
     -e EZBAK_ACTION=backup \
     -e EZBAK_NAME=my-backup \
-    -e EZBAK_SOURCE_PATHS=/path/to/source \
-    -e EZBAK_STORAGE_PATHS=/path/to/destination
-    # ...
+    -e EZBAK_SOURCE_PATHS=/source \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_RETENTION_DAILY=7 \
+    ghcr.io/natelandau/ezbak:latest
+
+# Run backups on a schedule (daily at 2 AM)
+docker run -d \
+    --name ezbak-scheduled \
+    --restart unless-stopped \
+    -v /path/to/source:/source:ro \
+    -v /path/to/backups:/backups \
+    -e EZBAK_ACTION=backup \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_SOURCE_PATHS=/source \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_RETENTION_DAILY=7 \
+    -e EZBAK_CRON="0 2 * * *" \
+    -e TZ=America/New_York \
+    ghcr.io/natelandau/ezbak:latest
+
+# Restore a backup
+docker run -it \
+    -v /path/to/backups:/backups:ro \
+    -v /path/to/restore:/restore \
+    -e EZBAK_ACTION=restore \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_DESTINATION=/restore \
+    ghcr.io/natelandau/ezbak:latest
 ```
 
-## Configuration
+## Manual
 
-ezbak takes a number of configuration options.
+Key concepts and configuration options for ezbak.
 
 ### Backup Names
 
-The name is used to identify the backup in the logs and in the backup filenames. A timestamp and label are automatically inferred and do not need to be provided.
+Each backup needs a unique name to identify it in logs and organize backup files. ezbak automatically adds timestamps and labels.
 
-The name is used by ezbak to identify previously created backups, allowing multiple backups to be stored in the same storage location.
+**Filename Format:** `{name}-{timestamp}-{period_label}.tgz`
 
--   Backup files are named in the format: `{name}-{timestamp}-{period_label}.tgz`
--   When `label_time_units` is False, the period_label is omitted.
--   If a backup with the same name exists, a UUID is appended to prevent conflicts.
--   The timestamp format is ISO 8601: `YYYYMMDDTHHMMSS`
+**Examples:**
+
+-   `my-documents-20241215T143022-daily.tgz`
+-   `database-backup-20241215T020000-weekly.tgz`
+
+**Key Points:**
+
+-   Multiple backup sets can share the same storage location
+-   Timestamps use ISO 8601 format: `YYYYMMDDTHHMMSS`
+-   Period labels (daily, weekly, etc.) can be disabled with `label_time_units=False`
+-   Duplicate names get a UUID suffix to prevent conflicts
 
 If desired, you can rename the backup files using the `rename_files` option. This will ensure the naming is consistent across backups.
 
 ### Retention Policies
 
-By default, all backups are kept. To prune backups you can use either the `max_backups` option or specify time-based retention policies.
+Control how many backups to keep with two approaches. **Note**: You can't use both methods together. If you set max_backups, time-based retention is ignored.
 
-Note that `max_backups` and the time-based retention policies are mutually exclusive, and if both are provided, only `max_backups` will be used.
+#### Simple Count-Based Retention
 
-#### Max Backups
+```python
+# Keep only the 10 most recent backups
+backup_manager = ezbak(
+    name="my-backup",
+    source_paths=[Path("/path/to/source")],
+    storage_paths=[Path("/path/to/destination")],
+    max_backups=10
+)
+```
 
-Retains the most recent specified number of backups
+#### Time-Based Retention (Recommended)
 
-#### Time-Based Retention Policies
-
-Time based retention polices allow keeping a specific number of backups for each time unit. The time units are:
-
--   `yearly`
--   `monthly`
--   `weekly`
--   `daily`
--   `hourly`
--   `minutely`
-
-If any time-based policy is set, all non-set policies default to keep one backup.
+```python
+# Keep different numbers of backups for different time periods
+# Unspecified time periods (hourly, minutely) default to keeping 1 backup each
+backup_manager = ezbak(
+    name="my-backup",
+    source_paths=[Path("/path/to/source")],
+    storage_paths=[Path("/path/to/destination")],
+    retention_daily=7,    # Keep 7 daily backups
+    retention_weekly=4,   # Keep 4 weekly backups
+    retention_monthly=12, # Keep 12 monthly backups
+    retention_yearly=3    # Keep 3 yearly backups
+)
+```
 
 ### Including and Excluding Files
 
-Any files or directories specified as source paths are included in the backup. With the exception of this global exclude list:
+By default, all files in your source paths are backed up, except for these automatically excluded files:
 
 -   `.DS_Store`
 -   `@eaDir`
@@ -163,37 +279,151 @@ When set, only files matching the regex pattern will be included in the backup.
 
 When set, files matching the regex pattern will be excluded from the backup.
 
+## Common Use Cases
+
+### Daily Document Backup
+
+```python
+from pathlib import Path
+from ezbak import ezbak
+
+backup_manager = ezbak(
+    name="documents",
+    source_paths=[Path("~/Documents"), Path("~/Pictures")],
+    storage_paths=[Path("~/Backups")],
+    retention_daily=30,  # Keep 30 days of daily backups
+    retention_monthly=12  # Keep 12 monthly backups
+)
+backup_manager.create_backup()
+```
+
+### Selective File Backup
+
+```python
+backup_manager = ezbak(
+    name="logs",
+    source_paths=[Path("/var/log")],
+    storage_paths=[Path("/backups")],
+    include_regex=r"\.log$",  # Only .log files
+    exclude_regex=r"debug",   # Exclude debug logs
+    max_backups=10
+)
+```
+
+### Database Backup with Pre/Post Scripts
+
+```python
+import subprocess
+from pathlib import Path
+from ezbak import ezbak
+
+# Dump database before backup
+subprocess.run(["pg_dump", "-f", "/tmp/db_backup.sql", "mydb"])
+
+backup_manager = ezbak(
+    name="database",
+    source_paths=[Path("/tmp/db_backup.sql")],
+    storage_paths=[Path("/backups/database")],
+    retention_hourly=24,  # Keep 24 hourly backups
+    retention_daily=7,
+    retention_weekly=4
+)
+
+backup_manager.create_backup()
+
+# Cleanup temp file
+Path("/tmp/db_backup.sql").unlink()
+```
+
 ## Configuration Options
 
-The following options can be set via the CLI, Python API, or environment variables.
+Configure ezbak using any combination of Python parameters, CLI arguments, or environment variables:
 
-| Description | CLI | Python | Environment Variable |
-| --- | --- | --- | --- |
-| Backup name | `--name` | `name` | `EZBAK_NAME` |
-| List of paths containing the content to backup | `--source` | `source_paths` | `EZBAK_SOURCE_PATHS` |
-| List of paths where backups will be stored | `--storage` | `storage_paths` | `EZBAK_STORAGE_PATHS` |
-| Regex pattern to exclude files. Defaults to `None`. | `--exclude-regex` | `exclude_regex` | `EZBAK_EXCLUDE_REGEX` |
-| Regex pattern to include files. Defaults to `None`. | `--include-regex` | `include_regex` | `EZBAK_INCLUDE_REGEX` |
-| Whether to label time units in filenames. Defaults to `True`. | `--no-label` | `label_time_units` | `EZBAK_LABEL_TIME_UNITS` |
-| Whether to rename files. Defaults to `False`. | `--rename-files` | `rename_files` | `EZBAK_RENAME_FILES` |
-| Compression level (1-9). Defaults to `9`. | `--compression-level` | `compression_level` | `EZBAK_COMPRESSION_LEVEL` |
-| Maximum number of backups to keep. Defaults to `None`. | `--max-backups` | `max_backups` | `EZBAK_MAX_BACKUPS` |
-| Number of yearly backups to keep. Defaults to `None`. | `--yearly` | `retention_yearly` | `EZBAK_RETENTION_YEARLY` |
-| Number of monthly backups to keep. Defaults to `None`. | `--monthly` | `retention_monthly` | `EZBAK_RETENTION_MONTHLY` |
-| Number of weekly backups to keep. Defaults to `None`. | `--weekly` | `retention_weekly` | `EZBAK_RETENTION_WEEKLY` |
-| Number of daily backups to keep. Defaults to `None`. | `--daily` | `retention_daily` | `EZBAK_RETENTION_DAILY` |
-| Number of hourly backups to keep. Defaults to `None`. | `--hourly` | `retention_hourly` | `EZBAK_RETENTION_HOURLY` |
-| Number of minutely backups to keep. Defaults to `None`. | `--minutely` | `retention_minutely` | `EZBAK_RETENTION_MINUTELY` |
-| Logging level. Defaults to `INFO`. | `--log-level` | `log_level` | `EZBAK_LOG_LEVEL` |
-| Path to log file. Defaults to `None`. | `--log-file` | `log_file` | `EZBAK_LOG_FILE` |
-| Optional prefix for log messages. Defaults to `None`. | `--log-prefix` | `log_prefix` | `EZBAK_LOG_PREFIX` |
-| Path to restore the backup to. Defaults to `None`. | `--restore-path` | `restore_path` | `EZBAK_RESTORE_PATH` |
-| Whether to clean the restore path before restoring. Defaults to `False`. | `--clean-before-restore` | `clean_before_restore` | `EZBAK_CLEAN_BEFORE_RESTORE` |
-| User ID to change the ownership of restored files to. Defaults to `None`. | `--uid` | `chown_user` | `EZBAK_CHOWN_USER` |
-| Group ID to change the ownership of restored files to. Defaults to `None`. | `--gid` | `chown_group` | `EZBAK_CHOWN_GROUP` |
-| Action to perform. One of `backup` or `restore`. Defaults to `None`. | N/A | N/A | `EZBAK_ACTION` |
-| Cron expression to schedule the backup. Example: `*/1 * * * *` | N/A | N/A | `EZBAK_CRON` |
-| Timezone for backup timestamps. Defaults to system timezone. | `tz` | N/A | `EZBAK_TZ` |
+### Core Settings
+
+```python
+backup_manager = ezbak(
+    name="my-backup",                    # Backup identifier
+    source_paths=[Path("/path/to/src")], # What to backup
+    storage_paths=[Path("/backups")],    # Where to store backups
+)
+```
+
+### Retention Settings
+
+```python
+# Option 1: Keep a maximum number of backups
+max_backups=10
+
+# Option 2: Time-based retention (recommended)
+retention_daily=7,      # Keep 7 daily backups
+retention_weekly=4,     # Keep 4 weekly backups
+retention_monthly=12,   # Keep 12 monthly backups
+retention_yearly=3,     # Keep 3 yearly backups
+retention_hourly=24,    # Keep 24 hourly backups
+retention_minutely=60,  # Keep 60 minutely backups
+```
+
+### File Filtering
+
+```python
+include_regex=r"\.txt$",     # Only include .txt files
+exclude_regex=r"temp|cache", # Exclude temp and cache files
+```
+
+### Backup Options
+
+```python
+compression_level=9,         # Compression level (1-9, default: 9)
+label_time_units=True,       # Include time labels in filenames (default: True)
+rename_files=False,          # Rename existing files (default: False)
+```
+
+### Restore Options
+
+```python
+restore_path=Path("/restore"),           # Where to restore files
+clean_before_restore=True,               # Clear destination first
+chown_user=1000,                         # Set file owner (UID)
+chown_group=1000,                        # Set file group (GID)
+```
+
+### Logging
+
+```python
+log_level="INFO",                       # DEBUG, INFO, WARNING, ERROR
+log_file=Path("/var/log/ezbak.log"),    # Log file path
+log_prefix="BACKUP",                    # Log message prefix
+```
+
+### Environment Variables
+
+All options can be set via environment variables using the `EZBAK_` prefix:
+
+```bash
+export EZBAK_NAME="my-backup"
+export EZBAK_SOURCE_PATHS="/path/to/source"
+export EZBAK_STORAGE_PATHS="/path/to/backups"
+export EZBAK_RETENTION_DAILY=7
+# etc.
+```
+
+### Docker-Only Options
+
+```bash
+EZBAK_ACTION=backup           # Action: backup or restore
+EZBAK_CRON="0 2 * * *"        # Cron schedule (daily at 2 AM)
+EZBAK_TZ="America/New_York"   # Timezone for timestamps
+```
+
+### CLI Equivalents
+
+Most Python options have CLI equivalents. Use --help for details:
+
+```bash
+ezbak create --help     # See all create options
+ezbak restore --help    # See all restore options
+```
 
 ## Contributing
 

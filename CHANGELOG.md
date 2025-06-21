@@ -1,3 +1,9 @@
+## v0.6.0 (2025-06-21)
+
+### Feat
+
+- **cli**: add restore command
+
 ## v0.5.0 (2025-06-21)
 
 ### Feat
