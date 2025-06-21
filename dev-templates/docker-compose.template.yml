@@ -30,8 +30,8 @@ services:
             - EZBAK_TZ=America/New_York
             - EZBAK_LOG_LEVEL=TRACE
             - EZBAK_LOG_FILE=/logs/ezbak.log
+            - EZBAK_LOG_PREFIX=docker
             - EZBAK_CLEAN_BEFORE_RESTORE=false
-            - EZBAK_HOSTNAME=docker
             # - EZBAK_CHOWN_USER=
             # - EZBAK_CHOWN_GROUP=
         volumes:

@@ -1,7 +1,6 @@
 """Entrypoint for ezbak from docker. Relies entirely on environment variables for configuration."""
 
 import atexit
-import socket
 import sys
 from dataclasses import dataclass
 
@@ -60,13 +59,12 @@ def main() -> None:
 
     Sets up logging, validates configuration settings, and either runs a one-time backup/restore operation or starts a scheduled backup service based on cron configuration.
     """
-    hostname = settings.hostname or socket.gethostname()
     logger.configure(
         log_level=settings.log_level,
         show_source_reference=False,
         log_file=str(settings.log_file) if settings.log_file else None,
+        prefix=settings.log_prefix,
     )
-    logger.info(f"EZBak Running on '{hostname}' for '{settings.name}'")
 
     try:
         settings.validate()
@@ -75,10 +73,10 @@ def main() -> None:
 
     for key, value in settings.model_dump().items():
         if not key.startswith("_"):
-            logger.debug(f"SETTING: {key}: {value}")
+            logger.debug(f"Config: {key}: {value}")
 
     retention_policy = settings.retention_policy.get_full_policy()
-    logger.debug(f"SETTING: retention_policy: {retention_policy}")
+    logger.debug(f"Config: retention_policy: {retention_policy}")
 
     if settings.cron:
         scheduler = BackgroundScheduler()

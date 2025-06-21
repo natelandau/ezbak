@@ -47,12 +47,12 @@ class Settings:
     tz: str | None = None
     log_level: str = "INFO"
     log_file: str | Path | None = None
+    log_prefix: str | None = None
 
     restore_path: str | Path | None = None
     clean_before_restore: bool = False
     chown_user: int | None = None
     chown_group: int | None = None
-    hostname: str | None = None
 
     tmp_dir: TemporaryDirectory | None = None
 
@@ -265,11 +265,11 @@ class SettingsManager:
                 ),
             ),
             log_file=env.str("LOG_FILE", None),
+            log_prefix=env.str("LOG_PREFIX", None),
             restore_path=env.str("RESTORE_PATH", None),
             clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
             chown_user=env.int("CHOWN_USER", None),
             chown_group=env.int("CHOWN_GROUP", None),
-            hostname=env.str("HOSTNAME", None),
         )
 
         cls._instance = settings
