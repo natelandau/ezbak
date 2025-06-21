@@ -28,4 +28,4 @@ RUN uv sync --locked
 ENTRYPOINT []
 
 # Run ezbak by default
-CMD ["uv", "run", "ezbak"]
+CMD ["uv", "run", "-m", "ezbak.entrypoint"]

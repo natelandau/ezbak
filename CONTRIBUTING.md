@@ -63,6 +63,15 @@ To set up a local development environment, run `duty dev-setup`. This will creat
 
 Use the directory structure to test the development environment.
 
+### Testing the Docker Entrypoint
+
+Docker is configured entirely with environment variables. To test the entrypoint follow these steps:
+
+1. Run `duty dev-setup` to create the development environment. This will create a `.dev/` folder and create a `.env` file at the project root.
+2. Edit the `.env` and or `.dev/docker-compose.yml` file to configure the environment
+3. Run `uv run -m ezbak.entrypoint` to run the entrypoint; or
+4. Run `docker compose -f .dev/docker-compose.yml up --build` to run the docker container
+
 ## Development Guidelines
 
 When developing for ezbak, please follow these guidelines:

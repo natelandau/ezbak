@@ -3,6 +3,7 @@
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from environs import Env, validate
 from nclutils import logger
@@ -12,7 +13,7 @@ from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, ENVAR_PREFIX, BackupType,
 from ezbak.controllers.retention_policy_manager import RetentionPolicyManager
 
 env = Env(prefix=ENVAR_PREFIX)
-
+env.read_env()
 err_console = Console(stderr=True)
 
 
@@ -51,6 +52,9 @@ class Settings:
     clean_before_restore: bool = False
     chown_user: int | None = None
     chown_group: int | None = None
+    hostname: str | None = None
+
+    tmp_dir: TemporaryDirectory | None = None
 
     _retention_policy: RetentionPolicyManager | None = None
 
@@ -265,6 +269,7 @@ class SettingsManager:
             clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
             chown_user=env.int("CHOWN_USER", None),
             chown_group=env.int("CHOWN_GROUP", None),
+            hostname=env.str("HOSTNAME", None),
         )
 
         cls._instance = settings

@@ -180,6 +180,10 @@ def dev_clean(ctx: Context) -> None:  # noqa: ARG001
     if DEV_DIR.exists():
         shutil.rmtree(DEV_DIR)
 
+    env = PROJECT_ROOT / ".env"
+    if env.exists():
+        env.unlink()
+
     console.print(f"✓ Cleaned dev env in '{DEV_DIR.name}/'")
 
 
@@ -207,6 +211,12 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
                 file.touch()
     console.print(f"✓ Development env set up in '{DEV_DIR.name}/'")
 
+    # copy .env.template to .env
+    env_template = TEMPLATES_DIR / ".env.template"
+    env = PROJECT_ROOT / ".env"
+    shutil.copy2(env_template, env)
+    console.print(f"✓ .env file created in '{PROJECT_ROOT.name}/{env.name}'")
+
     # copy docker-compose.override.yml to .dev/docker-compose.override.yml
     docker_compose_template = TEMPLATES_DIR / "docker-compose.template.yml"
     docker_compose = DEV_DIR / "docker-compose.yml"
@@ -220,5 +230,5 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
     console.print(f"✓ Replaced text in '{DEV_DIR.name}/{docker_compose.name}'")
 
     console.print(
-        f"✓ Development environment setup complete. Start the development environment with:\n\n    [code]docker compose -f {DEV_DIR.name}/{docker_compose.name} up --build[/code]"
+        f"✓ Development environment setup complete. Start the development environment with\n  one of the following commands:\n    [green]docker compose -f {DEV_DIR.name}/{docker_compose.name} up --build[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
     )
