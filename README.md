@@ -160,19 +160,23 @@ ezbak can be configured using environment variables with the `EZBAK_` prefix:
 -   `EZBAK_SOURCE_PATHS` (str): The paths to backup (Comma-separated list of paths)
 -   `EZBAK_STORAGE_PATHS` (str): The paths to store the backups (Comma-separated list of paths)
 -   `EZBAK_INCLUDE_REGEX` (str): The regex pattern to include files
+-   `EZBAK_EXCLUDE_REGEX` (str): The regex pattern to exclude files
 -   `EZBAK_COMPRESSION_LEVEL` (int): The compression level. One of `1` to `9`
 -   `EZBAK_LABEL_TIME_UNITS` (bool): Whether to label time units in filenames
 -   `EZBAK_RENAME_FILES` (bool): Whether to rename files
+-   `EZBAK_MAX_BACKUPS` (int): The maximum number of backups to keep
 -   `EZBAK_RETENTION_YEARLY` (int): The number of yearly backups to keep
 -   `EZBAK_RETENTION_MONTHLY` (int): The number of monthly backups to keep
 -   `EZBAK_RETENTION_WEEKLY` (int): The number of weekly backups to keep
 -   `EZBAK_RETENTION_DAILY` (int): The number of daily backups to keep
 -   `EZBAK_RETENTION_HOURLY` (int): The number of hourly backups to keep
 -   `EZBAK_RETENTION_MINUTELY` (int): The number of minutely backups to keep
+-   `EZBAK_CRON` (str): The cron expression to schedule the backup. Example: `*/1 * * * *`
 -   `EZBAK_TZ` (str): The timezone to use for the backup
 -   `EZBAK_LOG_LEVEL` (str): The logging level. One of `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`
 -   `EZBAK_LOG_FILE` (str): The path to the log file
 -   `EZBAK_LOG_PREFIX` (str): Optional prefix for log messages
+-   `EZBAK_RESTORE_PATH` (str): The path to restore the backup to
 -   `EZBAK_CLEAN_BEFORE_RESTORE` (bool): Whether to clean the restore path before restoring
 -   `EZBAK_CHOWN_USER` (int): The user ID to change the ownership of restored files to
 -   `EZBAK_CHOWN_GROUP` (int): The group ID to change the ownership of restored files to
