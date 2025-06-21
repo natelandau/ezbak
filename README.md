@@ -172,6 +172,7 @@ ezbak can be configured using environment variables with the `EZBAK_` prefix:
 -   `EZBAK_TZ` (str): The timezone to use for the backup
 -   `EZBAK_LOG_LEVEL` (str): The logging level. One of `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`
 -   `EZBAK_LOG_FILE` (str): The path to the log file
+-   `EZBAK_LOG_PREFIX` (str): Optional prefix for log messages
 -   `EZBAK_CLEAN_BEFORE_RESTORE` (bool): Whether to clean the restore path before restoring
 -   `EZBAK_CHOWN_USER` (int): The user ID to change the ownership of restored files to
 -   `EZBAK_CHOWN_GROUP` (int): The group ID to change the ownership of restored files to
