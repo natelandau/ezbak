@@ -26,6 +26,7 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
         max_backups=getattr(ezbak_cli.command, "max_backups", None),
         log_level=ezbak_cli.verbosity.name or None,
         log_file=str(ezbak_cli.log_file) if ezbak_cli.log_file else None,
+        log_prefix=ezbak_cli.log_prefix,
         retention_yearly=getattr(ezbak_cli.command, "yearly", None),
         retention_monthly=getattr(ezbak_cli.command, "monthly", None),
         retention_weekly=getattr(ezbak_cli.command, "weekly", None),
@@ -74,6 +75,14 @@ class EZBakCLI:
             required=False,
             help="The log file.",
             propagate=True,
+        ),
+    ] = None
+
+    log_prefix: Annotated[
+        str,
+        cappa.Arg(
+            long="log-prefix",
+            help="Prefix for log messages.",
         ),
     ] = None
     backup_manager: Annotated[

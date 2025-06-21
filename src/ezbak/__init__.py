@@ -17,6 +17,7 @@ def ezbak(  # noqa: PLR0913
     tz: str | None = None,
     log_level: str = "info",
     log_file: str | Path | None = None,
+    log_prefix: str | None = None,
     compression_level: int | None = None,
     max_backups: int | None = None,
     retention_yearly: int | None = None,
@@ -33,10 +34,7 @@ def ezbak(  # noqa: PLR0913
 ) -> BackupManager:
     """Execute automated backups with configurable retention policies and compression.
 
-    Creates timestamped backups of specified source directories/files to destination locations
-    using the BackupManager. Supports flexible retention policies (count-based or time-based),
-    file filtering with regex patterns, compression, and ownership changes. Ideal for automated
-    backup scripts and scheduled backup operations.
+    Creates timestamped backups of specified source directories/files to destination locations using the BackupManager. Supports flexible retention policies (count-based or time-based), file filtering with regex patterns, compression, and ownership changes. Ideal for automated backup scripts and scheduled backup operations.
 
     Args:
         name (str | None, optional): Unique identifier for the backup operation. Used for logging and backup labeling. Defaults to None.
@@ -45,6 +43,7 @@ def ezbak(  # noqa: PLR0913
         tz (str | None, optional): Timezone for timestamp formatting in backup names. Defaults to None.
         log_level (str, optional): Logging verbosity level. Defaults to "info".
         log_file (str | Path | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
+        log_prefix (str | None, optional): Prefix for log messages. Defaults to None.
         compression_level (int | None, optional): Compression level (1-9) for backup archives. Defaults to None.
         max_backups (int | None, optional): Maximum number of backups to retain (count-based retention). Defaults to None.
         retention_yearly (int | None, optional): Number of yearly backups to retain. Defaults to None.
@@ -70,6 +69,7 @@ def ezbak(  # noqa: PLR0913
             "tz": tz or None,
             "log_level": log_level or None,
             "log_file": log_file or None,
+            "log_prefix": log_prefix or None,
             "compression_level": compression_level or None,
             "max_backups": max_backups or None,
             "retention_yearly": retention_yearly or None,
@@ -87,11 +87,12 @@ def ezbak(  # noqa: PLR0913
     )
 
     logger.configure(
-        log_level=log_level,
+        log_level=settings.log_level,
         show_source_reference=False,
-        log_file=str(log_file) if log_file else None,
+        log_file=str(settings.log_file) if settings.log_file else None,
+        prefix=settings.log_prefix,
     )
-    logger.info(f"Starting ezbak for {settings.name}")
+    logger.info(f"Run ezbak for '{settings.name}'")
 
     settings.validate()
 

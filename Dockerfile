@@ -24,7 +24,7 @@ ADD . /app
 WORKDIR /app
 RUN uv sync --locked
 
-# Reset the entrypoint, don't invoke `uv`
+# Reset the entrypoint
 ENTRYPOINT []
 
 # Run ezbak by default
