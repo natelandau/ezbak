@@ -18,7 +18,7 @@ services:
             - EZBAK_INCLUDE_REGEX=
             - EZBAK_COMPRESSION_LEVEL=6
             - EZBAK_LABEL_TIME_UNITS=true
-            - EZBAK_RENAME_FILES=true
+            - EZBAK_RENAME_FILES=false
             - EZBAK_MAX_BACKUPS=4
             - EZBAK_RETENTION_YEARLY=4
             - EZBAK_RETENTION_MONTHLY=4

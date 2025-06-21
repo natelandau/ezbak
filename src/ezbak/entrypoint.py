@@ -3,7 +3,7 @@
 import atexit
 import socket
 import sys
-import time
+from dataclasses import dataclass
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -11,6 +11,13 @@ from nclutils import logger
 
 from ezbak import ezbak
 from ezbak.models import settings
+
+
+@dataclass
+class Run:
+    """Class to manage the running state of the application."""
+
+    running: bool = True
 
 
 def cleanup_tmp_dir() -> None:
@@ -86,8 +93,8 @@ def main() -> None:
 
         for job in scheduler.get_jobs():
             logger.info(job)
-        while True:  # Run the scheduler in a loop
-            time.sleep(1)
+        while Run().running:  # Run the scheduler in a loop
+            ...
     elif settings.action == "backup":
         do_backup()
     elif settings.action == "restore":
