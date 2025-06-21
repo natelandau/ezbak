@@ -14,6 +14,7 @@ A simple backup management tool that can be used both as a command-line interfac
 -   Time-based backup labeling (yearly, monthly, weekly, daily, hourly, minutely)
 -   Automatic backup pruning based on retention policies
 -   Restore functionality
+-   Run as a python package, cli script, or docker container
 
 ## Installation
 

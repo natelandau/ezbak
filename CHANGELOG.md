@@ -1,3 +1,21 @@
+## v0.5.0 (2025-06-21)
+
+### Feat
+
+- **logging**: support logger prefix (#9)
+- add docker container (#8)
+- rename restore method to restore_latest_backup (#7)
+- **restore**: add option to pre-clean restore directory (#6)
+- add exclude list of files (#2)
+
+### Fix
+
+- rename arguments for clarity (#5)
+
+### Refactor
+
+- use a global settings object (#4)
+
 ## v0.4.0 (2025-06-17)
 
 ### Feat
