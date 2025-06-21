@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from ezbak.cli import EZBakCLI  # noqa: TC001
+from ezbak import ezbak
 
 
-def main(command: EZBakCLI) -> None:
+def main() -> None:
     """The main function for the create command."""
-    command.backup_manager.create_backup()
+    backup_manager = ezbak()
+    backup_manager.create_backup()

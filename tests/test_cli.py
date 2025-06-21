@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -19,7 +20,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_cli_create_backup(filesystem, debug, clean_stderr, tmp_path):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -30,11 +31,11 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
             "create",
             "--name",
             "test",
-            "--sources",
+            "--source",
             str(src_dir),
-            "--destinations",
+            "--storage",
             str(dest1),
-            "--destinations",
+            "--storage",
             str(dest2),
         ],
         deps=[initialize_ezbak],
@@ -50,7 +51,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
+def test_cli_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
     """Verify that backups are pruned correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -61,11 +62,11 @@ def test_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
             "create",
             "-n",
             "test",
-            "-d",
+            "--storage",
             str(dest1),
-            "-d",
+            "--storage",
             str(dest2),
-            "-s",
+            "--source",
             str(src_dir),
             "--no-label",
         ],
@@ -82,7 +83,7 @@ def test_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
     assert f"INFO     | Created: …/dest2/{filename}" in output
 
 
-def test_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
+def test_cli_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
     """Verify pruning backups with max backup set."""
     mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
     # Given: A backup manager configured with test parameters
@@ -110,9 +111,9 @@ def test_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
             "prune",
             "--name",
             "test",
-            "-d",
+            "--storage",
             str(tmp_path),
-            "-x",
+            "--max-backups",
             "3",
         ],
         deps=[initialize_ezbak],
@@ -131,7 +132,7 @@ def test_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
+def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
     """Verify pruning backups with a policy."""
     mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
     # Given: A backup manager configured with test parameters
@@ -159,19 +160,19 @@ def test_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
             "prune",
             "--name",
             "test",
-            "-d",
+            "--storage",
             str(tmp_path),
-            "-Y",
+            "--yearly",
             "1",
-            "-M",
+            "--monthly",
             "4",
-            "-W",
+            "--weekly",
             "4",
-            "-D",
+            "--daily",
             "4",
-            "-H",
+            "--hourly",
             "4",
-            "-S",
+            "--minutely",
             "4",
         ],
         deps=[initialize_ezbak],
@@ -190,7 +191,7 @@ def test_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
         assert not Path(tmp_path / filename).exists()
 
 
-def test_list_backups(debug, clean_stdout, tmp_path):
+def test_cli_list_backups(debug, clean_stdout, tmp_path):
     """Verify listing backups."""
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -203,7 +204,7 @@ def test_list_backups(debug, clean_stdout, tmp_path):
 
     cappa.invoke(
         obj=EZBakCLI,
-        argv=["list", "--name", "test", "-l", str(tmp_path)],
+        argv=["list", "--name", "test", "--storage", str(tmp_path)],
         deps=[initialize_ezbak],
     )
     output = clean_stdout()
@@ -212,3 +213,35 @@ def test_list_backups(debug, clean_stdout, tmp_path):
     assert "test-20250609T101857-hourly.tgz" in output
     assert "test-20250609T095745-minutely.tgz" in output
     assert "test-20250609T095804-minutely.tgz" in output
+
+
+def test_cli_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+    """Verify that a backup is restored correctly."""
+    # Given: Source and destination directories from fixture
+    _, dest1, _ = filesystem
+    backup_name = f"test-{frozen_time_str}-yearly.tgz"
+    backup_path = Path(dest1 / backup_name)
+    shutil.copy2(fixture_archive_path, backup_path)
+
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "restore",
+            "--name",
+            "test",
+            "--storage",
+            str(dest1),
+            "--destination",
+            str(restore_path),
+        ],
+        deps=[initialize_ezbak],
+    )
+    output = clean_stderr()
+    debug(output)
+    # debug(restore_path)
+
+    assert "INFO     | Restored backup to …/restore" in output
+    assert Path(restore_path / "src" / "baz.txt").exists()

@@ -497,7 +497,7 @@ class BackupManager:
 
         if clean_before_restore or settings.clean_before_restore:
             clean_directory(dest)
-            logger.info(f"Cleaned all files: {dest.name}")
+            logger.info("Cleaned all files in backup destination before restore")
 
         most_recent_backup = self.get_latest_backup()
         if not most_recent_backup:

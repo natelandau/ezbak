@@ -245,7 +245,7 @@ class SettingsManager:
                     error="COMPRESSION_LEVEL must be one of: {choices}",
                 ),
             ),
-            label_time_units=env.bool("LABEL_TIME_UNITS", None),
+            label_time_units=env.bool("LABEL_TIME_UNITS", default=True),
             rename_files=env.bool("RENAME_FILES", default=False),
             max_backups=env.int("MAX_BACKUPS", None),
             retention_yearly=env.int("RETENTION_YEARLY", None),

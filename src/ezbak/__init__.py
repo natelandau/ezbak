@@ -4,7 +4,6 @@ from pathlib import Path
 
 from nclutils import logger
 
-from ezbak.constants import DEFAULT_LABEL_TIME_UNITS
 from ezbak.controllers import BackupManager
 from ezbak.models import settings
 
@@ -30,7 +29,7 @@ def ezbak(  # noqa: PLR0913
     include_regex: str | None = None,
     chown_user: int | None = None,
     chown_group: int | None = None,
-    label_time_units: bool = DEFAULT_LABEL_TIME_UNITS,
+    label_time_units: bool | None = None,
 ) -> BackupManager:
     """Execute automated backups with configurable retention policies and compression.
 

@@ -20,7 +20,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_create_backup(filesystem, debug, clean_stderr):
+def test_entrypoint_create_backup(filesystem, debug, clean_stderr):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -31,6 +31,7 @@ def test_create_backup(filesystem, debug, clean_stderr):
             "action": "backup",
             "source_paths": [src_dir],
             "storage_paths": [dest1, dest2],
+            # "log_level": "TRACE",
         }
     )
 
@@ -47,7 +48,7 @@ def test_create_backup(filesystem, debug, clean_stderr):
 
 
 @time_machine.travel(frozen_time, tick=True)
-def test_create_backup_with_cron(mocker, monkeypatch, filesystem, debug, clean_stderr):
+def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, debug, clean_stderr):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -79,7 +80,7 @@ def test_create_backup_with_cron(mocker, monkeypatch, filesystem, debug, clean_s
     )
 
 
-def test_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_entrypoint_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     """Verify that a backup is restored correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, _ = filesystem

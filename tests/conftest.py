@@ -49,6 +49,10 @@ def reset_settings() -> None:
     for key in settings.__dict__:
         if key == "compression_level":
             setattr(settings, key, DEFAULT_COMPRESSION_LEVEL)
+        elif key == "label_time_units":
+            setattr(settings, key, True)
+        elif key == "rename_files":
+            setattr(settings, key, False)
         elif key == "log_level":
             setattr(settings, key, "INFO")
         else:

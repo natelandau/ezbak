@@ -8,35 +8,37 @@ from typing import Annotated
 import cappa
 from nclutils import pp
 
-from ezbak import ezbak
 from ezbak.constants import CLILogLevel
-from ezbak.controllers import BackupManager  # noqa: TC001
+from ezbak.models import settings
 
 
 def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
     """Initialize the EZBak CLI."""
-    backup_manager = ezbak(
-        name=ezbak_cli.name,
-        source_paths=getattr(ezbak_cli.command, "sources", [Path.cwd()]),
-        storage_paths=getattr(ezbak_cli.command, "destinations", [Path.cwd()]),
-        include_regex=getattr(ezbak_cli.command, "include_regex", None),
-        exclude_regex=getattr(ezbak_cli.command, "exclude_regex", None),
-        compression_level=getattr(ezbak_cli.command, "compression_level", None),
-        label_time_units=not getattr(ezbak_cli.command, "no_label", None),
-        max_backups=getattr(ezbak_cli.command, "max_backups", None),
-        log_level=ezbak_cli.verbosity.name or None,
-        log_file=str(ezbak_cli.log_file) if ezbak_cli.log_file else None,
-        log_prefix=ezbak_cli.log_prefix,
-        retention_yearly=getattr(ezbak_cli.command, "yearly", None),
-        retention_monthly=getattr(ezbak_cli.command, "monthly", None),
-        retention_weekly=getattr(ezbak_cli.command, "weekly", None),
-        retention_daily=getattr(ezbak_cli.command, "daily", None),
-        retention_hourly=getattr(ezbak_cli.command, "hourly", None),
-        retention_minutely=getattr(ezbak_cli.command, "minutely", None),
-        chown_user=getattr(ezbak_cli.command, "uid", None),
-        chown_group=getattr(ezbak_cli.command, "gid", None),
+    settings.update(
+        {
+            "name": ezbak_cli.name,
+            "source_paths": getattr(ezbak_cli.command, "sources", [Path.cwd()]),
+            "storage_paths": ezbak_cli.storage_paths,
+            "include_regex": getattr(ezbak_cli.command, "include_regex", None),
+            "exclude_regex": getattr(ezbak_cli.command, "exclude_regex", None),
+            "compression_level": getattr(ezbak_cli.command, "compression_level", None),
+            "label_time_units": not getattr(ezbak_cli.command, "no_label", False),
+            "max_backups": getattr(ezbak_cli.command, "max_backups", None),
+            "log_level": ezbak_cli.verbosity.name or None,
+            "log_file": str(ezbak_cli.log_file) if ezbak_cli.log_file else None,
+            "log_prefix": ezbak_cli.log_prefix,
+            "retention_yearly": getattr(ezbak_cli.command, "yearly", None),
+            "retention_monthly": getattr(ezbak_cli.command, "monthly", None),
+            "retention_weekly": getattr(ezbak_cli.command, "weekly", None),
+            "retention_daily": getattr(ezbak_cli.command, "daily", None),
+            "retention_hourly": getattr(ezbak_cli.command, "hourly", None),
+            "retention_minutely": getattr(ezbak_cli.command, "minutely", None),
+            "clean_before_restore": getattr(ezbak_cli.command, "clean", False),
+            "restore_path": getattr(ezbak_cli.command, "destination", None),
+            "chown_user": getattr(ezbak_cli.command, "uid", None),
+            "chown_group": getattr(ezbak_cli.command, "gid", None),
+        }
     )
-    ezbak_cli.backup_manager = backup_manager
 
 
 @cappa.command(name="ezback")
@@ -49,10 +51,20 @@ class EZBakCLI:
         str,
         cappa.Arg(
             required=True,
-            help="The name of the backup.",
+            help="Short name for the backup. _Timestamps and labels are automatically inferred._",
             propagate=True,
             long="name",
             short="n",
+            group=(1, "Required"),
+        ),
+    ]
+    storage_paths: Annotated[
+        list[Path | str],
+        cappa.Arg(
+            long="storage",
+            help="The storage path(s) where backups are stored. Add multiple storage paths with multiple --storage flags.",
+            propagate=True,
+            group=(1, "Required"),
         ),
     ]
 
@@ -65,6 +77,7 @@ class EZBakCLI:
             choices=[],
             show_default=False,
             propagate=True,
+            group=(3, "Optional"),
         ),
     ] = CLILogLevel.INFO
 
@@ -75,6 +88,7 @@ class EZBakCLI:
             required=False,
             help="The log file.",
             propagate=True,
+            group=(3, "Optional"),
         ),
     ] = None
 
@@ -83,11 +97,9 @@ class EZBakCLI:
         cappa.Arg(
             long="log-prefix",
             help="Prefix for log messages.",
+            propagate=True,
+            group=(3, "Optional"),
         ),
-    ] = None
-    backup_manager: Annotated[
-        BackupManager,
-        cappa.Arg(long="backup-manager", hidden=True, propagate=True),
     ] = None
 
 
@@ -98,20 +110,10 @@ class CreateCommand:
     sources: Annotated[
         list[Path | str],
         cappa.Arg(
-            long="sources",
-            short="s",
+            long="source",
             required=True,
-            help="The sources to backup.",
-        ),
-    ]
-
-    destinations: Annotated[
-        list[Path | str],
-        cappa.Arg(
-            long="destinations",
-            short="d",
-            required=True,
-            help="The storage paths to backup to.",
+            help="Source path(s) to backup. Add multiple sources with multiple --source flags.",
+            group=(1, "Required"),
         ),
     ]
 
@@ -121,6 +123,7 @@ class CreateCommand:
             long="include-regex",
             short="i",
             help="The regex to include in the backup.",
+            group=(3, "Optional"),
         ),
     ] = None
 
@@ -130,6 +133,7 @@ class CreateCommand:
             long="exclude-regex",
             short="e",
             help="The regex to exclude from the backup.",
+            group=(3, "Optional"),
         ),
     ] = None
 
@@ -140,6 +144,7 @@ class CreateCommand:
             short="c",
             help="The compression level.",
             choices=range(1, 10),
+            group=(3, "Optional"),
         ),
     ] = None
 
@@ -148,11 +153,13 @@ class CreateCommand:
         cappa.Arg(
             long=["no-label"],
             help="Do not include time labels in the backup filename. (e.g. daily, weekly, etc.)",
+            group=(3, "Optional"),
+            show_default=False,
         ),
     ] = False
 
 
-@cappa.command(name="restore")
+@cappa.command(name="restore", invoke="ezbak.cli_commands.restore.main")
 class RestoreCommand:
     """Restore a backup."""
 
@@ -163,15 +170,26 @@ class RestoreCommand:
             short="d",
             required=True,
             help="The directory to restore to.",
+            group=(1, "Required"),
         ),
     ]
+
+    clean: Annotated[
+        bool,
+        cappa.Arg(
+            long="clean",
+            help="Clean the destination directory before restoring.",
+            group=(3, "Optional"),
+        ),
+    ] = False
 
     uid: Annotated[
         int,
         cappa.Arg(
             long="uid",
             short="u",
-            help="The UID to restore to.",
+            help="Post restore chown user.",
+            group=(3, "Optional"),
         ),
     ] = None
 
@@ -180,7 +198,8 @@ class RestoreCommand:
         cappa.Arg(
             long="gid",
             short="g",
-            help="The GID to restore to.",
+            help="Post restore chown group.",
+            group=(3, "Optional"),
         ),
     ] = None
 
@@ -189,22 +208,13 @@ class RestoreCommand:
 class PruneCommand:
     """Prune backups."""
 
-    destinations: Annotated[
-        list[Path | str],
-        cappa.Arg(
-            long="destinations",
-            short="d",
-            required=True,
-            help="The destinations to prune backups from.",
-        ),
-    ]
-
     max_backups: Annotated[
         int,
         cappa.Arg(
             long="max-backups",
             short="x",
             help="The maximum number of backups to prune.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -214,6 +224,7 @@ class PruneCommand:
             long="yearly",
             short="Y",
             help="The number of yearly backups to keep.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -223,6 +234,7 @@ class PruneCommand:
             long="monthly",
             short="M",
             help="The number of monthly backups to keep.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -232,6 +244,7 @@ class PruneCommand:
             long="weekly",
             short="W",
             help="The number of weekly backups to keep.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -241,6 +254,7 @@ class PruneCommand:
             long="daily",
             short="D",
             help="The number of daily backups to keep.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -250,6 +264,7 @@ class PruneCommand:
             long="hourly",
             short="H",
             help="The number of hourly backups to keep.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -259,6 +274,7 @@ class PruneCommand:
             long="minutely",
             short="S",
             help="The number of minutely backups to keep.",
+            group=(2, "Retention"),
         ),
     ] = None
 
@@ -266,16 +282,6 @@ class PruneCommand:
 @cappa.command(name="list", invoke="ezbak.cli_commands.list.main")
 class ListCommand:
     """List backups."""
-
-    destinations: Annotated[
-        list[Path | str],
-        cappa.Arg(
-            long="locations",
-            short="l",
-            required=True,
-            help="The locations to list backups from.",
-        ),
-    ]
 
 
 def main() -> None:  # pragma: no cover

@@ -6,17 +6,19 @@ A simple backup management tool that can be used both as a command-line interfac
 
 ## Features
 
--   Create compressed backups of files and directories in tgz format
--   Support for multiple backup destinations
--   Configurable compression levels
+-   Create compressed backups of files and directories in tgz (tar & gzip) format
+-   Support for multiple backup storage locations
 -   Intelligent retention policies (time-based and count-based)
 -   File filtering with regex patterns
 -   Time-based backup labeling (yearly, monthly, weekly, daily, hourly, minutely)
--   Automatic backup pruning based on retention policies
 -   Restore functionality
 -   Run as a python package, cli script, or docker container
 
 ## Installation
+
+ezbak can be used as a python package, cli script, or docker container.
+
+### Python Package
 
 ```bash
 # with uv
@@ -24,6 +26,16 @@ uv add ezbak
 
 # with pip
 pip install ezbak
+```
+
+### CLI Script
+
+```bash
+# With uv
+uv tool install ezbak
+
+# With pip
+python -m pip install --user ezbak
 ```
 
 ## Usage
@@ -62,88 +74,79 @@ deleted_files = backup_manager.prune_backups()
 backup_manager.restore_backup(destination=Path("/path/to/restore"), clean_before_restore=True)
 ```
 
-#### Configuration Options
+### CLI Script
 
--   `name (str)`: Backup name
--   `source_paths (list[Path])`: List of paths containing the content to backup
--   `storage_paths (list[Path])`: List of paths where backups will be stored
--   `compression_level (int, optional)`: Compression level (1-9). Defaults to `9`.
--   `max_backups (int, optional)`: Maximum number of backups to keep. Defaults to `None`.
--   `retention_yearly (int, optional)`: Number of yearly backups to keep. Defaults to `None`.
--   `retention_monthly (int, optional)`: Number of monthly backups to keep. Defaults to `None`.
--   `retention_weekly (int, optional)`: Number of weekly backups to keep. Defaults to `None`.
--   `retention_daily (int, optional)`: Number of daily backups to keep. Defaults to `None`.
--   `retention_hourly (int, optional)`: Number of hourly backups to keep. Defaults to `None`.
--   `retention_minutely (int, optional)`: Number of minutely backups to keep. Defaults to `None`.
--   `timezone (str, optional)`: Timezone for backup timestamps. Defaults to system timezone.
--   `log_level (str, optional)`: Logging level. Defaults to `INFO`.
--   `log_file (Path | str, optional)`: Path to log file. Defaults to `None`.
--   `exclude_regex (str, optional)`: Regex pattern to exclude files. Defaults to `None`.
--   `include_regex (str, optional)`: Regex pattern to include files. Defaults to `None`.
--   `label_time_units (bool, optional)`: Whether to label time units in filenames. Defaults to `True`.
--   `chown_user (int, optional)`: User ID to change the ownership of restored files to. Defaults to `None`.
--   `chown_group (int, optional)`: Group ID to change the ownership of restored files to. Defaults to `None`.
+```bash
+# help
+ezbak [subcommand] --help
 
-#### Backup Naming
+# Create a backup
+ezbak create --name my-backup --source /path/to/source --storage /path/to/destination
 
--   Backup files are named in the format: `{name}-{timestamp}-{period}.{extension}`
--   When `label_time_units` is False, the period is omitted
--   If a backup with the same name exists, a UUID is appended to prevent conflicts
+# List backups
+ezbak list --name my-backup --storage /path/to/backups
+
+# Prune backups
+ezbak prune --name my-backup --storage /path/to/backups --max-backups 10
+
+# Restore a backup
+ezbak restore --name my-backup --storage /path/to/backups --destination /path/to/restore
+```
+
+### Docker Container
+
+```bash
+docker run -it ghcr.io/natelandau/ezbak:latest \
+    -e EZBAK_ACTION=backup \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_SOURCE_PATHS=/path/to/source \
+    -e EZBAK_STORAGE_PATHS=/path/to/destination
+    # ...
+```
+
+## Configuration
+
+ezbak takes a number of configuration options.
+
+### Backup Names
+
+The name is used to identify the backup in the logs and in the backup filenames. A timestamp and label are automatically inferred and do not need to be provided.
+
+The name is used by ezbak to identify previously created backups, allowing multiple backups to be stored in the same storage location.
+
+-   Backup files are named in the format: `{name}-{timestamp}-{period_label}.tgz`
+-   When `label_time_units` is False, the period_label is omitted.
+-   If a backup with the same name exists, a UUID is appended to prevent conflicts.
 -   The timestamp format is ISO 8601: `YYYYMMDDTHHMMSS`
 
-#### Retention Policies
+If desired, you can rename the backup files using the `rename_files` option. This will ensure the naming is consistent across backups.
 
-If neither `max_backups` or any of the time-based retention policies are provided, all backups are kept. Keep in mind that `max_backups` and the time-based retention policies are mutually exclusive, and if both are provided, `max_backups` will be used.
+### Retention Policies
 
-For example, the following policy will keep the most recent 2 yearly backups, 12 monthly backups, 4 weekly backups, 7 daily backups, 24 hourly backups, and 10 minutely backups:
+By default, all backups are kept. To prune backups you can use either the `max_backups` option or specify time-based retention policies.
 
-### Command Line Interface
+Note that `max_backups` and the time-based retention policies are mutually exclusive, and if both are provided, only `max_backups` will be used.
 
-For convenience, ezbak also provides a command-line interface with several subcommands:
+#### Max Backups
 
-#### Create a Backup
+Retains the most recent specified number of backups
 
-```bash
-ezbak create --name my-backup --sources /path/to/source --destinations /path/to/destination
-```
+#### Time-Based Retention Policies
 
-Additional options:
+Time based retention polices allow keeping a specific number of backups for each time unit. The time units are:
 
--   `--include-regex`: Include files matching the regex pattern
--   `--exclude-regex`: Exclude files matching the regex pattern
--   `--compression-level`: Set compression level (1-9)
--   `--no-label`: Disable time unit labeling in backup filenames
+-   `yearly`
+-   `monthly`
+-   `weekly`
+-   `daily`
+-   `hourly`
+-   `minutely`
 
-#### List Backups
+If any time-based policy is set, all non-set policies default to keep one backup.
 
-```bash
-ezbak list --locations /path/to/backups
-```
+### Including and Excluding Files
 
-#### Prune Backups
-
-```bash
-ezbak prune --destinations /path/to/backups --max-backups 10
-```
-
-Time-based retention options:
-
--   `--yearly`: Number of yearly backups to keep
--   `--monthly`: Number of monthly backups to keep
--   `--weekly`: Number of weekly backups to keep
--   `--daily`: Number of daily backups to keep
--   `--hourly`: Number of hourly backups to keep
--   `--minutely`: Number of minutely backups to keep
-
-#### Restore Backup
-
-```bash
-ezbak restore --destination /path/to/restore
-```
-
-#### Excluded Files
-
-Importantly, some file and directory names are always excluded from backups. These are:
+Any files or directories specified as source paths are included in the backup. With the exception of this global exclude list:
 
 -   `.DS_Store`
 -   `@eaDir`
@@ -152,35 +155,45 @@ Importantly, some file and directory names are always excluded from backups. The
 -   `Thumbs.db`
 -   `IconCache.db`
 
-### Environment Variables
+#### Include by Regex
 
-ezbak can be configured using environment variables with the `EZBAK_` prefix:
+When set, only files matching the regex pattern will be included in the backup.
 
--   `EZBAK_ACTION` (str): The action to perform. One of `backup` or `restore`
--   `EZBAK_NAME` (str): The name of the backup
--   `EZBAK_SOURCE_PATHS` (str): The paths to backup (Comma-separated list of paths)
--   `EZBAK_STORAGE_PATHS` (str): The paths to store the backups (Comma-separated list of paths)
--   `EZBAK_INCLUDE_REGEX` (str): The regex pattern to include files
--   `EZBAK_EXCLUDE_REGEX` (str): The regex pattern to exclude files
--   `EZBAK_COMPRESSION_LEVEL` (int): The compression level. One of `1` to `9`
--   `EZBAK_LABEL_TIME_UNITS` (bool): Whether to label time units in filenames
--   `EZBAK_RENAME_FILES` (bool): Whether to rename files
--   `EZBAK_MAX_BACKUPS` (int): The maximum number of backups to keep
--   `EZBAK_RETENTION_YEARLY` (int): The number of yearly backups to keep
--   `EZBAK_RETENTION_MONTHLY` (int): The number of monthly backups to keep
--   `EZBAK_RETENTION_WEEKLY` (int): The number of weekly backups to keep
--   `EZBAK_RETENTION_DAILY` (int): The number of daily backups to keep
--   `EZBAK_RETENTION_HOURLY` (int): The number of hourly backups to keep
--   `EZBAK_RETENTION_MINUTELY` (int): The number of minutely backups to keep
--   `EZBAK_CRON` (str): The cron expression to schedule the backup. Example: `*/1 * * * *`
--   `EZBAK_TZ` (str): The timezone to use for the backup
--   `EZBAK_LOG_LEVEL` (str): The logging level. One of `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`
--   `EZBAK_LOG_FILE` (str): The path to the log file
--   `EZBAK_LOG_PREFIX` (str): Optional prefix for log messages
--   `EZBAK_RESTORE_PATH` (str): The path to restore the backup to
--   `EZBAK_CLEAN_BEFORE_RESTORE` (bool): Whether to clean the restore path before restoring
--   `EZBAK_CHOWN_USER` (int): The user ID to change the ownership of restored files to
--   `EZBAK_CHOWN_GROUP` (int): The group ID to change the ownership of restored files to
+#### Exclude by Regex
+
+When set, files matching the regex pattern will be excluded from the backup.
+
+## Configuration Options
+
+The following options can be set via the CLI, Python API, or environment variables.
+
+| Description | CLI | Python | Environment Variable |
+| --- | --- | --- | --- |
+| Backup name | `--name` | `name` | `EZBAK_NAME` |
+| List of paths containing the content to backup | `--source` | `source_paths` | `EZBAK_SOURCE_PATHS` |
+| List of paths where backups will be stored | `--storage` | `storage_paths` | `EZBAK_STORAGE_PATHS` |
+| Regex pattern to exclude files. Defaults to `None`. | `--exclude-regex` | `exclude_regex` | `EZBAK_EXCLUDE_REGEX` |
+| Regex pattern to include files. Defaults to `None`. | `--include-regex` | `include_regex` | `EZBAK_INCLUDE_REGEX` |
+| Whether to label time units in filenames. Defaults to `True`. | `--no-label` | `label_time_units` | `EZBAK_LABEL_TIME_UNITS` |
+| Whether to rename files. Defaults to `False`. | `--rename-files` | `rename_files` | `EZBAK_RENAME_FILES` |
+| Compression level (1-9). Defaults to `9`. | `--compression-level` | `compression_level` | `EZBAK_COMPRESSION_LEVEL` |
+| Maximum number of backups to keep. Defaults to `None`. | `--max-backups` | `max_backups` | `EZBAK_MAX_BACKUPS` |
+| Number of yearly backups to keep. Defaults to `None`. | `--yearly` | `retention_yearly` | `EZBAK_RETENTION_YEARLY` |
+| Number of monthly backups to keep. Defaults to `None`. | `--monthly` | `retention_monthly` | `EZBAK_RETENTION_MONTHLY` |
+| Number of weekly backups to keep. Defaults to `None`. | `--weekly` | `retention_weekly` | `EZBAK_RETENTION_WEEKLY` |
+| Number of daily backups to keep. Defaults to `None`. | `--daily` | `retention_daily` | `EZBAK_RETENTION_DAILY` |
+| Number of hourly backups to keep. Defaults to `None`. | `--hourly` | `retention_hourly` | `EZBAK_RETENTION_HOURLY` |
+| Number of minutely backups to keep. Defaults to `None`. | `--minutely` | `retention_minutely` | `EZBAK_RETENTION_MINUTELY` |
+| Logging level. Defaults to `INFO`. | `--log-level` | `log_level` | `EZBAK_LOG_LEVEL` |
+| Path to log file. Defaults to `None`. | `--log-file` | `log_file` | `EZBAK_LOG_FILE` |
+| Optional prefix for log messages. Defaults to `None`. | `--log-prefix` | `log_prefix` | `EZBAK_LOG_PREFIX` |
+| Path to restore the backup to. Defaults to `None`. | `--restore-path` | `restore_path` | `EZBAK_RESTORE_PATH` |
+| Whether to clean the restore path before restoring. Defaults to `False`. | `--clean-before-restore` | `clean_before_restore` | `EZBAK_CLEAN_BEFORE_RESTORE` |
+| User ID to change the ownership of restored files to. Defaults to `None`. | `--uid` | `chown_user` | `EZBAK_CHOWN_USER` |
+| Group ID to change the ownership of restored files to. Defaults to `None`. | `--gid` | `chown_group` | `EZBAK_CHOWN_GROUP` |
+| Action to perform. One of `backup` or `restore`. Defaults to `None`. | N/A | N/A | `EZBAK_ACTION` |
+| Cron expression to schedule the backup. Example: `*/1 * * * *` | N/A | N/A | `EZBAK_CRON` |
+| Timezone for backup timestamps. Defaults to system timezone. | `tz` | N/A | `EZBAK_TZ` |
 
 ## Contributing
 
