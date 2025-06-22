@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from nclutils import logger
 
 from ezbak import ezbak
+from ezbak.constants import __version__
 from ezbak.models import settings
 
 
@@ -50,6 +51,16 @@ def do_restore() -> None:
     backup_manager.restore_backup()
 
 
+def log_debug_info() -> None:
+    """Log debug information about the configuration."""
+    logger.debug(f"ezbak v{__version__}")
+    for key, value in settings.model_dump().items():
+        if not key.startswith("_") and value is not None:
+            logger.debug(f"Config: {key}: {value}")
+    retention_policy = settings.retention_policy.get_full_policy()
+    logger.debug(f"Config: retention_policy: {retention_policy}")
+
+
 def main() -> None:
     """Initialize and run the ezbak backup system with configuration validation.
 
@@ -67,12 +78,7 @@ def main() -> None:
     except (ValueError, FileNotFoundError):
         sys.exit(1)
 
-    for key, value in settings.model_dump().items():
-        if not key.startswith("_") and value is not None:
-            logger.debug(f"Config: {key}: {value}")
-
-    retention_policy = settings.retention_policy.get_full_policy()
-    logger.debug(f"Config: retention_policy: {retention_policy}")
+    log_debug_info()
 
     if settings.cron:
         scheduler = BackgroundScheduler()

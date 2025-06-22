@@ -3,7 +3,7 @@
 import re
 from enum import Enum
 
-VERSION = "0.1.0"
+__version__ = "0.6.3"
 
 DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
 TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
