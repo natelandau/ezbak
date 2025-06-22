@@ -12,6 +12,8 @@ on:
             - "uv.lock"
         branches:
             - main
+        tags-ignore:
+            - "v*"
     pull_request:
         types:
             - opened
