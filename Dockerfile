@@ -27,5 +27,5 @@ RUN uv sync --no-dev
 # Reset the entrypoint
 ENTRYPOINT []
 
-# Run ezbak by default
-CMD ["uv", "run", "-m", "ezbak.entrypoint", "--no-dev", "--no-sync"]
+# Run ezbak
+CMD [".venv/bin/python", "-m", "ezbak.entrypoint"]
