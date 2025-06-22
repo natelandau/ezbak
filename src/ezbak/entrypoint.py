@@ -100,11 +100,13 @@ def main() -> None:
 
     elif settings.action == "backup":
         do_backup()
-        time.sleep(1)
+        if Run().running:
+            time.sleep(1)
         logger.info("Backup complete. Exiting.")
     elif settings.action == "restore":
         do_restore()
-        time.sleep(1)
+        if Run().running:
+            time.sleep(1)
         logger.info("Restore complete. Exiting.")
 
 
