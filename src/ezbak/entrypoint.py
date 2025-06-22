@@ -16,7 +16,7 @@ from ezbak.models import settings
 
 @dataclass
 class Run:
-    """Class to manage the running state of the application."""
+    """Class to manage the running state of the application. Used to prevent infinite loop in scheduler during tests where Run().running is mocked to False."""
 
     running: bool = True
 
