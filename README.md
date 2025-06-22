@@ -385,8 +385,8 @@ strip_source_paths=False,    # Strip source paths from directory sources to flat
 ```python
 restore_path=Path("/restore"),           # Where to restore files
 clean_before_restore=True,               # Clear destination first
-chown_user=1000,                         # Set file owner (UID)
-chown_group=1000,                        # Set file group (GID)
+chown_uid=1000,                          # Set file owner of all restored files
+chown_gid=1000,                          # Set file group of all restored files
 ```
 
 ### Logging

@@ -46,8 +46,8 @@ class Backup:
         if isinstance(directory, str):
             directory = Path(directory)
 
-        uid = int(settings.chown_user)
-        gid = int(settings.chown_group)
+        uid = int(settings.chown_uid)
+        gid = int(settings.chown_gid)
 
         for path in directory.rglob("*"):
             try:
@@ -92,7 +92,7 @@ class Backup:
             logger.error(f"Failed to restore backup: {e}")
             return False
 
-        if settings.chown_user and settings.chown_group:
+        if settings.chown_uid and settings.chown_gid:
             self._chown_all_files(destination)
 
         logger.info(f"Restored backup to {destination}")

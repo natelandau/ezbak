@@ -36,8 +36,8 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
             "retention_minutely": getattr(ezbak_cli.command, "minutely", None),
             "clean_before_restore": getattr(ezbak_cli.command, "clean", False),
             "restore_path": getattr(ezbak_cli.command, "destination", None),
-            "chown_user": getattr(ezbak_cli.command, "uid", None),
-            "chown_group": getattr(ezbak_cli.command, "gid", None),
+            "chown_uid": getattr(ezbak_cli.command, "uid", None),
+            "chown_gid": getattr(ezbak_cli.command, "gid", None),
         }
     )
 
