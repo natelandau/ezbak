@@ -28,4 +28,4 @@ RUN uv sync --no-dev
 ENTRYPOINT []
 
 # Run ezbak by default
-CMD ["uv", "run", "-m", "ezbak.entrypoint"]
+CMD ["uv", "run", "-m", "ezbak.entrypoint", "--no-dev", "--no-sync"]
