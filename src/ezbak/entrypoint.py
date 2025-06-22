@@ -46,11 +46,6 @@ def do_restore() -> None:
 
     Restores data from a previously created backup to recover from data loss or system failures. Requires RESTORE_DIR environment variable to be set.
     """
-    if not settings.restore_path:
-        msg = "RESTORE_DIR is not set"
-        logger.error(msg)
-        sys.exit(1)
-
     backup_manager = ezbak()
     backup_manager.restore_backup()
 
@@ -73,7 +68,7 @@ def main() -> None:
         sys.exit(1)
 
     for key, value in settings.model_dump().items():
-        if not key.startswith("_"):
+        if not key.startswith("_") and value is not None:
             logger.debug(f"Config: {key}: {value}")
 
     retention_policy = settings.retention_policy.get_full_policy()

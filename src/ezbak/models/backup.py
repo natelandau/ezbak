@@ -8,6 +8,8 @@ from pathlib import Path
 from nclutils import logger
 from whenever import SystemDateTime, ZonedDateTime
 
+from .settings import settings
+
 
 @dataclass
 class Backup:
@@ -27,34 +29,36 @@ class Backup:
     hour: str
     minute: str
     zoned_datetime: ZonedDateTime | SystemDateTime
-    chown_user: int | None
-    chown_group: int | None
 
-    def _chown_all_files(self, directory: Path | str) -> None:
+    @staticmethod
+    def _chown_all_files(directory: Path | str) -> None:
         """Recursively change ownership of all files in a directory to backup settings.
 
-        Updates file ownership for all files and subdirectories in the specified directory
-        to match the backup's configured user and group IDs. Used during restoration to
-        preserve original file ownership from the backup.
+        Updates file ownership for all files and subdirectories in the specified directory to match the backup's configured user and group IDs. Used during restoration to preserve original file ownership from the backup.
 
         Args:
             directory (Path | str): Directory path to recursively update file ownership.
         """
+        if os.getuid() != 0:
+            logger.warning("Not running as root, skip chown operations")
+            return
+
         if isinstance(directory, str):
             directory = Path(directory)
 
-        uid = int(self.chown_user)
-        gid = int(self.chown_group)
+        uid = int(settings.chown_user)
+        gid = int(settings.chown_group)
 
-        os.chown(directory.resolve(), uid, gid)
-
-        for file in directory.rglob("*"):
+        for path in directory.rglob("*"):
             try:
-                os.chown(file.resolve(), uid, gid)
-            except OSError as e:  # noqa: PERF203
-                logger.warning(f"Failed to chown {file}: {e}")
+                os.chown(path.resolve(), uid, gid)
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Failed to chown {path}: {e}")
+                break
 
-        logger.info(f"Changed ownership of all restored files in {directory} to {uid}:{gid}")
+            logger.trace(f"chown: {path.resolve()}")
+
+        logger.info(f"chown all restored files to '{uid}:{gid}'")
 
     def delete(self) -> Path:
         """Remove the backup archive file from the filesystem.
@@ -72,9 +76,7 @@ class Backup:
     def restore(self, destination: Path) -> bool:
         """Extract backup archive contents to the specified destination directory.
 
-        Extracts all files from the backup archive to the destination path while preserving
-        file structure. Optionally restores original file ownership if chown settings are
-        configured. Used for disaster recovery and backup verification.
+        Extracts all files from the backup archive to the destination path while preserving file structure. Optionally restores original file ownership if chown settings are configured. Used for disaster recovery and backup verification.
 
         Args:
             destination (Path): Directory path where backup contents will be extracted.
@@ -90,7 +92,7 @@ class Backup:
             logger.error(f"Failed to restore backup: {e}")
             return False
 
-        if self.chown_user and self.chown_group:
+        if settings.chown_user and settings.chown_group:
             self._chown_all_files(destination)
 
         logger.info(f"Restored backup to {destination}")

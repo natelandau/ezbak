@@ -377,6 +377,7 @@ exclude_regex=r"temp|cache", # Exclude temp and cache files
 compression_level=9,         # Compression level (1-9, default: 9)
 label_time_units=True,       # Include time labels in filenames (default: True)
 rename_files=False,          # Rename existing files (default: False)
+strip_source_paths=False,    # Strip source paths from directory sources to flatten the tarfile (e.g. /source/foo.txt -> foo.txt)
 ```
 
 ### Restore Options

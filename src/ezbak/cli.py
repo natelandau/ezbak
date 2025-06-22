@@ -19,6 +19,7 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
             "name": ezbak_cli.name,
             "source_paths": getattr(ezbak_cli.command, "sources", [Path.cwd()]),
             "storage_paths": ezbak_cli.storage_paths,
+            "strip_source_paths": getattr(ezbak_cli.command, "strip_source_paths", None),
             "include_regex": getattr(ezbak_cli.command, "include_regex", None),
             "exclude_regex": getattr(ezbak_cli.command, "exclude_regex", None),
             "compression_level": getattr(ezbak_cli.command, "compression_level", None),
@@ -136,6 +137,17 @@ class CreateCommand:
             group=(3, "Optional"),
         ),
     ] = None
+
+    strip_source_paths: Annotated[
+        bool,
+        cappa.Arg(
+            long="strip-source-paths",
+            short="s",
+            help="Strip source paths from directory sources. (e.g. /source/foo.txt -> foo.txt)",
+            group=(3, "Optional"),
+            show_default=False,
+        ),
+    ] = False
 
     compression_level: Annotated[
         int,
