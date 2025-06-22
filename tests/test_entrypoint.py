@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
 import time_machine
 
 from ezbak.constants import DEFAULT_DATE_FORMAT
@@ -17,6 +18,14 @@ UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
 frozen_time_str = frozen_time.strftime(DEFAULT_DATE_FORMAT)
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
+
+
+@pytest.fixture(autouse=True)
+def mock_run(mocker):
+    """Mock the Run class to prevent infinite loop in scheduler."""
+    # Mock the Run class to prevent infinite loop in scheduler
+    mock_run = mocker.patch("ezbak.entrypoint.Run")
+    mock_run.return_value.running = False
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -52,13 +61,6 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
-
-    # Mock the Run class to prevent infinite loop in scheduler
-    mock_run = mocker.patch("ezbak.entrypoint.Run")
-    mock_run.return_value.running = False
-
-    # mocker.patch("ezbak.entrypoint.time.sleep")
-    # monkeypatch.setattr("time.sleep", lambda x: None)
 
     settings.update(
         {
