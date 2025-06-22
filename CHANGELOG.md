@@ -1,3 +1,9 @@
+## v0.6.2 (2025-06-22)
+
+### Fix
+
+- **docker**: improve docker load speed
+
 ## v0.6.1 (2025-06-21)
 
 ### Fix
