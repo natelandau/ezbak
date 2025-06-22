@@ -1,3 +1,13 @@
+## v0.7.0 (2025-06-22)
+
+### Feat
+
+- add option to flatten source paths (#10)
+
+### Fix
+
+- **entrypoint**: add version number to debug logs (#11)
+
 ## v0.6.3 (2025-06-22)
 
 ### Fix
