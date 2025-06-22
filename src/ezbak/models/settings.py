@@ -29,6 +29,7 @@ class Settings:
     source_paths: list[Path] | None = None
     storage_paths: list[Path] | None = None
 
+    strip_source_paths: bool = False
     exclude_regex: str | None = None
     include_regex: str | None = None
     compression_level: int = DEFAULT_COMPRESSION_LEVEL
@@ -235,6 +236,7 @@ class SettingsManager:
             name=env.str("NAME", None),
             source_paths=env.list_paths("SOURCE_PATHS", None),
             storage_paths=env.list_paths("STORAGE_PATHS", None),
+            strip_source_paths=env.bool("STRIP_SOURCE_PATHS", default=False),
             exclude_regex=env.str("EXCLUDE_REGEX", None),
             include_regex=env.str("INCLUDE_REGEX", None),
             compression_level=env.int(

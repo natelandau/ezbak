@@ -21,6 +21,10 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     """Verify that a backups are created and restored correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
+
+    simlink_file = tmp_path / "simlink_file.txt"
+    simlink_file.touch()
+    (src_dir / "symlink").symlink_to(simlink_file)
     test_file = tmp_path / "test_file.txt"
     test_exclude_file = src_dir / ".DS_Store"
     test_file.touch()
@@ -52,6 +56,9 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     # When: Capturing stderr output
     output = clean_stderr()
     # debug(output)
+    # debug(src_dir)
+
+    assert "Skip backup of symlink" in output
 
     # Then: All expected backup files exist in both storage paths
     for filename in filenames:
@@ -90,7 +97,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
-        if file.name == test_exclude_file.name:
+        if file.name in {test_exclude_file.name, "symlink"}:
             assert not (restore_dir / src_dir.name / file.name).exists()
             continue
         assert (restore_dir / src_dir.name / file.name).exists()
@@ -196,6 +203,29 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
             assert not (restore_dir / src_dir.name / file.name).exists()
             i += 1
     assert i == len(list(src_dir.rglob("*")))
+
+
+def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
+    """Verify that the path is stripped from the backup."""
+    # Given: Source and destination directories from fixture
+    src_dir, dest1, _ = filesystem
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    # Given: A backup manager configured with test parameters
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        strip_source_paths=True,
+    )
+    backup_manager.create_backup()
+    backup_manager.restore_backup(restore_dir)
+    # output = clean_stderr()
+    # debug(output)
+
+    for file in src_dir.rglob("*"):
+        assert (restore_dir / file.name).exists()
 
 
 def test_rename_backups_with_labels(debug, clean_stderr, tmp_path):

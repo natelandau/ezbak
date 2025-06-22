@@ -38,6 +38,24 @@ def test_source_paths_not_found(filesystem):
         )
 
 
+def test_source_paths_symlink(tmp_path, clean_stderr, debug):
+    """Test EZBak errors."""
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "file.txt").touch()
+    (src_dir / "symlink").symlink_to(src_dir / "file.txt")
+
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir / "symlink"],
+        storage_paths=[dest_dir],
+    )
+    with pytest.raises(ValueError, match="Not a file or directory"):
+        backup_manager.create_backup()
+
+
 def test_storage_paths(filesystem):
     """Test EZBak errors."""
     src_dir, _, _ = filesystem

@@ -14,6 +14,7 @@ services:
             - EZBAK_STORAGE_PATHS=/backups
             - EZBAK_SOURCE_PATHS=/source/project1,/source/project2
             - EZBAK_RESTORE_PATH=/restore
+            - EZBAK_STRIP_SOURCE_PATHS=false
             - EZBAK_EXCLUDE_REGEX=
             - EZBAK_INCLUDE_REGEX=
             - EZBAK_COMPRESSION_LEVEL=6
@@ -31,7 +32,7 @@ services:
             - EZBAK_LOG_LEVEL=TRACE
             - EZBAK_LOG_FILE=/logs/ezbak.log
             - EZBAK_LOG_PREFIX=docker
-            - EZBAK_CLEAN_BEFORE_RESTORE=false
+            - EZBAK_CLEAN_BEFORE_RESTORE=true
             # - EZBAK_CHOWN_USER=
             # - EZBAK_CHOWN_GROUP=
         volumes:

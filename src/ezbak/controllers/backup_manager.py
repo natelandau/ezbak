@@ -46,13 +46,10 @@ class BackupManager:
         self.name = settings.name
         self.source_paths = settings.source_paths
         self.tz = settings.tz
-        self.compression_level = settings.compression_level
         self.retention_policy = settings.retention_policy
         self.label_time_units = settings.label_time_units
         self.exclude_regex = settings.exclude_regex
         self.include_regex = settings.include_regex
-        self.chown_user = settings.chown_user
-        self.chown_group = settings.chown_group
 
     def _include_file_in_backup(self, path: Path) -> bool:
         """Determine whether a file should be included in the backup based on configured regex filters.
@@ -65,6 +62,10 @@ class BackupManager:
         Returns:
             bool: True if the file should be included in the backup, False if it should be excluded.
         """
+        if path.is_symlink():
+            logger.warning(f"Skip backup of symlink: {path}")
+            return False
+
         if path.name in ALWAYS_EXCLUDE_FILENAMES:
             logger.trace(f"Excluded file: {path.name}")
             return False
@@ -231,8 +232,6 @@ class BackupManager:
             path=path,
             timestamp=timestamp,
             zoned_datetime=dt,
-            chown_user=self.chown_user,
-            chown_group=self.chown_group,
         )
 
     def _rename_no_labels(self, path: Path) -> list[FileForRename]:
@@ -335,7 +334,7 @@ class BackupManager:
 
         @dataclass
         class FileToAdd:
-            path: Path
+            full_path: Path
             relative_path: Path | str
 
         files_to_add = []
@@ -343,14 +342,19 @@ class BackupManager:
             if source.is_dir():
                 files_to_add.extend(
                     [
-                        FileToAdd(path=f, relative_path=f"{source.name}/{f.relative_to(source)}")
+                        FileToAdd(
+                            full_path=f,
+                            relative_path=f"{f.relative_to(source)}"
+                            if settings.strip_source_paths
+                            else f"{source.name}/{f.relative_to(source)}",
+                        )
                         for f in source.rglob("*")
                         if f.is_file() and self._include_file_in_backup(f)
                     ]
                 )
-            elif source.is_file():
+            elif source.is_file() and not source.is_symlink():
                 if self._include_file_in_backup(source):
-                    files_to_add.extend([FileToAdd(path=source, relative_path=source.name)])
+                    files_to_add.extend([FileToAdd(full_path=source, relative_path=source.name)])
             else:
                 msg = f"Not a file or directory: {source}"
                 logger.error(msg)
@@ -361,11 +365,11 @@ class BackupManager:
             logger.trace(f"Temp tarfile: {temp_tarfile}")
             try:
                 with tarfile.open(
-                    temp_tarfile, "w:gz", compresslevel=self.compression_level
+                    temp_tarfile, "w:gz", compresslevel=settings.compression_level
                 ) as tar:
                     for file in files_to_add:
                         logger.trace(f"Add to tar: {file.relative_path}")
-                        tar.add(file.path, arcname=file.relative_path)
+                        tar.add(file.full_path, arcname=file.relative_path)
             except tarfile.TarError as e:
                 logger.error(f"Failed to create backup: {e}")
                 return None

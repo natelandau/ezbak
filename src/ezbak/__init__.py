@@ -14,7 +14,7 @@ def ezbak(  # noqa: PLR0913
     source_paths: list[Path | str] | None = None,
     storage_paths: list[Path | str] | None = None,
     tz: str | None = None,
-    log_level: str = "info",
+    log_level: str | None = None,
     log_file: str | Path | None = None,
     log_prefix: str | None = None,
     compression_level: int | None = None,
@@ -25,6 +25,7 @@ def ezbak(  # noqa: PLR0913
     retention_daily: int | None = None,
     retention_hourly: int | None = None,
     retention_minutely: int | None = None,
+    strip_source_paths: bool | None = None,
     exclude_regex: str | None = None,
     include_regex: str | None = None,
     chown_user: int | None = None,
@@ -39,6 +40,7 @@ def ezbak(  # noqa: PLR0913
         name (str | None, optional): Unique identifier for the backup operation. Used for logging and backup labeling. Defaults to None.
         source_paths (list[Path | str] | None, optional): Source paths to backup. Can be files or directories. Defaults to None.
         storage_paths (list[Path | str] | None, optional): Destination paths where backups will be stored. Defaults to None.
+        strip_source_paths (bool | None, optional): Strip source paths from directory sources. Defaults to None.
         tz (str | None, optional): Timezone for timestamp formatting in backup names. Defaults to None.
         log_level (str, optional): Logging verbosity level. Defaults to "info".
         log_file (str | Path | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
@@ -65,6 +67,7 @@ def ezbak(  # noqa: PLR0913
             "name": name or None,
             "source_paths": source_paths or None,
             "storage_paths": storage_paths or None,
+            "strip_source_paths": strip_source_paths or None,
             "tz": tz or None,
             "log_level": log_level or None,
             "log_file": log_file or None,
