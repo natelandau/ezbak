@@ -2,6 +2,7 @@
 
 import atexit
 import sys
+import time
 from dataclasses import dataclass
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -91,8 +92,11 @@ def main() -> None:
 
         for job in scheduler.get_jobs():
             logger.info(job)
-        while Run().running:  # Run the scheduler in a loop
-            ...
+        while True:
+            if not Run().running:
+                break
+            time.sleep(1)
+
     elif settings.action == "backup":
         do_backup()
     elif settings.action == "restore":

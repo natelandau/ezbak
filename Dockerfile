@@ -22,7 +22,7 @@ ADD . /app
 
 # Sync the project into a new environment, asserting the lockfile is up to date
 WORKDIR /app
-RUN uv sync
+RUN uv sync --no-dev
 
 # Reset the entrypoint
 ENTRYPOINT []
