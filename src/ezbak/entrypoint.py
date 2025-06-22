@@ -3,7 +3,6 @@
 import atexit
 import sys
 import time
-from dataclasses import dataclass
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -14,13 +13,6 @@ from ezbak.constants import __version__
 from ezbak.models import settings
 
 
-@dataclass
-class Run:
-    """Class to manage the running state of the application. Used to prevent infinite loop in scheduler during tests where Run().running is mocked to False."""
-
-    running: bool = True
-
-
 def cleanup_tmp_dir() -> None:
     """Clean up the temporary directory to prevent disk space accumulation.
 
@@ -28,9 +20,10 @@ def cleanup_tmp_dir() -> None:
     """
     if settings.tmp_dir:
         settings.tmp_dir.cleanup()
+        logger.debug("Temporary directory cleaned up")
 
 
-def do_backup() -> None:
+def do_backup(scheduler: BackgroundScheduler | None = None) -> None:
     """Create a backup of the service data directory and manage retention.
 
     Performs a complete backup operation including creating the backup, pruning old backups based on retention policy, and optionally renaming backup files for better organization.
@@ -41,14 +34,24 @@ def do_backup() -> None:
     if settings.rename_files:
         backup_manager.rename_backups()
 
+    if scheduler:  # pragma: no cover
+        job = scheduler.get_job(job_id="backup")
+        if job and job.next_run_time:
+            logger.info(f"Next scheduled run: {job.next_run_time}")
 
-def do_restore() -> None:
+
+def do_restore(scheduler: BackgroundScheduler | None = None) -> None:
     """Restore a backup of the service data directory from the specified path.
 
     Restores data from a previously created backup to recover from data loss or system failures. Requires RESTORE_DIR environment variable to be set.
     """
     backup_manager = ezbak()
     backup_manager.restore_backup()
+
+    if scheduler:  # pragma: no cover
+        job = scheduler.get_job(job_id="restore")
+        if job and job.next_run_time:
+            logger.info(f"Next scheduled run: {job.next_run_time}")
 
 
 def log_debug_info() -> None:
@@ -83,30 +86,34 @@ def main() -> None:
     if settings.cron:
         scheduler = BackgroundScheduler()
 
-        scheduler.add_job(
+        job = scheduler.add_job(
             func=do_backup if settings.action == "backup" else do_restore,
+            args=[scheduler],
             trigger=CronTrigger.from_crontab(settings.cron),
             jitter=600,
+            id=settings.action,
         )
+        logger.info(job)
         scheduler.start()
+
+        job = scheduler.get_job(job_id=settings.action)
+        if job and job.next_run_time:
+            logger.info(f"Next scheduled run: {job.next_run_time}")
+        else:
+            logger.info("No next scheduled run")
+
         logger.info("Scheduler started")
 
-        for job in scheduler.get_jobs():
-            logger.info(job)
-        while True:
-            if not Run().running:
-                break
+        while scheduler.running:
             time.sleep(1)
 
     elif settings.action == "backup":
         do_backup()
-        if Run().running:
-            time.sleep(1)
+        time.sleep(2)
         logger.info("Backup complete. Exiting.")
     elif settings.action == "restore":
         do_restore()
-        if Run().running:
-            time.sleep(1)
+        time.sleep(2)
         logger.info("Restore complete. Exiting.")
 
 
