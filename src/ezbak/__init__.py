@@ -28,8 +28,8 @@ def ezbak(  # noqa: PLR0913
     strip_source_paths: bool | None = None,
     exclude_regex: str | None = None,
     include_regex: str | None = None,
-    chown_user: int | None = None,
-    chown_group: int | None = None,
+    chown_uid: int | None = None,
+    chown_gid: int | None = None,
     label_time_units: bool | None = None,
 ) -> BackupManager:
     """Execute automated backups with configurable retention policies and compression.
@@ -55,8 +55,8 @@ def ezbak(  # noqa: PLR0913
         retention_minutely (int | None, optional): Number of minutely backups to retain. Defaults to None.
         exclude_regex (str | None, optional): Regex pattern to exclude files from backup. Defaults to None.
         include_regex (str | None, optional): Regex pattern to include only matching files. Defaults to None.
-        chown_user (int | None, optional): User ID to set ownership of backup files. Defaults to None.
-        chown_group (int | None, optional): Group ID to set ownership of backup files. Defaults to None.
+        chown_uid (int | None, optional): User ID to set ownership of backup files. Defaults to None.
+        chown_gid (int | None, optional): Group ID to set ownership of backup files. Defaults to None.
         label_time_units (bool, optional): Include time units in backup filenames. Defaults to True.
 
     Returns:
@@ -83,8 +83,8 @@ def ezbak(  # noqa: PLR0913
             "exclude_regex": exclude_regex or None,
             "include_regex": include_regex or None,
             "label_time_units": label_time_units if label_time_units is not None else None,
-            "chown_user": chown_user or None,
-            "chown_group": chown_group or None,
+            "chown_uid": chown_uid or None,
+            "chown_gid": chown_gid or None,
         }
     )
 

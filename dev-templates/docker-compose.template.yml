@@ -33,8 +33,8 @@ services:
             - EZBAK_LOG_FILE=/logs/ezbak.log
             - EZBAK_LOG_PREFIX=docker
             - EZBAK_CLEAN_BEFORE_RESTORE=true
-            # - EZBAK_CHOWN_USER=
-            # - EZBAK_CHOWN_GROUP=
+            # - EZBAK_CHOWN_UID=
+            # - EZBAK_CHOWN_GID=
         volumes:
             - ./source:/source
             - ./backups:/backups

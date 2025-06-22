@@ -16,7 +16,7 @@ from ezbak.models import settings
 
 @dataclass
 class Run:
-    """Class to manage the running state of the application."""
+    """Class to manage the running state of the application. Used to prevent infinite loop in scheduler during tests where Run().running is mocked to False."""
 
     running: bool = True
 
@@ -100,8 +100,14 @@ def main() -> None:
 
     elif settings.action == "backup":
         do_backup()
+        if Run().running:
+            time.sleep(1)
+        logger.info("Backup complete. Exiting.")
     elif settings.action == "restore":
         do_restore()
+        if Run().running:
+            time.sleep(1)
+        logger.info("Restore complete. Exiting.")
 
 
 if __name__ == "__main__":
