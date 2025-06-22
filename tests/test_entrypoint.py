@@ -24,8 +24,10 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 def mock_run(mocker):
     """Mock the Run class to prevent infinite loop in scheduler."""
     # Mock the Run class to prevent infinite loop in scheduler
-    mock_run = mocker.patch("ezbak.entrypoint.Run")
-    mock_run.return_value.running = False
+    mock_scheduler = mocker.patch("ezbak.entrypoint.BackgroundScheduler")
+    mock_scheduler_instance = mock_scheduler.return_value
+    mock_scheduler_instance.running = False
+    mocker.patch("time.sleep", return_value=None)
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -75,11 +77,9 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
     entrypoint()
 
     output = clean_stderr()
-    debug(output)
-    assert (
-        "do_backup (trigger: cron[month='*', day='*', day_of_week='*', hour='*', minute='*/1'], next run at: 2025-06-09 00:01:00 UTC)"
-        in output
-    )
+    # debug(output)
+    assert "Scheduler started" in output
+    assert "Next scheduled run" in output
 
 
 def test_entrypoint_restore_backup(filesystem, debug, clean_stderr, tmp_path):

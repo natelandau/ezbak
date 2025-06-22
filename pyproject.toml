@@ -69,6 +69,7 @@
         'def __repr__',
         'except [\w\s\._]+ as .*:',
         'if TYPE_CHECKING:',
+        'pragma: no cover',
         'time\.sleep',
     ]
     fail_under = 20
