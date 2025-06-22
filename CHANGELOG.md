@@ -1,3 +1,9 @@
+## v0.6.3 (2025-06-22)
+
+### Fix
+
+- **docker**: run ezbak directly
+
 ## v0.6.2 (2025-06-22)
 
 ### Fix
