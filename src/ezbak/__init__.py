@@ -95,7 +95,7 @@ def ezbak(  # noqa: PLR0913
     )
 
     logger.configure(
-        log_level=settings.log_level,
+        log_level=settings.log_level.value,
         show_source_reference=False,
         log_file=str(settings.log_file) if settings.log_file else None,
         prefix=settings.log_prefix,

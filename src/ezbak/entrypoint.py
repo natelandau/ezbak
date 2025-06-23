@@ -70,7 +70,7 @@ def main() -> None:
     Sets up logging, validates configuration settings, and either runs a one-time backup/restore operation or starts a scheduled backup service based on cron configuration.
     """
     logger.configure(
-        log_level=settings.log_level,
+        log_level=settings.log_level.value,
         show_source_reference=False,
         log_file=str(settings.log_file) if settings.log_file else None,
         prefix=settings.log_prefix,
