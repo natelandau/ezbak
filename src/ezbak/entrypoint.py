@@ -18,8 +18,8 @@ def cleanup_tmp_dir() -> None:
 
     Removes the temporary directory created during backup operations to free up disk space and maintain system cleanliness.
     """
-    if settings.tmp_dir:
-        settings.tmp_dir.cleanup()
+    if settings._tmp_dir:  # noqa: SLF001
+        settings._tmp_dir.cleanup()  # noqa: SLF001
         logger.debug("Temporary directory cleaned up")
 
 

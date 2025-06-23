@@ -55,7 +55,10 @@ class Settings:
     chown_uid: int | None = None
     chown_gid: int | None = None
 
-    tmp_dir: TemporaryDirectory | None = None
+    mongo_uri: str | None = None
+    mongo_db_name: str | None = None
+
+    _tmp_dir: TemporaryDirectory | None = None
 
     _retention_policy: RetentionPolicyManager | None = None
 
@@ -106,6 +109,17 @@ class Settings:
             )
 
         return self._retention_policy
+
+    @property
+    def tmp_dir(self) -> TemporaryDirectory:
+        """Get the temporary directory.
+
+        Returns:
+            TemporaryDirectory: The temporary directory.
+        """
+        if self._tmp_dir is None:
+            self._tmp_dir = TemporaryDirectory()
+        return self._tmp_dir
 
     def model_dump(self) -> dict[str, int | str | bool | list[Path | str] | None]:
         """Serialize settings to a dictionary representation.
@@ -236,6 +250,7 @@ class SettingsManager:
             name=env.str("NAME", None),
             source_paths=env.list_paths("SOURCE_PATHS", None),
             storage_paths=env.list_paths("STORAGE_PATHS", None),
+            # Backup settings
             strip_source_paths=env.bool("STRIP_SOURCE_PATHS", default=False),
             exclude_regex=env.str("EXCLUDE_REGEX", None),
             include_regex=env.str("INCLUDE_REGEX", None),
@@ -249,6 +264,7 @@ class SettingsManager:
             ),
             label_time_units=env.bool("LABEL_TIME_UNITS", default=True),
             rename_files=env.bool("RENAME_FILES", default=False),
+            # Retention settings
             max_backups=env.int("MAX_BACKUPS", None),
             retention_yearly=env.int("RETENTION_YEARLY", None),
             retention_monthly=env.int("RETENTION_MONTHLY", None),
@@ -256,8 +272,10 @@ class SettingsManager:
             retention_daily=env.int("RETENTION_DAILY", None),
             retention_hourly=env.int("RETENTION_HOURLY", None),
             retention_minutely=env.int("RETENTION_MINUTELY", None),
+            # Cron settings
             cron=env.str("CRON", default=None),
             tz=env.str("TZ", None),
+            # Logging settings
             log_level=env.str(
                 "LOG_LEVEL",
                 default="INFO",
@@ -268,10 +286,14 @@ class SettingsManager:
             ),
             log_file=env.str("LOG_FILE", None),
             log_prefix=env.str("LOG_PREFIX", None),
+            # Restore settings
             restore_path=env.str("RESTORE_PATH", None),
             clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
             chown_uid=env.int("CHOWN_UID", None),
             chown_gid=env.int("CHOWN_GID", None),
+            # MongoDB settings
+            mongo_uri=env.str("MONGO_URI", None),
+            mongo_db_name=env.str("MONGO_DB_NAME", None),
         )
 
         cls._instance = settings
