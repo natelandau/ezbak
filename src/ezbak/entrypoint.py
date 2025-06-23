@@ -11,16 +11,7 @@ from nclutils import logger
 from ezbak import ezbak
 from ezbak.constants import __version__
 from ezbak.models import settings
-
-
-def cleanup_tmp_dir() -> None:
-    """Clean up the temporary directory to prevent disk space accumulation.
-
-    Removes the temporary directory created during backup operations to free up disk space and maintain system cleanliness.
-    """
-    if settings._tmp_dir:  # noqa: SLF001
-        settings._tmp_dir.cleanup()  # noqa: SLF001
-        logger.debug("Temporary directory cleaned up")
+from ezbak.utils import cleanup_tmp_dir
 
 
 def do_backup(scheduler: BackgroundScheduler | None = None) -> None:

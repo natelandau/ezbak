@@ -1,11 +1,13 @@
 """EZBak package for automated backup operations with retention policies and compression."""
 
+import atexit
 from pathlib import Path
 
 from nclutils import logger
 
 from ezbak.controllers import BackupManager
 from ezbak.models import settings
+from ezbak.utils import cleanup_tmp_dir
 
 
 def ezbak(  # noqa: PLR0913
@@ -103,5 +105,6 @@ def ezbak(  # noqa: PLR0913
     logger.info(f"Run ezbak for '{settings.name}'")
 
     settings.validate()
+    atexit.register(cleanup_tmp_dir)
 
     return BackupManager()

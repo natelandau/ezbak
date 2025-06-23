@@ -202,11 +202,11 @@ class BackupManager:
             )
 
         return sorted(
-            [self._parse_backup_from_path(path=x) for x in found_backups],
+            [self._build_backup_object(path=x) for x in found_backups],
             key=lambda x: x.zoned_datetime,
         )
 
-    def _parse_backup_from_path(self, path: Path | None = None) -> Backup:
+    def _build_backup_object(self, path: Path | None = None) -> Backup:
         """Extract backup metadata from a backup file path to create a structured Backup object.
 
         Parse backup filenames to extract timestamp information and create Backup objects that enable time-based operations like sorting, grouping, and retention management. Use this to convert file paths into structured data for backup management operations.
@@ -518,5 +518,5 @@ class BackupManager:
             logger.error("No backup found to restore")
             return False
 
-        backup = self._parse_backup_from_path(path=most_recent_backup)
+        backup = self._build_backup_object(path=most_recent_backup)
         return backup.restore(destination=dest)
