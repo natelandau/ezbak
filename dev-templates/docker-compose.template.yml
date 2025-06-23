@@ -35,6 +35,8 @@ services:
             - EZBAK_CLEAN_BEFORE_RESTORE=true
             # - EZBAK_CHOWN_UID=
             # - EZBAK_CHOWN_GID=
+            - EZBAK_MONGO_URI=mongodb://localhost:27017
+            - EZBAK_MONGO_DB_NAME=ezbak
         volumes:
             - ./source:/source
             - ./backups:/backups

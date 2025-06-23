@@ -31,6 +31,8 @@ def ezbak(  # noqa: PLR0913
     chown_uid: int | None = None,
     chown_gid: int | None = None,
     label_time_units: bool | None = None,
+    mongo_uri: str | None = None,
+    mongo_db_name: str | None = None,
 ) -> BackupManager:
     """Execute automated backups with configurable retention policies and compression.
 
@@ -58,6 +60,8 @@ def ezbak(  # noqa: PLR0913
         chown_uid (int | None, optional): User ID to set ownership of backup files. Defaults to None.
         chown_gid (int | None, optional): Group ID to set ownership of backup files. Defaults to None.
         label_time_units (bool, optional): Include time units in backup filenames. Defaults to True.
+        mongo_uri (str | None, optional): MongoDB URI for backup history. Defaults to None.
+        mongo_db_name (str | None, optional): MongoDB database name for backup history. Defaults to None.
 
     Returns:
         BackupManager: Configured backup manager instance ready to execute backup operations.
@@ -85,6 +89,8 @@ def ezbak(  # noqa: PLR0913
             "label_time_units": label_time_units if label_time_units is not None else None,
             "chown_uid": chown_uid or None,
             "chown_gid": chown_gid or None,
+            "mongo_uri": mongo_uri or None,
+            "mongo_db_name": mongo_db_name or None,
         }
     )
 

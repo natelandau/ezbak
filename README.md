@@ -6,24 +6,18 @@ A simple, powerful backup management tool for Python developers and system admin
 
 Use ezbak as a Python package in your code, run it from the command line, or deploy it as a Docker container.
 
-**Core Functionality**
+**Features**
 
--   Create compressed backups (tgz format) of files and directories
--   Restore backups to any location
--   Support for multiple backup storage destinations
-
-**Smart Management**
-
+-   Create tar gzipped compressed backups (tgz format) of files and directories
+-   Supports MongoDB backups (via `mongodump`)
+-   File filtering with regex patterns
 -   Intelligent retention policies (time-based and count-based)
 -   Automatic cleanup of old backups
 -   Time-based backup labeling (yearly, monthly, weekly, daily, hourly, minutely)
-
-**Flexible Usage**
-
+-   Restore backups to any location
 -   Python package for integration into your projects
 -   Command-line interface for scripts and automation
 -   Docker container for containerized environments
--   File filtering with regex patterns
 
 ## Table of Contents
 
@@ -378,6 +372,14 @@ compression_level=9,         # Compression level (1-9, default: 9)
 label_time_units=True,       # Include time labels in filenames (default: True)
 rename_files=False,          # Rename existing files (default: False)
 strip_source_paths=False,    # Strip source paths from directory sources to flatten the tarfile (e.g. /source/foo.txt -> foo.txt)
+```
+
+### MongoDB Backup Options
+
+```python
+# Setting these will disable file backups and only backup the MongoDB database
+mongo_uri="mongodb://[username]:[password]@localhost:27017",  # MongoDB URI
+mongo_db_name="my-database",                                        # MongoDB database name
 ```
 
 ### Restore Options

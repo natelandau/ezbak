@@ -21,6 +21,8 @@ from ezbak.constants import (
 )
 from ezbak.models import Backup, settings
 
+from .mongodb import MongoManager
+
 
 @dataclass
 class FileForRename:
@@ -44,12 +46,20 @@ class BackupManager:
         """
         self.storage_paths = settings.storage_paths
         self.name = settings.name
-        self.source_paths = settings.source_paths
         self.tz = settings.tz
         self.retention_policy = settings.retention_policy
         self.label_time_units = settings.label_time_units
         self.exclude_regex = settings.exclude_regex
         self.include_regex = settings.include_regex
+
+        if settings.mongo_uri and settings.mongo_db_name:
+            logger.info("Backup MongoDB database")
+            mongo_manager = MongoManager()
+            mongo_backup_file = mongo_manager.make_tmp_backup()
+            settings.update({"source_paths": [mongo_backup_file]})
+            self.source_paths = [mongo_backup_file]
+        else:
+            self.source_paths = settings.source_paths
 
     def _include_file_in_backup(self, path: Path) -> bool:
         """Determine whether a file should be included in the backup based on configured regex filters.
