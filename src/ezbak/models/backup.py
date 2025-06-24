@@ -5,8 +5,7 @@ from pathlib import Path
 from nclutils import logger
 from whenever import PlainDateTime, TimeZoneNotFoundError
 
-from ezbak.constants import DEFAULT_DATE_FORMAT, TIMESTAMP_REGEX
-from ezbak.models.settings import StorageType
+from ezbak.constants import DEFAULT_DATE_FORMAT, TIMESTAMP_REGEX, StorageType
 
 from .settings import settings
 

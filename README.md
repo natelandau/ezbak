@@ -341,6 +341,8 @@ backup_manager = ezbak(
     name="my-backup",                    # Backup identifier
     source_paths=[Path("/path/to/src")], # What to backup
     storage_paths=[Path("/backups")],    # Where to store backups
+    storage_location="local",            # Optional: Where to store backups.
+                                         # One of "local", "aws", or "all" (default: "local")
 )
 ```
 
