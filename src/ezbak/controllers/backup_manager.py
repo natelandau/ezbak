@@ -39,9 +39,6 @@ class BackupManager:
         """Initialize a backup manager to automate backup creation, management, and cleanup operations.
 
         Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
-
-        Args:
-            settings (Settings): The settings for the backup manager.
         """
         self.aws_service = None
         self.mongo_manager = None
@@ -70,8 +67,10 @@ class BackupManager:
     def storage_locations(self) -> list[StorageLocation]:
         """Find all existing backups in available storage locations.
 
+        Scan configured storage locations to discover existing backup files and organize them by storage type and path. Use this to get an up-to-date inventory of all available backups for management operations like listing, pruning, or restoration.
+
         Returns:
-            list[StorageLocation]: A list of StorageLocation objects.
+            list[StorageLocation]: A list of StorageLocation objects containing discovered backups.
         """
         if not self.rebuild_storage_locations and self._storage_locations:
             return self._storage_locations
@@ -93,6 +92,8 @@ class BackupManager:
 
     def _create_tmp_backup_file(self) -> Path:
         """Create a temporary backup file in the temporary directory.
+
+        Compress all configured source files and directories into a single tar.gz archive in the temporary directory. Use this to prepare backup data before distributing it to storage locations.
 
         Returns:
             Path: The path to the temporary backup file.
@@ -148,7 +149,13 @@ class BackupManager:
         return temp_tarfile
 
     def _delete_backup(self, backup: Backup) -> None:
-        """Delete a backup file from the storage locations."""
+        """Delete a backup file from the storage locations.
+
+        Remove a specific backup file from its storage location, whether local filesystem or cloud storage. Use this to clean up individual backup files during pruning operations or manual cleanup.
+
+        Args:
+            backup (Backup): The backup object containing information about the file to delete.
+        """
         match backup.storage_type:
             case StorageType.LOCAL:
                 backup.path.unlink()
@@ -162,6 +169,8 @@ class BackupManager:
 
     def _do_restore(self, backup: Backup, destination: Path) -> bool:
         """Restore a backup file to the storage locations.
+
+        Extract and decompress a backup archive to a specified destination directory, optionally changing file ownership. Use this to recover files from a backup archive for disaster recovery or data migration.
 
         Args:
             backup (Backup): The backup to restore.
@@ -206,10 +215,12 @@ class BackupManager:
 
     @staticmethod
     def _find_existing_backups_local() -> list[StorageLocation]:
-        """Find all existing backups in an local storage locations.
+        """Find all existing backups in local storage locations.
+
+        Scan local filesystem directories for backup files matching the configured naming pattern. Use this to discover existing local backups for inventory management and cleanup operations.
 
         Returns:
-            list[StorageLocation]: A list of StorageLocation objects.
+            list[StorageLocation]: A list of StorageLocation objects containing local backup files.
         """
         backups_by_storage_path: list[StorageLocation] = []
         for storage_path in settings.storage_paths:
@@ -242,8 +253,10 @@ class BackupManager:
     def _find_existing_backups_aws(self) -> list[StorageLocation]:
         """Find all existing backups in AWS storage locations.
 
+        Query AWS S3 bucket for backup objects matching the configured naming pattern. Use this to discover existing cloud backups for inventory management and cleanup operations.
+
         Returns:
-            list[StorageLocation]: A list of StorageLocation objects.
+            list[StorageLocation]: A list of StorageLocation objects containing AWS backup objects.
         """
         found_backups = self.aws_service.list_objects(prefix=settings.name)
 
@@ -295,10 +308,12 @@ class BackupManager:
         return True
 
     def _rename_no_labels(self) -> list[FileForRename]:
-        """Rename a backup file without time unit labels.
+        """Rename backup files to remove time unit labels.
+
+        Generate rename operations to strip time unit labels and UUIDs from backup filenames. Use this to simplify backup naming when detailed time unit labeling is not required.
 
         Returns:
-            list[FileForRename]: A list of FileForRename objects.
+            list[FileForRename]: A list of FileForRename objects containing rename operations.
         """
         files_for_rename: list[FileForRename] = []
         for storage_location in self.storage_locations:
@@ -325,10 +340,12 @@ class BackupManager:
         return files_for_rename
 
     def _rename_with_labels(self) -> list[FileForRename]:
-        """Rename a backup file with time unit labels.
+        """Rename backup files to include time unit labels.
+
+        Generate rename operations to add or update time unit labels in backup filenames. Use this to organize backups by time periods (hourly, daily, weekly, monthly) for better retention policy management.
 
         Returns:
-            list[FileForRename]: A list of FileForRename objects.
+            list[FileForRename]: A list of FileForRename objects containing rename operations.
         """
         files_for_rename: list[FileForRename] = []
         for storage_location in self.storage_locations:
@@ -400,8 +417,10 @@ class BackupManager:
     def get_latest_backup(self) -> Backup:
         """Get the latest backup from the storage locations.
 
+        Find the most recent backup across all configured storage locations based on timestamp. Use this to identify the newest backup for restoration operations or to determine if new backups are needed.
+
         Returns:
-            Backup: The latest backup.
+            Backup: The latest backup, or None if no backups exist.
         """
         all_backups = [x for y in self.storage_locations for x in y.backups]
         if not all_backups:
@@ -411,15 +430,12 @@ class BackupManager:
         return max(all_backups, key=lambda x: x.zoned_datetime.timestamp())
 
     def list_backups(self) -> list[Backup]:
-        """Retrieve file paths of all existing backup files for this backup configuration.
+        """Retrieve all existing backup files for this backup configuration.
 
-        Get a complete list of backup file paths sorted by creation time to enable backup inventory management, cleanup operations, or user display of available backups. Use this when you need to work with backup file paths directly rather than Backup objects.
-
-        Args:
-            path (Path | None, optional): The directory path to search for backups. If None, searches all configured storage_paths. Defaults to None.
+        Get a complete list of backup objects sorted by creation time to enable backup inventory management, cleanup operations, or user display of available backups. Use this when you need to work with backup metadata rather than just file paths.
 
         Returns:
-            list[Path]: A list of backup file paths sorted by creation time from oldest to newest.
+            list[Backup]: A list of backup objects sorted by creation time from oldest to newest.
         """
         return [x for y in self.storage_locations for x in y.backups]
 
@@ -429,7 +445,7 @@ class BackupManager:
         Delete excess backup files while preserving the most important backups based on the retention policy configuration. Use this to automatically clean up old backups and prevent unlimited storage growth while maintaining appropriate historical coverage.
 
         Returns:
-            list[Backup]: A list of file paths that were successfully deleted during the pruning operation.
+            list[Backup]: A list of backup objects that were successfully deleted during the pruning operation.
         """
         deleted_backups: list[Backup] = []
 
@@ -465,7 +481,10 @@ class BackupManager:
         return deleted_backups
 
     def rename_backups(self) -> None:
-        """Rename all backups to the configured name."""
+        """Rename all backups according to the configured naming strategy.
+
+        Apply consistent naming patterns to all existing backups, either adding time unit labels or removing them based on configuration. Use this to standardize backup naming across all storage locations for better organization and retention policy management.
+        """
         if settings.label_time_units:
             files_for_rename = self._rename_with_labels()
         else:
@@ -511,8 +530,8 @@ class BackupManager:
         Decompress and extract the latest backup archive to recover files and directories to their original structure. Use this for disaster recovery, file restoration, or migrating backup contents to a new location.
 
         Args:
-            destination (Path | str): The directory path where backup contents should be extracted and restored.
-            clean_before_restore (bool): Whether to clean the restore path before restoring
+            destination (Path | str | None, optional): The directory path where backup contents should be extracted and restored. If None, uses the configured restore path. Defaults to None.
+            clean_before_restore (bool): Whether to clean the restore path before restoring. Defaults to False.
 
         Returns:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.

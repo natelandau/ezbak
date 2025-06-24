@@ -69,10 +69,7 @@ class AWSService:
     def file_exists(self, key: str) -> bool:
         """Check if a file exists in the S3 bucket.
 
-        Check if a file exists in the S3 bucket by its key using head_object. Use this method
-        when you need to verify the existence of a file in S3 before performing operations on it.
-        The method automatically handles bucket path prefixes and provides detailed logging
-        of the existence check.
+        Verify the existence of a file in S3 before performing operations on it. Use this method when you need to check if a file exists before attempting to download, delete, or modify it. The method automatically handles bucket path prefixes and provides detailed logging of the existence check.
 
         Args:
             key (str): The S3 object key to check.
@@ -125,10 +122,7 @@ class AWSService:
     def delete_objects(self, keys: list[str]) -> bool:
         """Delete multiple files from the configured S3 bucket.
 
-        Remove multiple files from the S3 bucket by their keys using batch deletion. Use this method
-        when you need to efficiently delete multiple files at once, such as cleaning up multiple
-        outdated backups or removing a batch of files. The method automatically handles bucket path
-        prefixes and provides detailed logging of the deletion process.
+        Remove multiple files from the S3 bucket by their keys using batch deletion. Use this method when you need to efficiently delete multiple files at once, such as cleaning up multiple outdated backups or removing a batch of files. The method automatically handles bucket path prefixes and provides detailed logging of the deletion process.
 
         Args:
             keys (list[str]): List of S3 object keys to delete.
@@ -186,6 +180,8 @@ class AWSService:
     def get_object(self, key: str, destination: Path) -> Path:
         """Retrieve the contents of an object from the S3 bucket using streaming.
 
+        Download a file from S3 to a local destination with efficient streaming. Use this method when you need to retrieve files from S3 for local processing, backup restoration, or file analysis. The method uses streaming to handle large files efficiently and automatically handles bucket path prefixes.
+
         Args:
             key (str): The S3 object key to retrieve.
             destination (Path): The local path to save the object to.
@@ -212,6 +208,8 @@ class AWSService:
     def list_objects(self, prefix: str = "") -> list[str]:
         """List all objects in the configured S3 bucket that start with the specified prefix.
 
+        Discover files in the S3 bucket that match a specific prefix pattern. Use this method when you need to enumerate files for backup management, cleanup operations, or to find specific file patterns. The method automatically handles bucket path prefixes and provides efficient pagination for large buckets.
+
         Args:
             prefix (str, optional): The prefix to filter object keys by. If empty, return all objects.
 
@@ -232,6 +230,8 @@ class AWSService:
 
     def rename_file(self, current_name: str, new_name: str) -> bool:
         """Rename a file in the configured S3 bucket by copying and then deleting the old one.
+
+        Change the name of a file in S3 while preserving its content and metadata. Use this method when you need to reorganize files in S3, implement versioning schemes, or correct file naming conventions. The method performs a copy operation followed by deletion to ensure data integrity.
 
         Args:
             current_name (str): The current name of the file.
@@ -279,7 +279,7 @@ class AWSService:
     def upload_file(self, file: Path, name: str = "") -> bool:
         """Upload a local file to the configured S3 bucket.
 
-        Upload a file from the local filesystem to the S3 bucket using the configured bucket path. Use this method when you need to store files in S3 for backup, sharing, or cloud storage purposes. The method automatically handles the bucket path prefix and provides detailed logging.
+        Store a file from the local filesystem to the S3 bucket using the configured bucket path. Use this method when you need to store files in S3 for backup, sharing, or cloud storage purposes. The method automatically handles the bucket path prefix and provides detailed logging.
 
         Args:
             file (Path): The local file path to upload to S3.
