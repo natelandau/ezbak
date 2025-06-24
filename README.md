@@ -25,7 +25,7 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 -   [Installation](#installation)
 -   [Quick Start](#quick-start)
 -   [Usage](#usage)
--   [Manual](#manual)
+-   [Core Concepts](#core-concepts)
 -   [Common Use Cases](#common-use-cases)
 -   [Configuration Options](#configuration-options)
 -   [Contributing](#contributing)
@@ -199,7 +199,7 @@ docker run -it \
     ghcr.io/natelandau/ezbak:latest
 ```
 
-## Manual
+## Core Concepts
 
 Key concepts and configuration options for ezbak.
 
@@ -341,6 +341,8 @@ backup_manager = ezbak(
     name="my-backup",                    # Backup identifier
     source_paths=[Path("/path/to/src")], # What to backup
     storage_paths=[Path("/backups")],    # Where to store backups
+    storage_location="local",            # Optional: Where to store backups.
+                                         # One of "local", "aws", or "all" (default: "local")
 )
 ```
 
@@ -373,7 +375,7 @@ compression_level=9,         # Compression level (1-9, default: 9)
 label_time_units=True,       # Include time labels in filenames (default: True)
 rename_files=False,          # Rename existing files (default: False)
 strip_source_paths=False,    # Optional: Strip source paths from directory sources to flatten
-                            #            the tarfile (e.g. /source/foo.txt -> foo.txt)
+                             #            the tarfile (e.g. /source/foo.txt -> foo.txt)
 ```
 
 ### MongoDB Backup Options
@@ -414,7 +416,7 @@ aws_s3_bucket_path="your-bucket-path", # Optional: Path within the bucket
 
 ### Environment Variables
 
-All options can be set via environment variables using the `EZBAK_` prefix:
+All options can be set via environment variables using the `EZBAK_` prefix. For example:
 
 ```bash
 export EZBAK_NAME="my-backup"
