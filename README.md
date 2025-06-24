@@ -33,7 +33,7 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 
 ezbak can be used as a python package, cli script, or docker container.
 
-**Note:** ezbak requires Python 3.10 or higher.
+**Note:** ezbak requires Python 3.11 or higher.
 
 ### Python Package
 
