@@ -2,15 +2,15 @@
 
 # ezbak
 
-A simple, powerful backup management tool for Python developers and system administrators. ezbak automates backup creation, management, and cleanup with support for multiple destinations, compression, and intelligent retention policies.
+A simple backup management tool. ezbak automates backup creation, management, and restores with support for multiple destinations, compression, and intelligent retention policies.
 
 Use ezbak as a Python package in your code, run it from the command line, or deploy it as a Docker container.
 
 **Features**
 
--   Create tar gzipped compressed backups (tgz format) of files and directories
+-   Create tar-gzipped (`.tgz`) compressed backups of files and directories
 -   Creates MongoDB backups (via `mongodump`)
--   Supports AWS S3 as a storage location
+-   Support for local filesystems and AWS S3 storage locations
 -   File filtering with regex patterns
 -   Intelligent retention policies (time-based and count-based)
 -   Automatic cleanup of old backups

@@ -2,7 +2,7 @@
 name: ezbak
 services:
     ezbak:
-        image: python:3.12-slim-bookworm
+        image: python:3.13-slim-bookworm
         build:
             context: _ROOT_DIR_
             dockerfile: Dockerfile
