@@ -416,7 +416,7 @@ aws_s3_bucket_path="your-bucket-path", # Optional: Path within the bucket
 
 ### Environment Variables
 
-All options can be set via environment variables using the `EZBAK_` prefix:
+All options can be set via environment variables using the `EZBAK_` prefix. For example:
 
 ```bash
 export EZBAK_NAME="my-backup"
