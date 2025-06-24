@@ -9,9 +9,11 @@
     ]
     dependencies = [
         "apscheduler>=3.11.0,<4.0.0",
+        "boto3>=1.38.41",
         "cappa>=0.28.0",
         "environs>=14.2.0",
         "nclutils>=0.6.0",
+        "rich>=14.0.0",
         "whenever>=0.8.5",
     ]
     description = "A simple tool to backup and restore data as tgz files."

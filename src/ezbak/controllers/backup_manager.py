@@ -1,26 +1,25 @@
 """Backup management controller."""
 
+import atexit
 import re
 import tarfile
-import tempfile
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import assert_never
 
 from nclutils import clean_directory, copy_file, find_files, logger, new_uid
-from whenever import Instant, PlainDateTime, TimeZoneNotFoundError
 
 from ezbak.constants import (
     ALWAYS_EXCLUDE_FILENAMES,
     BACKUP_EXTENSION,
     BACKUP_NAME_REGEX,
-    DEFAULT_DATE_FORMAT,
-    TIMESTAMP_REGEX,
-    BackupType,
     RetentionPolicyType,
+    StorageType,
 )
-from ezbak.models import Backup, settings
+from ezbak.models import Backup, StorageLocation, settings
+from ezbak.utils import chown_files, cleanup_tmp_dir
 
+from .aws import AWSService
 from .mongodb import MongoManager
 
 
@@ -28,8 +27,8 @@ from .mongodb import MongoManager
 class FileForRename:
     """Temporary class used for renaming backups."""
 
-    old_path: Path
-    new_path: Path
+    backup: Backup
+    new_name: str
     do_rename: bool = False
 
 
@@ -44,13 +43,11 @@ class BackupManager:
         Args:
             settings (Settings): The settings for the backup manager.
         """
-        self.storage_paths = settings.storage_paths
-        self.name = settings.name
-        self.tz = settings.tz
-        self.retention_policy = settings.retention_policy
-        self.label_time_units = settings.label_time_units
-        self.exclude_regex = settings.exclude_regex
-        self.include_regex = settings.include_regex
+        self.aws_service = None
+        self.mongo_manager = None
+        self._storage_locations: list[StorageLocation] = []
+        self.rebuild_storage_locations = False
+        self.tmp_dir = Path(settings.tmp_dir.name)
 
         if settings.mongo_uri and settings.mongo_db_name:
             logger.info("Backup MongoDB database")
@@ -61,282 +58,44 @@ class BackupManager:
         else:
             self.source_paths = settings.source_paths
 
-    def _include_file_in_backup(self, path: Path) -> bool:
-        """Determine whether a file should be included in the backup based on configured regex filters.
+        if settings.storage_location in {StorageType.AWS, StorageType.ALL}:
+            try:
+                self.aws_service = AWSService()
+            except ValueError as e:
+                logger.error(e)
 
-        Apply include and exclude regex patterns to filter files during backup creation. Use this to implement fine-grained control over which files are backed up, such as excluding temporary files or including only specific file types.
+        atexit.register(cleanup_tmp_dir)
 
-        Args:
-            path (Path): The file path to evaluate against the configured regex patterns.
-
-        Returns:
-            bool: True if the file should be included in the backup, False if it should be excluded.
-        """
-        if path.is_symlink():
-            logger.warning(f"Skip backup of symlink: {path}")
-            return False
-
-        if path.name in ALWAYS_EXCLUDE_FILENAMES:
-            logger.trace(f"Excluded file: {path.name}")
-            return False
-
-        if self.include_regex and re.search(rf"{self.include_regex}", str(path)) is None:
-            logger.trace(f"Exclude by include regex: {path.name}")
-            return False
-
-        if self.exclude_regex and re.search(rf"{self.exclude_regex}", str(path)):
-            logger.trace(f"Exclude by regex: {path.name}")
-            return False
-
-        return True
-
-    def _generate_filename(self, path: Path | None = None, *, with_uuid: bool = False) -> str:
-        """Generate a unique backup filename with timestamp and optional time unit classification.
-
-        Create backup filenames that include timestamps and optionally classify backups by time periods (yearly, monthly, daily, etc.) to enable intelligent retention policies. Use this to ensure backup files have consistent, sortable names that support automated cleanup operations.
-
-        Args:
-            path (Path | None, optional): The directory path to check for existing backups when determining time unit labels. If None, uses the first configured destination. Defaults to None.
-            with_uuid (bool, optional): Whether to append a unique identifier to prevent filename conflicts. Defaults to False.
+    @property
+    def storage_locations(self) -> list[StorageLocation]:
+        """Find all existing backups in available storage locations.
 
         Returns:
-            str: The generated backup filename in format "{name}-{timestamp}-{period}.{extension}" or "{name}-{timestamp}.{extension}" depending on configuration.
-
-        Raises:
-            TimeZoneNotFoundError: If the configured timezone identifier is invalid.
+            list[StorageLocation]: A list of StorageLocation objects.
         """
-        i = Instant.now()
-        try:
-            now = i.to_tz(self.tz) if self.tz else i.to_system_tz()
-        except TimeZoneNotFoundError as e:
-            logger.error(e)
-            raise
+        if not self.rebuild_storage_locations and self._storage_locations:
+            return self._storage_locations
 
-        uuid = f"-{new_uid(bits=24)}" if with_uuid else ""
+        match settings.storage_location:
+            case StorageType.LOCAL:
+                self._storage_locations = self._find_existing_backups_local()
 
-        timestamp = now.py_datetime().strftime(DEFAULT_DATE_FORMAT)
-
-        if not self.label_time_units:
-            return f"{self.name}-{timestamp}{uuid}.{BACKUP_EXTENSION}"
-
-        _, existing_times = self._group_backups_by_period(path=path)
-
-        period_checks = [
-            ("yearly", BackupType.YEARLY, str(now.year)),
-            ("monthly", BackupType.MONTHLY, str(now.month)),
-            ("weekly", BackupType.WEEKLY, now.py_datetime().strftime("%W")),
-            ("daily", BackupType.DAILY, str(now.day)),
-            ("hourly", BackupType.HOURLY, str(now.hour)),
-            ("minutely", BackupType.MINUTELY, str(now.minute)),
-        ]
-
-        period = "minutely"  # Default to minutely
-        for period_name, backup_type, current_value in period_checks:
-            if current_value not in existing_times[backup_type]:
-                period = period_name
-                break
-
-        return f"{self.name}-{timestamp}-{period}{uuid}.{BACKUP_EXTENSION}"
-
-    def _group_backups_by_period(
-        self, path: Path | None = None
-    ) -> tuple[dict[BackupType, list[Backup]], dict[BackupType, list[str]]]:
-        """Categorize existing backups into time-based groups for retention policy management.
-
-        Organize backups by time periods (yearly, monthly, weekly, daily, hourly, minutely) to enable selective retention where the oldest backup in each period is preserved. Use this to implement sophisticated retention policies that maintain historical coverage while controlling storage usage.
-
-        Args:
-            path (Path | None, optional): The directory path to search for backups. If None, searches all configured storage_paths. Defaults to None.
-
-        Returns:
-            tuple[dict[BackupType, list[Backup]], dict[BackupType, list[str]]]: A tuple containing dictionaries of backups grouped by time period and the date values found for each period.
-        """
-        backups = self._load_all_backups(path=path)
-
-        dates_found: dict[BackupType, list[str]] = defaultdict(list)
-        backups_by_type: dict[BackupType, list[Backup]] = defaultdict(list)
-
-        period_definitions = [
-            (BackupType.YEARLY, "year"),
-            (BackupType.MONTHLY, "month"),
-            (BackupType.WEEKLY, "week"),
-            (BackupType.DAILY, "day"),
-            (BackupType.HOURLY, "hour"),
-            (BackupType.MINUTELY, "minute"),
-        ]
-
-        for backup in backups:
-            if not backup:
-                continue
-
-            for period_type, date_attr in period_definitions:
-                date_value = getattr(backup, date_attr)
-                if date_value not in dates_found[period_type]:
-                    dates_found[period_type].append(date_value)
-                    backups_by_type[period_type].append(backup)
-                    break  # Move to the next backup once it's categorized
-
-                if period_type == BackupType.MINUTELY:
-                    backups_by_type[period_type].append(backup)
-                    break
-
-        return backups_by_type, dates_found
-
-    def _load_all_backups(self, path: Path | None = None) -> list[Backup]:
-        """Discover and load all backup files matching this configuration into structured Backup objects.
-
-        Scan configured storage_paths for backup files and convert them into Backup objects sorted by creation time. Use this to get a complete inventory of existing backups for operations like listing, pruning, or finding the latest backup.
-
-        Args:
-            path (Path | None, optional): The directory path to search for backups. If None, searches all configured storage_paths. Defaults to None.
-
-        Returns:
-            list[Backup]: A list of Backup objects sorted by creation time from oldest to newest.
-        """
-        storage_paths = [path] if path else self.storage_paths
-        found_backups: list[Path] = []
-
-        for destination in storage_paths:
-            found_backups.extend(
-                find_files(path=destination, globs=[f"*{self.name}*.{BACKUP_EXTENSION}"])
-            )
-
-        return sorted(
-            [self._build_backup_object(path=x) for x in found_backups],
-            key=lambda x: x.zoned_datetime,
-        )
-
-    def _build_backup_object(self, path: Path | None = None) -> Backup:
-        """Extract backup metadata from a backup file path to create a structured Backup object.
-
-        Parse backup filenames to extract timestamp information and create Backup objects that enable time-based operations like sorting, grouping, and retention management. Use this to convert file paths into structured data for backup management operations.
-
-        Args:
-            path (Path | None, optional): The backup file path to parse. If None, returns None.
-
-        Returns:
-            Backup: A Backup object containing parsed timestamp data and file path information, or None if parsing fails.
-
-        Raises:
-            TimeZoneNotFoundError: If the configured timezone identifier is invalid when converting timestamps.
-        """
-        try:
-            timestamp = TIMESTAMP_REGEX.search(path.name).group(0)
-        except AttributeError:
-            logger.warning(f"Could not parse timestamp: {path}")
-            return None
-        plain_dt = PlainDateTime.parse_strptime(timestamp, format=DEFAULT_DATE_FORMAT)
-        try:
-            dt = plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
-        except TimeZoneNotFoundError as e:
-            logger.error(e)
-            raise
-
-        return Backup(
-            year=str(dt.year),
-            month=str(dt.month),
-            week=dt.py_datetime().strftime("%W"),
-            day=str(dt.day),
-            hour=str(dt.hour),
-            minute=str(dt.minute),
-            path=path,
-            timestamp=timestamp,
-            zoned_datetime=dt,
-        )
-
-    def _rename_no_labels(self, path: Path) -> list[FileForRename]:
-        """Rename a backup file without time unit labels.
-
-        Args:
-            path (Path): The path to rename.
-
-        Returns:
-            list[FileForRename]: A list of FileForRename objects.
-        """
-        backups = self._load_all_backups(path=path)
-        files_for_rename: list[FileForRename] = []
-        for backup in backups:
-            new_backup_name = backup.path.name
-            name_parts = BACKUP_NAME_REGEX.finditer(backup.path.name)
-            for match in name_parts:
-                matches = match.groupdict()
-                found_period = matches.get("period", None)
-                found_uuid = matches.get("uuid", None)
-            if found_period:
-                new_backup_name = re.sub(rf"-{found_period}", "", new_backup_name)
-            if found_uuid:
-                new_backup_name = re.sub(rf"-{found_uuid}", "", new_backup_name)
-
-            files_for_rename.append(
-                FileForRename(
-                    old_path=backup.path,
-                    new_path=backup.path.with_name(new_backup_name),
-                    do_rename=backup.path.with_name(new_backup_name) != backup.path,
+            case StorageType.AWS:
+                self._storage_locations = self._find_existing_backups_aws()
+            case StorageType.ALL:
+                self._storage_locations = (
+                    self._find_existing_backups_local() + self._find_existing_backups_aws()
                 )
-            )
+            case _:
+                assert_never(settings.storage_location)
 
-        return files_for_rename
+        return self._storage_locations
 
-    def _rename_with_labels(self, path: Path) -> list[FileForRename]:
-        """Rename a backup file with time unit labels.
-
-        Args:
-            path (Path): The path to rename.
+    def _create_tmp_backup_file(self) -> Path:
+        """Create a temporary backup file in the temporary directory.
 
         Returns:
-            list[FileForRename]: A list of FileForRename objects.
-        """
-        backup_dict, _ = self._group_backups_by_period(path=path)
-
-        files_for_rename: list[FileForRename] = []
-        for backup_type, backups in backup_dict.items():
-            for backup in backups:
-                name_parts = BACKUP_NAME_REGEX.finditer(backup.path.name)
-                for match in name_parts:
-                    matches = match.groupdict()
-                    found_period = matches.get("period", None)
-                if found_period and found_period == backup_type.value:
-                    files_for_rename.append(
-                        FileForRename(old_path=backup.path, new_path=backup.path, do_rename=False)
-                    )
-                    continue
-
-                new_name = BACKUP_NAME_REGEX.sub(
-                    repl=f"{matches.get('name')}-{matches.get('timestamp')}-{backup_type.value}.{BACKUP_EXTENSION}",
-                    string=backup.path.name,
-                )
-                files_for_rename.append(
-                    FileForRename(
-                        old_path=backup.path,
-                        new_path=backup.path.with_name(new_name),
-                        do_rename=True,
-                    )
-                )
-
-        return files_for_rename
-
-    def get_latest_backup(self) -> Path:
-        """Find the most recently created backup file for restoration or verification purposes.
-
-        Locate the newest backup file based on creation time to enable quick access to the most current backup for restoration operations or backup verification. Use this when you need to restore from or examine the latest backup without manually sorting through all available backups.
-
-        Returns:
-            Path: The file path of the most recently created backup.
-        """
-        if not self.list_backups():
-            logger.error("No backups found")
-            return None
-
-        backups: list[Path] = self.list_backups()
-        return max(backups, key=lambda x: x.stat().st_ctime)
-
-    def create_backup(self) -> list[Path]:
-        """Create compressed backup archives of all configured sources and distribute them to all storage_paths.
-
-        Generate new backup files by compressing all source files and directories into tar.gz archives, then copy these archives to each configured destination directory. Use this to perform the core backup operation that preserves your data with configurable compression and multi-destination redundancy.
-
-        Returns:
-            list[Path]: A list of paths to the newly created backup files, one for each destination.
+            Path: The path to the temporary backup file.
 
         Raises:
             ValueError: If a source path is neither a file nor a directory.
@@ -344,8 +103,11 @@ class BackupManager:
 
         @dataclass
         class FileToAdd:
+            """Class to store file information for the backup."""
+
             full_path: Path
             relative_path: Path | str
+            is_dir: bool = False
 
         files_to_add = []
         for source in self.source_paths:
@@ -370,34 +132,285 @@ class BackupManager:
                 logger.error(msg)
                 raise ValueError(msg)
 
-        with tempfile.TemporaryDirectory() as temp_dir_path:
-            temp_tarfile = Path(temp_dir_path) / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
-            logger.trace(f"Temp tarfile: {temp_tarfile}")
-            try:
-                with tarfile.open(
-                    temp_tarfile, "w:gz", compresslevel=settings.compression_level
-                ) as tar:
-                    for file in files_to_add:
-                        logger.trace(f"Add to tar: {file.relative_path}")
-                        tar.add(file.full_path, arcname=file.relative_path)
-            except tarfile.TarError as e:
-                logger.error(f"Failed to create backup: {e}")
-                return None
+        temp_tarfile = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+        logger.trace(f"Temp tarfile: {temp_tarfile}")
+        try:
+            with tarfile.open(
+                temp_tarfile, "w:gz", compresslevel=settings.compression_level
+            ) as tar:
+                for file in files_to_add:
+                    logger.trace(f"Add to tar: {file.relative_path}")
+                    tar.add(file.full_path, arcname=file.relative_path)
+        except tarfile.TarError as e:
+            logger.error(f"Failed to create backup: {e}")
+            return None
 
-            created_files = []
-            for destination_dir in self.storage_paths:
-                backup_path = destination_dir / self._generate_filename(path=destination_dir)
-                if backup_path.exists():
-                    backup_path = destination_dir / self._generate_filename(with_uuid=True)
+        return temp_tarfile
 
-                logger.trace(f"New backup name: {backup_path}")
-                copy_file(src=temp_tarfile, dst=backup_path)
-                created_files.append(backup_path)
+    def _delete_backup(self, backup: Backup) -> None:
+        """Delete a backup file from the storage locations."""
+        match backup.storage_type:
+            case StorageType.LOCAL:
+                backup.path.unlink()
+                logger.info(f"Delete: {backup.path}")
+            case StorageType.AWS:
+                self.aws_service.delete_object(key=backup.name)
+            case StorageType.ALL:
+                pass
+            case _:
+                assert_never(backup.storage_type)
+
+    def _do_restore(self, backup: Backup, destination: Path) -> bool:
+        """Restore a backup file to the storage locations.
+
+        Args:
+            backup (Backup): The backup to restore.
+            destination (Path): The destination path to restore the backup to.
+
+        Returns:
+            bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
+        """
+        logger.debug(f"Restoring backup: {backup.name}")
+        tarfile_path = None
+        match backup.storage_type:
+            case StorageType.LOCAL:
+                tarfile_path = backup.path
+
+            case StorageType.AWS:
+                if not self.aws_service.file_exists(backup.name):
+                    logger.error(f"Backup file does not exist in AWS: {backup.name}")
+                    return False
+
+                tmp_file = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+                self.aws_service.get_object(key=backup.name, destination=tmp_file)
+
+                tarfile_path = tmp_file
+
+            case StorageType.ALL:
+                return False
+            case _:
+                assert_never(backup.storage_type)
+
+        try:
+            with tarfile.open(tarfile_path) as archive:
+                archive.extractall(path=destination, filter="data")
+        except tarfile.TarError as e:
+            logger.error(f"Failed to restore backup: {e}")
+            return False
+
+        if settings.chown_uid and settings.chown_gid:
+            chown_files(destination)
+
+        logger.info(f"Restored backup to {destination}")
+        return True
+
+    @staticmethod
+    def _find_existing_backups_local() -> list[StorageLocation]:
+        """Find all existing backups in an local storage locations.
+
+        Returns:
+            list[StorageLocation]: A list of StorageLocation objects.
+        """
+        backups_by_storage_path: list[StorageLocation] = []
+        for storage_path in settings.storage_paths:
+            found_backups: list[Backup] = []
+            found_files = find_files(
+                path=storage_path, globs=[f"*{settings.name}*.{BACKUP_EXTENSION}"]
+            )
+            found_backups = sorted(
+                [
+                    Backup(
+                        storage_type=StorageType.LOCAL,
+                        name=x.name,
+                        path=x,
+                        storage_path=storage_path,
+                    )
+                    for x in found_files
+                ],
+                key=lambda x: x.zoned_datetime,
+            )
+            backups_by_storage_path.append(
+                StorageLocation(
+                    storage_path=storage_path,
+                    storage_type=StorageType.LOCAL,
+                    backups=found_backups,
+                )
+            )
+
+        return backups_by_storage_path
+
+    def _find_existing_backups_aws(self) -> list[StorageLocation]:
+        """Find all existing backups in AWS storage locations.
+
+        Returns:
+            list[StorageLocation]: A list of StorageLocation objects.
+        """
+        found_backups = self.aws_service.list_objects(prefix=settings.name)
+
+        if settings.aws_s3_bucket_path:
+            found_backups = [
+                x.replace(f"{settings.aws_s3_bucket_path.rstrip('/')}/", "") for x in found_backups
+            ]
+
+        backups = sorted(
+            [Backup(storage_type=StorageType.AWS, name=x) for x in found_backups],
+            key=lambda x: x.zoned_datetime,
+        )
+        return [
+            StorageLocation(
+                storage_path=settings.aws_s3_bucket_path,
+                storage_type=StorageType.AWS,
+                backups=backups,
+            )
+        ]
+
+    @staticmethod
+    def _include_file_in_backup(path: Path) -> bool:
+        """Determine whether a file should be included in the backup based on configured regex filters.
+
+        Apply include and exclude regex patterns to filter files during backup creation. Use this to implement fine-grained control over which files are backed up, such as excluding temporary files or including only specific file types.
+
+        Args:
+            path (Path): The file path to evaluate against the configured regex patterns.
+
+        Returns:
+            bool: True if the file should be included in the backup, False if it should be excluded.
+        """
+        if path.is_symlink():
+            logger.warning(f"Skip backup of symlink: {path}")
+            return False
+
+        if path.name in ALWAYS_EXCLUDE_FILENAMES:
+            logger.trace(f"Excluded file: {path.name}")
+            return False
+
+        if settings.include_regex and re.search(rf"{settings.include_regex}", str(path)) is None:
+            logger.trace(f"Exclude by include regex: {path.name}")
+            return False
+
+        if settings.exclude_regex and re.search(rf"{settings.exclude_regex}", str(path)):
+            logger.trace(f"Exclude by regex: {path.name}")
+            return False
+
+        return True
+
+    def _rename_no_labels(self) -> list[FileForRename]:
+        """Rename a backup file without time unit labels.
+
+        Returns:
+            list[FileForRename]: A list of FileForRename objects.
+        """
+        files_for_rename: list[FileForRename] = []
+        for storage_location in self.storage_locations:
+            for backup in storage_location.backups:
+                new_backup_name = backup.name
+                name_parts = BACKUP_NAME_REGEX.finditer(backup.name)
+                for match in name_parts:
+                    matches = match.groupdict()
+                    found_period = matches.get("period", None)
+                    found_uuid = matches.get("uuid", None)
+                if found_period:
+                    new_backup_name = re.sub(rf"-{found_period}", "", new_backup_name)
+                if found_uuid:
+                    new_backup_name = re.sub(rf"-{found_uuid}", "", new_backup_name)
+
+                files_for_rename.append(
+                    FileForRename(
+                        backup=backup,
+                        new_name=new_backup_name,
+                        do_rename=backup.name != new_backup_name,
+                    )
+                )
+
+        return files_for_rename
+
+    def _rename_with_labels(self) -> list[FileForRename]:
+        """Rename a backup file with time unit labels.
+
+        Returns:
+            list[FileForRename]: A list of FileForRename objects.
+        """
+        files_for_rename: list[FileForRename] = []
+        for storage_location in self.storage_locations:
+            for backup_type, backups in storage_location.backups_by_time_unit.items():
+                for backup in backups:
+                    name_parts = BACKUP_NAME_REGEX.finditer(backup.name)
+                    for match in name_parts:
+                        matches = match.groupdict()
+                        found_period = matches.get("period", None)
+                    if found_period and found_period == backup_type.value:
+                        files_for_rename.append(
+                            FileForRename(
+                                backup=backup,
+                                new_name=backup.name,
+                                do_rename=False,
+                            )
+                        )
+                        continue
+
+                    new_name = BACKUP_NAME_REGEX.sub(
+                        repl=f"{matches.get('name')}-{matches.get('timestamp')}-{backup_type.value}.{BACKUP_EXTENSION}",
+                        string=backup.name,
+                    )
+                    files_for_rename.append(
+                        FileForRename(
+                            backup=backup,
+                            new_name=new_name,
+                            do_rename=True,
+                        )
+                    )
+
+        return files_for_rename
+
+    def create_backup(self) -> list[Backup]:
+        """Create compressed backup archives of all configured sources and distribute them to all storage_paths.
+
+        Generate new backup files by compressing all source files and directories into tar.gz archives, then copy these archives to each configured destination directory. Use this to perform the core backup operation that preserves your data with configurable compression and multi-destination redundancy.
+
+        Returns:
+            list[Backup]: A list of Backup objects which were created.
+        """
+        tmp_backup = self._create_tmp_backup_file()
+        created_backups: list[Backup] = []
+
+        for storage_location in self.storage_locations:
+            backup_name = storage_location.generate_new_backup_name()
+
+            if storage_location.storage_type == StorageType.LOCAL:
+                backup_path = Path(storage_location.storage_path) / backup_name
+                copy_file(src=tmp_backup, dst=backup_path)
                 logger.info(f"Created: {backup_path}")
+                created_backups.append(
+                    Backup(
+                        storage_type=StorageType.LOCAL,
+                        name=backup_path.name,
+                        path=backup_path,
+                        storage_path=storage_location.storage_path,
+                    )
+                )
+                self.rebuild_storage_locations = True
+            elif storage_location.storage_type == StorageType.AWS:
+                self.aws_service.upload_file(file=tmp_backup, name=backup_name)
+                created_backups.append(Backup(storage_type=StorageType.AWS, name=backup_name))
+                logger.info(f"S3 create: {backup_name}")
+                self.rebuild_storage_locations = True
 
-            return created_files
+        return created_backups
 
-    def list_backups(self, path: Path | None = None) -> list[Path]:
+    def get_latest_backup(self) -> Backup:
+        """Get the latest backup from the storage locations.
+
+        Returns:
+            Backup: The latest backup.
+        """
+        all_backups = [x for y in self.storage_locations for x in y.backups]
+        if not all_backups:
+            logger.error("No backups found")
+            return None
+
+        return max(all_backups, key=lambda x: x.zoned_datetime.timestamp())
+
+    def list_backups(self) -> list[Backup]:
         """Retrieve file paths of all existing backup files for this backup configuration.
 
         Get a complete list of backup file paths sorted by creation time to enable backup inventory management, cleanup operations, or user display of available backups. Use this when you need to work with backup file paths directly rather than Backup objects.
@@ -408,74 +421,75 @@ class BackupManager:
         Returns:
             list[Path]: A list of backup file paths sorted by creation time from oldest to newest.
         """
-        return [x.path for x in self._load_all_backups(path=path)]
+        return [x for y in self.storage_locations for x in y.backups]
 
-    def prune_backups(self) -> list[Path]:
+    def prune_backups(self) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.
 
         Delete excess backup files while preserving the most important backups based on the retention policy configuration. Use this to automatically clean up old backups and prevent unlimited storage growth while maintaining appropriate historical coverage.
 
         Returns:
-            list[Path]: A list of file paths that were successfully deleted during the pruning operation.
+            list[Backup]: A list of file paths that were successfully deleted during the pruning operation.
         """
-        deleted_files: list[Path] = []
-        if self.retention_policy.policy_type == RetentionPolicyType.KEEP_ALL:
-            logger.info("Will not delete backups because no retention policy is set")
-            return deleted_files
+        deleted_backups: list[Backup] = []
 
-        if self.retention_policy.policy_type == RetentionPolicyType.COUNT_BASED:
-            for path in self.storage_paths:
-                backups = self._load_all_backups(path=path)
-                sorted_backups = sorted(backups, key=lambda x: x.zoned_datetime, reverse=True)
-                max_keep = self.retention_policy.get_retention(BackupType.NO_TYPE)
-                if len(sorted_backups) > max_keep:
-                    deleted_files.extend(
-                        backup.delete()
-                        for backup in sorted_backups[max_keep:]
-                        if isinstance(backup, Backup)
-                    )
+        for storage_location in self.storage_locations:
+            match settings.retention_policy.policy_type:
+                case RetentionPolicyType.KEEP_ALL:
+                    logger.info("Will not delete backups because no retention policy is set")
+                    return deleted_backups
+
+                case RetentionPolicyType.COUNT_BASED:
+                    max_keep = settings.retention_policy.get_retention()
+                    if len(storage_location.backups) > max_keep:
+                        deleted_backups.extend(list(reversed(storage_location.backups))[max_keep:])
+
+                case RetentionPolicyType.TIME_BASED:
+                    for backup_type, backups in storage_location.backups_by_time_unit.items():
+                        max_keep = settings.retention_policy.get_retention(backup_type)
+                        if len(backups) > max_keep:
+                            deleted_backups.extend(list(reversed(backups))[max_keep:])
+
+                case _:
+                    assert_never(settings.retention_policy.policy_type)
+
+        for backup in [x for x in deleted_backups if x.storage_type == StorageType.LOCAL]:
+            self._delete_backup(backup)
+
+        if any(x.storage_type == StorageType.AWS for x in deleted_backups):
+            self.aws_service.delete_objects(
+                keys=[x.name for x in deleted_backups if x.storage_type == StorageType.AWS]
+            )
+
+        logger.info(f"Pruned {len(deleted_backups)} backups")
+        return deleted_backups
+
+    def rename_backups(self) -> None:
+        """Rename all backups to the configured name."""
+        if settings.label_time_units:
+            files_for_rename = self._rename_with_labels()
         else:
-            for path in self.storage_paths:
-                backups_by_type, _ = self._group_backups_by_period(path=path)
-                for backup_type, backups in backups_by_type.items():
-                    sorted_backups = sorted(backups, key=lambda x: x.zoned_datetime, reverse=True)
-                    max_keep = self.retention_policy.get_retention(backup_type)
-                    if len(sorted_backups) > max_keep:
-                        deleted_files.extend(
-                            backup.delete()
-                            for backup in sorted_backups[max_keep:]
-                            if isinstance(backup, Backup)
-                        )
-
-        logger.info(f"Deleted {len(deleted_files)} old backups")
-        return deleted_files
-
-    def rename_backups(self, path: Path | None = None) -> None:
-        """Update backup filenames to match the current naming convention and time unit labeling configuration.
-
-        Rename existing backup files to ensure consistent filename formats when configuration changes or to apply time unit labels to previously unlabeled backups. Use this to maintain filename consistency across your backup collection after changing naming conventions.
-
-        Args:
-            path (Path | None, optional): The directory path containing backups to rename. If None, processes all configured storage_paths. Defaults to None.
-        """
-        if self.label_time_units:
-            files_for_rename = self._rename_with_labels(path=path)
-        else:
-            files_for_rename = self._rename_no_labels(path=path)
+            files_for_rename = self._rename_no_labels()
 
         for file in files_for_rename:
             if file.do_rename:
                 target_exists = (
-                    len([x.new_path for x in files_for_rename if x.new_path == file.new_path]) > 1
+                    len([x.new_name for x in files_for_rename if x.new_name == file.new_name]) > 1
                 )
                 if target_exists:
-                    file.new_path = file.new_path.with_name(
-                        f"{file.new_path.stem}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+                    file.new_name = f"{file.new_name.rstrip(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+
+                if file.backup.storage_type == StorageType.LOCAL:
+                    file.backup.path.rename(file.backup.path.parent / file.new_name)
+                    logger.debug(f"Rename: {file.backup.path} -> {file.new_name}")
+                elif file.backup.storage_type == StorageType.AWS:
+                    self.aws_service.rename_file(
+                        current_name=file.backup.name, new_name=file.new_name
                     )
-                file.old_path.rename(file.new_path)
-                logger.debug(f"Renamed: {file.old_path.name} -> {file.new_path.name}")
+                    logger.debug(f"S3: Rename {file.backup.name} -> {file.new_name}")
 
         if len([x for x in files_for_rename if x.do_rename]) > 0:
+            self.did_create_backup = True
             logger.info(f"Renamed {len([x for x in files_for_rename if x.do_rename])} backups")
         else:
             logger.info("No backups to rename")
@@ -518,5 +532,4 @@ class BackupManager:
             logger.error("No backup found to restore")
             return False
 
-        backup = self._build_backup_object(path=most_recent_backup)
-        return backup.restore(destination=dest)
+        return self._do_restore(backup=most_recent_backup, destination=dest)

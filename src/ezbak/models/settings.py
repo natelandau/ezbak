@@ -16,7 +16,7 @@ from ezbak.constants import (
     BackupType,
     LogLevel,
     RetentionPolicyType,
-    StorageLocation,
+    StorageType,
 )
 from ezbak.controllers.retention_policy_manager import RetentionPolicyManager
 
@@ -36,7 +36,7 @@ class Settings:
     name: str | None = None
     source_paths: list[Path] | None = None
     storage_paths: list[Path] | None = None
-    storage_location: StorageLocation = StorageLocation.LOCAL
+    storage_location: StorageType = StorageType.LOCAL
 
     strip_source_paths: bool = False
     exclude_regex: str | None = None
@@ -66,6 +66,11 @@ class Settings:
 
     mongo_uri: str | None = None
     mongo_db_name: str | None = None
+
+    aws_access_key_id: str | None = None
+    aws_s3_bucket_name: str | None = None
+    aws_s3_bucket_path: str | None = None
+    aws_secret_access_key: str | None = None
 
     _tmp_dir: TemporaryDirectory | None = None
 
@@ -132,7 +137,7 @@ class Settings:
 
     def model_dump(
         self,
-    ) -> dict[str, int | str | bool | list[Path | str] | LogLevel | StorageLocation | None]:
+    ) -> dict[str, int | str | bool | list[Path | str] | LogLevel | StorageType | None]:
         """Serialize settings to a dictionary representation.
 
         Converts all settings attributes to a dictionary format for serialization,
@@ -145,7 +150,7 @@ class Settings:
 
     def update(
         self,
-        updates: dict[str, str | int | Path | bool | list[Path | str] | LogLevel | StorageLocation],
+        updates: dict[str, str | int | Path | bool | list[Path | str] | LogLevel | StorageType],
     ) -> None:
         """Update settings with provided key-value pairs and reset cached properties.
 
@@ -168,7 +173,7 @@ class Settings:
                     continue
 
                 if key == "storage_location" and isinstance(value, str):
-                    setattr(self, key, StorageLocation(value.upper()))
+                    setattr(self, key, StorageType(value.upper()))
                     continue
 
                 setattr(self, key, value)
@@ -272,12 +277,12 @@ class SettingsManager:
                 name=env.str("NAME", None),
                 source_paths=env.list_paths("SOURCE_PATHS", None),
                 storage_paths=env.list_paths("STORAGE_PATHS", None),
-                storage_location=StorageLocation(
+                storage_location=StorageType(
                     env.str(
                         "STORAGE_LOCATION",
-                        default=StorageLocation.LOCAL.value,
+                        default=StorageType.LOCAL.value,
                         validate=validate.OneOf(
-                            [x.value for x in StorageLocation],
+                            [x.value for x in StorageType],
                             error="STORAGE_LOCATION must be one of: {choices}",
                         ),
                     )
@@ -328,6 +333,11 @@ class SettingsManager:
                 # MongoDB settings
                 mongo_uri=env.str("MONGO_URI", None),
                 mongo_db_name=env.str("MONGO_DB_NAME", None),
+                # AWS settings
+                aws_access_key_id=env.str("AWS_ACCESS_KEY_ID", None),
+                aws_s3_bucket_name=env.str("AWS_S3_BUCKET_NAME", None),
+                aws_s3_bucket_path=env.str("AWS_S3_BUCKET_PATH", None),
+                aws_secret_access_key=env.str("AWS_SECRET_ACCESS_KEY", None),
             )
         except EnvValidationError as e:
             msg = f"ERROR    | {e}"
@@ -341,7 +351,7 @@ class SettingsManager:
     def apply_cli_settings(
         cls,
         cli_settings: dict[
-            str, str | int | Path | bool | list[Path | str] | LogLevel | StorageLocation
+            str, str | int | Path | bool | list[Path | str] | LogLevel | StorageType
         ],
     ) -> None:
         """Override existing settings with non-None values from CLI arguments.

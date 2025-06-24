@@ -1,6 +1,5 @@
 """Entrypoint for ezbak from docker. Relies entirely on environment variables for configuration."""
 
-import atexit
 import sys
 import time
 
@@ -11,7 +10,6 @@ from nclutils import logger
 from ezbak import ezbak
 from ezbak.constants import __version__
 from ezbak.models import settings
-from ezbak.utils import cleanup_tmp_dir
 
 
 def do_backup(scheduler: BackgroundScheduler | None = None) -> None:
@@ -20,6 +18,7 @@ def do_backup(scheduler: BackgroundScheduler | None = None) -> None:
     Performs a complete backup operation including creating the backup, pruning old backups based on retention policy, and optionally renaming backup files for better organization.
     """
     backup_manager = ezbak()
+
     backup_manager.create_backup()
     backup_manager.prune_backups()
     if settings.rename_files:
@@ -109,5 +108,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    atexit.register(cleanup_tmp_dir)
     main()

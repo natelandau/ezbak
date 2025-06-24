@@ -1,7 +1,9 @@
 """Controllers for ezbak."""
 
-from .backup_manager import BackupManager
+from .backup_manager import BackupManager  # isort:skip
 from .mongodb import MongoManager
 from .retention_policy_manager import RetentionPolicyManager
 
-__all__ = ["BackupManager", "MongoManager", "RetentionPolicyManager"]
+from .aws import AWSService  # isort:skip
+
+__all__ = ["AWSService", "BackupManager", "MongoManager", "RetentionPolicyManager"]

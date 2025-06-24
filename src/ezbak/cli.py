@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import atexit
 from pathlib import Path
 from typing import Annotated
 
@@ -11,7 +10,6 @@ from nclutils import pp
 
 from ezbak.constants import CLILogLevel
 from ezbak.models import settings
-from ezbak.utils import cleanup_tmp_dir
 
 
 def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
@@ -42,8 +40,6 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
             "chown_gid": getattr(ezbak_cli.command, "gid", None),
         }
     )
-
-    atexit.register(cleanup_tmp_dir)
 
 
 @cappa.command(name="ezback")

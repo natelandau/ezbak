@@ -57,7 +57,7 @@ class RetentionPolicyType(Enum):
     KEEP_ALL = "keep_all"  # Keeps all backups
 
 
-class StorageLocation(Enum):
+class StorageType(Enum):
     """Storage location."""
 
     LOCAL = "local"

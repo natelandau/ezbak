@@ -121,7 +121,7 @@ def test_cli_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
     output = clean_stderr()
     # debug(output)
 
-    assert "Deleted 10 old backups" in output
+    assert "Pruned 10 backups" in output
     existing_files = list(tmp_path.iterdir())
     assert len(existing_files) == 3
     for filename in [
@@ -180,7 +180,7 @@ def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
     output = clean_stderr()
     # debug(output)
 
-    assert "Deleted 3 old backups" in output
+    assert "Pruned 3 backups" in output
     existing_files = list(tmp_path.iterdir())
     assert len(existing_files) == 10
     for filename in [
