@@ -150,6 +150,7 @@ class AWSService:
             raise ValueError(msg)
 
         objects_to_delete = [{"Key": self._build_full_key(key)} for key in keys]
+        logger.trace(f"S3: Deleting {len(objects_to_delete)} objects")
 
         try:
             response = self.s3.delete_objects(
@@ -245,11 +246,11 @@ class AWSService:
         full_current_name = self._build_full_key(current_name)
         full_new_name = self._build_full_key(new_name)
 
-        logger.debug(f"S3: Attempting to rename '{full_current_name}' to '{full_new_name}'")
+        logger.trace(f"S3: Attempting to rename '{full_current_name}' to '{full_new_name}'")
         try:
             copy_source = {"Bucket": self.bucket, "Key": full_current_name}
             self.s3.copy_object(Bucket=self.bucket, CopySource=copy_source, Key=full_new_name)
-            logger.debug(f"S3: Copied '{full_current_name}' to '{full_new_name}'.")
+            logger.trace(f"S3: Copied '{full_current_name}' to '{full_new_name}'.")
 
         except ClientError as e:
             logger.error(f"S3: Failed to rename '{current_name}' to '{new_name}': {e}")
@@ -268,7 +269,7 @@ class AWSService:
 
         try:
             self.s3.delete_object(Bucket=self.bucket, Key=full_current_name)
-            logger.info(f"S3: Renamed '{current_name}' to '{new_name}'.")
+            logger.debug(f"S3: Renamed '{current_name}' to '{new_name}'.")
         except ClientError as e:
             logger.error(f"S3: Failed to rename '{current_name}' to '{new_name}': {e}")
             raise
@@ -301,5 +302,5 @@ class AWSService:
             logger.error(e)
             raise
 
-        logger.debug(f"S3: Upload {name}")
+        logger.debug(f"S3 upload: {name}")
         return True

@@ -155,9 +155,9 @@ class BackupManager:
                 logger.info(f"Delete: {backup.path}")
             case StorageType.AWS:
                 self.aws_service.delete_object(key=backup.name)
-            case StorageType.ALL:
+            case StorageType.ALL:  # pragma: no cover
                 pass
-            case _:
+            case _:  # pragma: no cover
                 assert_never(backup.storage_type)
 
     def _do_restore(self, backup: Backup, destination: Path) -> bool:
@@ -195,7 +195,7 @@ class BackupManager:
             with tarfile.open(tarfile_path) as archive:
                 archive.extractall(path=destination, filter="data")
         except tarfile.TarError as e:
-            logger.error(f"Failed to restore backup: {e}")
+            logger.error(f"Failed to restore backup: {tarfile_path}\n{e}")
             return False
 
         if settings.chown_uid and settings.chown_gid:
@@ -526,7 +526,6 @@ class BackupManager:
         if clean_before_restore or settings.clean_before_restore:
             clean_directory(dest)
             logger.info("Cleaned all files in backup destination before restore")
-
         most_recent_backup = self.get_latest_backup()
         if not most_recent_backup:
             logger.error("No backup found to restore")

@@ -217,15 +217,16 @@ class Settings:
                 logger.error(msg)
                 raise FileNotFoundError(msg) from None
 
-        if not self.storage_paths:
+        if not self.storage_paths and self.storage_location != StorageType.AWS:
             msg = "No storage paths provided"
             logger.error(msg)
             raise ValueError(msg)
 
-        for destination in self.storage_paths:
-            if not destination.exists():
-                logger.info(f"Create destination: {destination}")
-                destination.mkdir(parents=True, exist_ok=True)
+        if self.storage_paths:
+            for destination in self.storage_paths:
+                if not destination.exists():
+                    logger.info(f"Create destination: {destination}")
+                    destination.mkdir(parents=True, exist_ok=True)
 
 
 @env.parser_for("list_paths")
