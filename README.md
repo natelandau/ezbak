@@ -25,7 +25,7 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 -   [Installation](#installation)
 -   [Quick Start](#quick-start)
 -   [Usage](#usage)
--   [Manual](#manual)
+-   [Core Concepts](#core-concepts)
 -   [Common Use Cases](#common-use-cases)
 -   [Configuration Options](#configuration-options)
 -   [Contributing](#contributing)
@@ -199,7 +199,7 @@ docker run -it \
     ghcr.io/natelandau/ezbak:latest
 ```
 
-## Manual
+## Core Concepts
 
 Key concepts and configuration options for ezbak.
 
@@ -375,7 +375,7 @@ compression_level=9,         # Compression level (1-9, default: 9)
 label_time_units=True,       # Include time labels in filenames (default: True)
 rename_files=False,          # Rename existing files (default: False)
 strip_source_paths=False,    # Optional: Strip source paths from directory sources to flatten
-                            #            the tarfile (e.g. /source/foo.txt -> foo.txt)
+                             #            the tarfile (e.g. /source/foo.txt -> foo.txt)
 ```
 
 ### MongoDB Backup Options
