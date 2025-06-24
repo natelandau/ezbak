@@ -67,10 +67,10 @@ class Settings:
     mongo_uri: str | None = None
     mongo_db_name: str | None = None
 
-    aws_access_key_id: str | None = None
+    aws_access_key: str | None = None
     aws_s3_bucket_name: str | None = None
     aws_s3_bucket_path: str | None = None
-    aws_secret_access_key: str | None = None
+    aws_secret_key: str | None = None
 
     _tmp_dir: TemporaryDirectory | None = None
 
@@ -335,10 +335,10 @@ class SettingsManager:
                 mongo_uri=env.str("MONGO_URI", None),
                 mongo_db_name=env.str("MONGO_DB_NAME", None),
                 # AWS settings
-                aws_access_key_id=env.str("AWS_ACCESS_KEY_ID", None),
+                aws_access_key=env.str("AWS_ACCESS_KEY", None),
                 aws_s3_bucket_name=env.str("AWS_S3_BUCKET_NAME", None),
                 aws_s3_bucket_path=env.str("AWS_S3_BUCKET_PATH", None),
-                aws_secret_access_key=env.str("AWS_SECRET_ACCESS_KEY", None),
+                aws_secret_key=env.str("AWS_SECRET_KEY", None),
             )
         except EnvValidationError as e:
             msg = f"ERROR    | {e}"

@@ -474,7 +474,16 @@ class BackupManager:
         for file in files_for_rename:
             if file.do_rename:
                 target_exists = (
-                    len([x.new_name for x in files_for_rename if x.new_name == file.new_name]) > 1
+                    len(
+                        [
+                            x.new_name
+                            for x in files_for_rename
+                            if x.new_name == file.new_name
+                            and x.backup.storage_type == file.backup.storage_type
+                            and x.backup.storage_path == file.backup.storage_path
+                        ]
+                    )
+                    > 1
                 )
                 if target_exists:
                     file.new_name = f"{file.new_name.rstrip(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"

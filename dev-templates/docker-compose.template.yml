@@ -55,10 +55,11 @@ services:
             # - EZBAK_MONGO_DB_NAME=ezbak
             # AWS Storage Backend
             # ---------------------------
-            # - ACCESS_KEY_ID=
+            # - EZBAK_AWS_ACCESS_KEY=
+            # - EZBAK_AWS_SECRET_KEY=
             # - EZBAK_AWS_S3_BUCKET_NAME=
             # - EZBAK_AWS_S3_BUCKET_PATH=
-            # - EZBAK_AWS_SECRET_ACCESS_KEY=
+
         volumes:
             - ./source:/source
             - ./backups:/backups

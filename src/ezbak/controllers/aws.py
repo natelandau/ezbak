@@ -24,20 +24,20 @@ class AWSService:
         """
         logger.debug("AWSService: Initializing")
 
-        self.aws_access_key_id = settings.aws_access_key_id
-        self.aws_secret_access_key = settings.aws_secret_access_key
+        self.aws_access_key = settings.aws_access_key
+        self.aws_secret_key = settings.aws_secret_key
         self.bucket_path = settings.aws_s3_bucket_path or ""
         self.bucket = settings.aws_s3_bucket_name
 
-        if not all([self.aws_access_key_id, self.aws_secret_access_key, self.bucket]):
+        if not all([self.aws_access_key, self.aws_secret_key, self.bucket]):
             msg = "AWS credentials are not set"
             logger.error(msg)
             raise ValueError(msg)
 
         self.s3 = boto3.client(
             "s3",
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
+            aws_access_key_id=self.aws_access_key,
+            aws_secret_access_key=self.aws_secret_key,
             config=Config(retries={"max_attempts": 10, "mode": "standard"}),
         )
 

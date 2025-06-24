@@ -51,8 +51,8 @@ def test_aws_create_backup(filesystem, debug, clean_stderr):
         {
             "storage_location": StorageType.AWS,
             "aws_s3_bucket_name": "test-bucket",
-            "aws_access_key_id": "test-access-key-id",
-            "aws_secret_access_key": "test-secret-access-key",
+            "aws_access_key": "test-access-key-id",
+            "aws_secret_key": "test-secret-access-key",
             "log_level": "TRACE",
         }
     )
@@ -79,8 +79,8 @@ def test_aws_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
         {
             "storage_location": StorageType.AWS,
             "aws_s3_bucket_name": "test-bucket",
-            "aws_access_key_id": "test-access-key-id",
-            "aws_secret_access_key": "test-secret-access-key",
+            "aws_access_key": "test-access-key-id",
+            "aws_secret_key": "test-secret-access-key",
         }
     )
     backup_manager = ezbak(
@@ -110,8 +110,8 @@ def test_get_latest_backup(filesystem, debug, clean_stderr, tmp_path):
         {
             "storage_location": StorageType.AWS,
             "aws_s3_bucket_name": "test-bucket",
-            "aws_access_key_id": "test-access-key-id",
-            "aws_secret_access_key": "test-secret-access-key",
+            "aws_access_key": "test-access-key-id",
+            "aws_secret_key": "test-secret-access-key",
         }
     )
     backup_manager = ezbak(
@@ -137,8 +137,8 @@ def test_delete_object(mocker, debug, clean_stderr, tmp_path):
         {
             "storage_location": StorageType.AWS,
             "aws_s3_bucket_name": "test-bucket",
-            "aws_access_key_id": "test-access-key-id",
-            "aws_secret_access_key": "test-secret-access-key",
+            "aws_access_key": "test-access-key-id",
+            "aws_secret_key": "test-secret-access-key",
         }
     )
     backup_manager = ezbak(
@@ -162,8 +162,8 @@ def test_rename_file(mocker, debug, clean_stderr, tmp_path):
         {
             "storage_location": StorageType.AWS,
             "aws_s3_bucket_name": "test-bucket",
-            "aws_access_key_id": "test-access-key-id",
-            "aws_secret_access_key": "test-secret-access-key",
+            "aws_access_key": "test-access-key-id",
+            "aws_secret_key": "test-secret-access-key",
             "log_level": LogLevel.TRACE,
         }
     )
@@ -192,8 +192,8 @@ def test_delete_objects(mocker, debug, clean_stderr, tmp_path):
         {
             "storage_location": StorageType.AWS,
             "aws_s3_bucket_name": "test-bucket",
-            "aws_access_key_id": "test-access-key-id",
-            "aws_secret_access_key": "test-secret-access-key",
+            "aws_access_key": "test-access-key-id",
+            "aws_secret_key": "test-secret-access-key",
             "log_level": LogLevel.TRACE,
         }
     )
