@@ -6,10 +6,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from environs import Env, validate
+from environs.exceptions import EnvValidationError
 from nclutils import logger
 from rich.console import Console
 
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, ENVAR_PREFIX, BackupType, RetentionPolicyType
+from ezbak.constants import (
+    DEFAULT_COMPRESSION_LEVEL,
+    ENVAR_PREFIX,
+    BackupType,
+    LogLevel,
+    RetentionPolicyType,
+    StorageType,
+)
 from ezbak.controllers.retention_policy_manager import RetentionPolicyManager
 
 env = Env(prefix=ENVAR_PREFIX)
@@ -28,6 +36,7 @@ class Settings:
     name: str | None = None
     source_paths: list[Path] | None = None
     storage_paths: list[Path] | None = None
+    storage_location: StorageType = StorageType.LOCAL
 
     strip_source_paths: bool = False
     exclude_regex: str | None = None
@@ -46,7 +55,7 @@ class Settings:
 
     cron: str | None = None
     tz: str | None = None
-    log_level: str = "INFO"
+    log_level: LogLevel = LogLevel.INFO
     log_file: str | Path | None = None
     log_prefix: str | None = None
 
@@ -57,6 +66,11 @@ class Settings:
 
     mongo_uri: str | None = None
     mongo_db_name: str | None = None
+
+    aws_access_key: str | None = None
+    aws_s3_bucket_name: str | None = None
+    aws_s3_bucket_path: str | None = None
+    aws_secret_key: str | None = None
 
     _tmp_dir: TemporaryDirectory | None = None
 
@@ -121,7 +135,9 @@ class Settings:
             self._tmp_dir = TemporaryDirectory()
         return self._tmp_dir
 
-    def model_dump(self) -> dict[str, int | str | bool | list[Path | str] | None]:
+    def model_dump(
+        self,
+    ) -> dict[str, int | str | bool | list[Path | str] | LogLevel | StorageType | None]:
         """Serialize settings to a dictionary representation.
 
         Converts all settings attributes to a dictionary format for serialization,
@@ -132,11 +148,13 @@ class Settings:
         """
         return self.__dict__
 
-    def update(self, updates: dict[str, str | int | Path | bool | list[Path | str]]) -> None:
+    def update(
+        self,
+        updates: dict[str, str | int | Path | bool | list[Path | str] | LogLevel | StorageType],
+    ) -> None:
         """Update settings with provided key-value pairs and reset cached properties.
 
-        Validates that all keys exist as attributes on the settings object before updating.
-        Resets cached properties when their underlying data changes to ensure consistency.
+        Validates that all keys exist as attributes on the settings object before updating. Resets cached properties when their underlying data changes to ensure consistency.
 
         Args:
             updates (dict[str, str | int | Path | bool | list[Path | str]]): Dictionary of setting keys and their new values.
@@ -150,6 +168,14 @@ class Settings:
                 sys.exit(1)
 
             if value is not None:
+                if key == "log_level" and isinstance(value, str):
+                    setattr(self, key, LogLevel(value.upper()))
+                    continue
+
+                if key == "storage_location" and isinstance(value, str):
+                    setattr(self, key, StorageType(value.upper()))
+                    continue
+
                 setattr(self, key, value)
 
         # Reset cached properties
@@ -191,15 +217,16 @@ class Settings:
                 logger.error(msg)
                 raise FileNotFoundError(msg) from None
 
-        if not self.storage_paths:
+        if not self.storage_paths and self.storage_location != StorageType.AWS:
             msg = "No storage paths provided"
             logger.error(msg)
             raise ValueError(msg)
 
-        for destination in self.storage_paths:
-            if not destination.exists():
-                logger.info(f"Create destination: {destination}")
-                destination.mkdir(parents=True, exist_ok=True)
+        if self.storage_paths:
+            for destination in self.storage_paths:
+                if not destination.exists():
+                    logger.info(f"Create destination: {destination}")
+                    destination.mkdir(parents=True, exist_ok=True)
 
 
 @env.parser_for("list_paths")
@@ -239,69 +266,94 @@ class SettingsManager:
         if cls._instance is not None:
             return cls._instance
 
-        settings = Settings(
-            action=env.str(
-                "ACTION",
-                default=None,
-                validate=validate.OneOf(
-                    ["backup", "restore", None], error="ACTION must be one of: {choices}"
+        try:
+            settings = Settings(
+                action=env.str(
+                    "ACTION",
+                    default=None,
+                    validate=validate.OneOf(
+                        ["backup", "restore", None], error="ACTION must be one of: {choices}"
+                    ),
                 ),
-            ),
-            name=env.str("NAME", None),
-            source_paths=env.list_paths("SOURCE_PATHS", None),
-            storage_paths=env.list_paths("STORAGE_PATHS", None),
-            # Backup settings
-            strip_source_paths=env.bool("STRIP_SOURCE_PATHS", default=False),
-            exclude_regex=env.str("EXCLUDE_REGEX", None),
-            include_regex=env.str("INCLUDE_REGEX", None),
-            compression_level=env.int(
-                "COMPRESSION_LEVEL",
-                default=DEFAULT_COMPRESSION_LEVEL,
-                validate=validate.OneOf(
-                    [1, 2, 3, 4, 5, 6, 7, 8, 9],
-                    error="COMPRESSION_LEVEL must be one of: {choices}",
+                name=env.str("NAME", None),
+                source_paths=env.list_paths("SOURCE_PATHS", None),
+                storage_paths=env.list_paths("STORAGE_PATHS", None),
+                storage_location=StorageType(
+                    env.str(
+                        "STORAGE_LOCATION",
+                        default=StorageType.LOCAL.value,
+                        validate=validate.OneOf(
+                            [x.value for x in StorageType],
+                            error="STORAGE_LOCATION must be one of: {choices}",
+                        ),
+                    )
                 ),
-            ),
-            label_time_units=env.bool("LABEL_TIME_UNITS", default=True),
-            rename_files=env.bool("RENAME_FILES", default=False),
-            # Retention settings
-            max_backups=env.int("MAX_BACKUPS", None),
-            retention_yearly=env.int("RETENTION_YEARLY", None),
-            retention_monthly=env.int("RETENTION_MONTHLY", None),
-            retention_weekly=env.int("RETENTION_WEEKLY", None),
-            retention_daily=env.int("RETENTION_DAILY", None),
-            retention_hourly=env.int("RETENTION_HOURLY", None),
-            retention_minutely=env.int("RETENTION_MINUTELY", None),
-            # Cron settings
-            cron=env.str("CRON", default=None),
-            tz=env.str("TZ", None),
-            # Logging settings
-            log_level=env.str(
-                "LOG_LEVEL",
-                default="INFO",
-                validate=validate.OneOf(
-                    ["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                    error="LOG_LEVEL must be one of: {choices}",
+                # Backup settings
+                strip_source_paths=env.bool("STRIP_SOURCE_PATHS", default=False),
+                exclude_regex=env.str("EXCLUDE_REGEX", None),
+                include_regex=env.str("INCLUDE_REGEX", None),
+                compression_level=env.int(
+                    "COMPRESSION_LEVEL",
+                    default=DEFAULT_COMPRESSION_LEVEL,
+                    validate=validate.OneOf(
+                        [1, 2, 3, 4, 5, 6, 7, 8, 9],
+                        error="COMPRESSION_LEVEL must be one of: {choices}",
+                    ),
                 ),
-            ),
-            log_file=env.str("LOG_FILE", None),
-            log_prefix=env.str("LOG_PREFIX", None),
-            # Restore settings
-            restore_path=env.str("RESTORE_PATH", None),
-            clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
-            chown_uid=env.int("CHOWN_UID", None),
-            chown_gid=env.int("CHOWN_GID", None),
-            # MongoDB settings
-            mongo_uri=env.str("MONGO_URI", None),
-            mongo_db_name=env.str("MONGO_DB_NAME", None),
-        )
+                label_time_units=env.bool("LABEL_TIME_UNITS", default=True),
+                rename_files=env.bool("RENAME_FILES", default=False),
+                # Retention settings
+                max_backups=env.int("MAX_BACKUPS", None),
+                retention_yearly=env.int("RETENTION_YEARLY", None),
+                retention_monthly=env.int("RETENTION_MONTHLY", None),
+                retention_weekly=env.int("RETENTION_WEEKLY", None),
+                retention_daily=env.int("RETENTION_DAILY", None),
+                retention_hourly=env.int("RETENTION_HOURLY", None),
+                retention_minutely=env.int("RETENTION_MINUTELY", None),
+                # Cron settings
+                cron=env.str("CRON", default=None),
+                tz=env.str("TZ", None),
+                # Logging settings
+                log_level=LogLevel(
+                    env.str(
+                        "LOG_LEVEL",
+                        default=LogLevel.INFO.name,
+                        validate=validate.OneOf(
+                            [x.name for x in LogLevel],
+                            error="LOG_LEVEL must be one of: {choices}",
+                        ),
+                    )
+                ),
+                log_file=env.str("LOG_FILE", None),
+                log_prefix=env.str("LOG_PREFIX", None),
+                # Restore settings
+                restore_path=env.str("RESTORE_PATH", None),
+                clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
+                chown_uid=env.int("CHOWN_UID", None),
+                chown_gid=env.int("CHOWN_GID", None),
+                # MongoDB settings
+                mongo_uri=env.str("MONGO_URI", None),
+                mongo_db_name=env.str("MONGO_DB_NAME", None),
+                # AWS settings
+                aws_access_key=env.str("AWS_ACCESS_KEY", None),
+                aws_s3_bucket_name=env.str("AWS_S3_BUCKET_NAME", None),
+                aws_s3_bucket_path=env.str("AWS_S3_BUCKET_PATH", None),
+                aws_secret_key=env.str("AWS_SECRET_KEY", None),
+            )
+        except EnvValidationError as e:
+            msg = f"ERROR    | {e}"
+            err_console.print(msg)
+            sys.exit(1)
 
         cls._instance = settings
         return settings
 
     @classmethod
     def apply_cli_settings(
-        cls, cli_settings: dict[str, str | int | Path | bool | list[Path | str]]
+        cls,
+        cli_settings: dict[
+            str, str | int | Path | bool | list[Path | str] | LogLevel | StorageType
+        ],
     ) -> None:
         """Override existing settings with non-None values from CLI arguments.
 

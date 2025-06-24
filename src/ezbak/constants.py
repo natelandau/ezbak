@@ -55,3 +55,22 @@ class RetentionPolicyType(Enum):
     TIME_BASED = "time_based"  # Uses yearly/monthly/weekly/etc. retention
     COUNT_BASED = "count_based"  # Uses simple max_backups count
     KEEP_ALL = "keep_all"  # Keeps all backups
+
+
+class StorageType(Enum):
+    """Storage location."""
+
+    LOCAL = "local"
+    AWS = "aws"
+    ALL = "all"
+
+
+class LogLevel(Enum):
+    """Log level."""
+
+    TRACE = "TRACE"
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"

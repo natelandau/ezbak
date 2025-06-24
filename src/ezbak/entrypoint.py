@@ -1,6 +1,5 @@
 """Entrypoint for ezbak from docker. Relies entirely on environment variables for configuration."""
 
-import atexit
 import sys
 import time
 
@@ -13,22 +12,13 @@ from ezbak.constants import __version__
 from ezbak.models import settings
 
 
-def cleanup_tmp_dir() -> None:
-    """Clean up the temporary directory to prevent disk space accumulation.
-
-    Removes the temporary directory created during backup operations to free up disk space and maintain system cleanliness.
-    """
-    if settings._tmp_dir:  # noqa: SLF001
-        settings._tmp_dir.cleanup()  # noqa: SLF001
-        logger.debug("Temporary directory cleaned up")
-
-
 def do_backup(scheduler: BackgroundScheduler | None = None) -> None:
     """Create a backup of the service data directory and manage retention.
 
     Performs a complete backup operation including creating the backup, pruning old backups based on retention policy, and optionally renaming backup files for better organization.
     """
     backup_manager = ezbak()
+
     backup_manager.create_backup()
     backup_manager.prune_backups()
     if settings.rename_files:
@@ -70,7 +60,7 @@ def main() -> None:
     Sets up logging, validates configuration settings, and either runs a one-time backup/restore operation or starts a scheduled backup service based on cron configuration.
     """
     logger.configure(
-        log_level=settings.log_level,
+        log_level=settings.log_level.value,
         show_source_reference=False,
         log_file=str(settings.log_file) if settings.log_file else None,
         prefix=settings.log_prefix,
@@ -118,5 +108,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    atexit.register(cleanup_tmp_dir)
     main()

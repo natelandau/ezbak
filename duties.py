@@ -179,12 +179,12 @@ def dev_clean(ctx: Context) -> None:  # noqa: ARG001
     """Clean the development environment."""
     if DEV_DIR.exists():
         shutil.rmtree(DEV_DIR)
+        console.print(f"✓ Cleaned dev env in '{DEV_DIR.name}/'")
 
     env = PROJECT_ROOT / ".env"
     if env.exists():
         env.unlink()
-
-    console.print(f"✓ Cleaned dev env in '{DEV_DIR.name}/'")
+        console.print("✓ Cleaned .env file in project root")
 
 
 @duty(pre=[dev_clean])
@@ -230,5 +230,5 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
     console.print(f"✓ Replaced text in '{DEV_DIR.name}/{docker_compose.name}'")
 
     console.print(
-        f"✓ Development environment setup complete. Start the development environment with\n  one of the following commands:\n    [green]docker compose -f {DEV_DIR.name}/{docker_compose.name} up --build[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
+        f"✓ Development environment setup complete.\n  Start the development environment with one of the following commands:\n    [green]docker compose -f {DEV_DIR.name}/{docker_compose.name} up --build[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
     )

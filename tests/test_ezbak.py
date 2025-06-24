@@ -1,6 +1,7 @@
 """Test ezbak."""
 
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -17,7 +18,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
     """Verify that a backups are created and restored correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -57,6 +58,7 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     output = clean_stderr()
     # debug(output)
     # debug(src_dir)
+    # debug(dest1)
 
     assert "Skip backup of symlink" in output
 
@@ -78,32 +80,6 @@ def test_create_and_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     assert len(list_backups) == 14
     assert all(Path(dest1 / filename).exists() for filename in filenames)
     assert all(Path(dest2 / filename).exists() for filename in filenames)
-
-    # Then: Latest backup has correct name structure
-    latest_backup = backup_manager.get_latest_backup()
-    latest_backup_name_parts = BACKUP_NAME_REGEX.match(latest_backup.name).groupdict()
-    assert latest_backup_name_parts["name"] == "test"
-    assert latest_backup_name_parts["timestamp"] == frozen_time_str
-    assert latest_backup_name_parts["period"] == "minutely"
-    assert len(latest_backup_name_parts["uuid"]) == 5
-    assert latest_backup_name_parts["extension"] == "tgz"
-
-    # When: Restoring the latest backup
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
-    existing_file = restore_dir / "existing_file.txt"
-    existing_file.touch()
-    backup_manager.restore_backup(restore_dir)
-
-    # Then: All source files are restored correctly
-    for file in src_dir.rglob("*"):
-        if file.name in {test_exclude_file.name, "symlink"}:
-            assert not (restore_dir / src_dir.name / file.name).exists()
-            continue
-        assert (restore_dir / src_dir.name / file.name).exists()
-
-    assert (restore_dir / test_file.name).exists()
-    assert (restore_dir / existing_file.name).exists()
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -205,25 +181,79 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
     assert i == len(list(src_dir.rglob("*")))
 
 
-def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
-    """Verify that the path is stripped from the backup."""
+def test_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+    """Verify the correct backup is selected and restored."""
     # Given: Source and destination directories from fixture
-    src_dir, dest1, _ = filesystem
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
+    src_dir, _, _ = filesystem
+    tmp_dst = tmp_path / "dst"
+    tmp_dst.mkdir()
+
+    backup_names = [
+        "test-20250623T182710-yearly.tgz",
+        "test-20250623T184301-weekly.tgz",
+        "test-20250623T190750-daily.tgz",
+        "test-20250623T193930-hourly.tgz",
+        "test-20250623T193951-minutely.tgz",
+        "test-20250624T084658-daily.tgz",
+        "test-20250624T084727-hourly-Tr5J7.tgz",
+    ]
+
+    for backup_name in backup_names:
+        shutil.copy2(fixture_archive_path, tmp_dst / backup_name)
 
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(
         name="test",
         source_paths=[src_dir],
-        storage_paths=[dest1],
+        storage_paths=[tmp_dst],
+    )
+    latest_backup = backup_manager.get_latest_backup()
+    assert latest_backup.name == "test-20250624T084727-hourly-Tr5J7.tgz"
+
+    latest_backup = backup_manager.get_latest_backup()
+    latest_backup_name_parts = BACKUP_NAME_REGEX.match(latest_backup.name).groupdict()
+    assert latest_backup_name_parts["name"] == "test"
+    assert latest_backup_name_parts["timestamp"] == "20250624T084727"
+    assert latest_backup_name_parts["period"] == "hourly"
+    assert len(latest_backup_name_parts["uuid"]) == 5
+    assert latest_backup_name_parts["extension"] == "tgz"
+
+    # When: Restoring the latest backup
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    existing_file = restore_dir / "existing_file.txt"
+    existing_file.touch()
+    backup_manager.restore_backup(restore_dir)
+
+    # Then: All source files are restored correctly
+    for file in src_dir.rglob("*"):
+        assert (restore_dir / src_dir.name / file.name).exists()
+
+
+def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
+    """Verify that the path is stripped from the backup."""
+    # Given: Source and destination directories from fixture
+    src_dir, dst1, _ = filesystem
+
+    # Given: A backup manager configured with test parameters
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dst1],
         strip_source_paths=True,
     )
-    backup_manager.create_backup()
-    backup_manager.restore_backup(restore_dir)
-    # output = clean_stderr()
-    # debug(output)
 
+    backup_manager.create_backup()
+
+    # When: Restoring the latest backup
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    backup_manager.restore_backup(restore_dir)
+
+    debug(src_dir, "src_dir")
+    debug(restore_dir)
+
+    # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
         assert (restore_dir / file.name).exists()
 
@@ -320,11 +350,11 @@ def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
     # debug(output)
     # debug(tmp_path)
 
-    assert "Renamed: test-20240609T090932-yearly.tgz -> test-20240609T090932.tgz" in output
-    assert "Renamed: test-20250609T090932-yearly.tgz -> test-20250609T090932.tgz" in output
-    assert "Renamed: test-20250609T095751-minutely.tgz -> test-20250609T095751.tgz" in output
+    assert "Rename: …/test-20240609T090932-yearly.tgz -> test-20240609T090932.tgz" in output
+    assert "Rename: …/test-20250609T090932-yearly.tgz -> test-20250609T090932.tgz" in output
+    assert "Rename: …/test-20250609T095751-minutely.tgz -> test-20250609T095751.tgz" in output
     assert (
-        "DEBUG    | Renamed: test-20250609T095804-minutely-p2we3r.tgz -> test-20250609T095804.tgz"
+        "DEBUG    | Rename: …/test-20250609T095804-minutely-p2we3r.tgz -> test-20250609T095804.tgz"
         in output
     )
     assert re.search(
@@ -332,8 +362,6 @@ def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
         output,
         re.IGNORECASE,
     )
-
-    ###################################
 
     renamed_files = [
         "test-20250609T095751.tgz",
@@ -377,10 +405,10 @@ def test_prune_max_backups(debug, clean_stderr, tmp_path):
     )
     backup_manager.prune_backups()
     output = clean_stderr()
-    # debug(output)
+    debug(output)
     # debug(tmp_path)
 
-    assert "Deleted 10 old backups" in output
+    assert "Pruned 10 backups" in output
     existing_files = list(tmp_path.iterdir())
     assert len(existing_files) == 3
     for filename in [
@@ -430,7 +458,7 @@ def test_prune_policy(debug, clean_stderr, tmp_path):
     # debug(output)
     # debug(tmp_path)
 
-    assert "Deleted 3 old backups" in output
+    assert "Pruned 3 backups" in output
     existing_files = list(tmp_path.iterdir())
     assert len(existing_files) == 10
     for filename in [

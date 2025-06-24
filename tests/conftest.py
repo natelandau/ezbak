@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from nclutils.pytest_fixtures import clean_stderr, clean_stdout, debug  # noqa: F401
 
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, LogLevel, StorageType
 from ezbak.models.settings import settings
 
 
@@ -54,7 +54,9 @@ def reset_settings() -> None:
         elif key == "rename_files":
             setattr(settings, key, False)
         elif key == "log_level":
-            setattr(settings, key, "INFO")
+            setattr(settings, key, LogLevel.INFO)
+        elif key == "storage_location":
+            setattr(settings, key, StorageType.LOCAL)
         else:
             setattr(settings, key, None)
 

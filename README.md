@@ -9,7 +9,8 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 **Features**
 
 -   Create tar gzipped compressed backups (tgz format) of files and directories
--   Supports MongoDB backups (via `mongodump`)
+-   Creates MongoDB backups (via `mongodump`)
+-   Supports AWS S3 as a storage location
 -   File filtering with regex patterns
 -   Intelligent retention policies (time-based and count-based)
 -   Automatic cleanup of old backups
@@ -33,7 +34,7 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 
 ezbak can be used as a python package, cli script, or docker container.
 
-**Note:** ezbak requires Python 3.10 or higher.
+**Note:** ezbak requires Python 3.11 or higher.
 
 ### Python Package
 
@@ -361,8 +362,8 @@ retention_minutely=60,  # Keep 60 minutely backups
 ### File Filtering
 
 ```python
-include_regex=r"\.txt$",     # Only include .txt files
-exclude_regex=r"temp|cache", # Exclude temp and cache files
+include_regex=r"\.txt$",     # Optional: Only include .txt files
+exclude_regex=r"temp|cache", # Optional: Exclude temp and cache files
 ```
 
 ### Backup Options
@@ -371,32 +372,44 @@ exclude_regex=r"temp|cache", # Exclude temp and cache files
 compression_level=9,         # Compression level (1-9, default: 9)
 label_time_units=True,       # Include time labels in filenames (default: True)
 rename_files=False,          # Rename existing files (default: False)
-strip_source_paths=False,    # Strip source paths from directory sources to flatten the tarfile (e.g. /source/foo.txt -> foo.txt)
+strip_source_paths=False,    # Optional: Strip source paths from directory sources to flatten
+                            #            the tarfile (e.g. /source/foo.txt -> foo.txt)
 ```
 
 ### MongoDB Backup Options
 
 ```python
 # Setting these will disable file backups and only backup the MongoDB database
-mongo_uri="mongodb://[username]:[password]@localhost:27017",  # MongoDB URI
+mongo_uri="mongodb://[username]:[password]@localhost:27017",        # MongoDB URI
 mongo_db_name="my-database",                                        # MongoDB database name
 ```
 
 ### Restore Options
 
 ```python
-restore_path=Path("/restore"),           # Where to restore files
-clean_before_restore=True,               # Clear destination first
-chown_uid=1000,                          # Set file owner of all restored files
-chown_gid=1000,                          # Set file group of all restored files
+restore_path=Path("/restore"),           # Optional: Where to restore files.
+                                         #           Can be an arg to ezbak.restore_backup()
+clean_before_restore=True,               # Optional: Clear destination first
+chown_uid=1000,                          # Optional: Set file owner of all restored files
+chown_gid=1000,                          # Optional: Set file group of all restored files
 ```
 
 ### Logging
 
 ```python
-log_level="INFO",                       # DEBUG, INFO, WARNING, ERROR
-log_file=Path("/var/log/ezbak.log"),    # Log file path
-log_prefix="BACKUP",                    # Log message prefix
+log_level="INFO",                       # One of: TRACE, DEBUG, INFO, WARNING, ERROR. (default: INFO)
+log_file=Path("/var/log/ezbak.log"),    # Optional: Log file path.
+                                        #           If not set, logs are only printed to stderr
+log_prefix="BACKUP",                    # Optional: Log message prefix added to all log messages
+```
+
+### AWS S3 Configuration
+
+```python
+aws_access_key="your-access-key",
+aws_secret_key="your-secret-key",
+aws_s3_bucket_name="your-bucket-name",
+aws_s3_bucket_path="your-bucket-path", # Optional: Path within the bucket
 ```
 
 ### Environment Variables

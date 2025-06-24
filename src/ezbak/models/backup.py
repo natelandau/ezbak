@@ -1,99 +1,61 @@
 """Backup model for managing individual backup archives and restoration operations."""
 
-import os
-import tarfile
-from dataclasses import dataclass
 from pathlib import Path
 
 from nclutils import logger
-from whenever import SystemDateTime, ZonedDateTime
+from whenever import PlainDateTime, TimeZoneNotFoundError
+
+from ezbak.constants import DEFAULT_DATE_FORMAT, TIMESTAMP_REGEX
+from ezbak.models.settings import StorageType
 
 from .settings import settings
 
 
-@dataclass
 class Backup:
     """Represent a single backup archive with metadata and restoration capabilities.
 
-    Encapsulates a backup archive file with its timestamp information, ownership settings,
-    and methods for restoration and deletion. Provides time-based categorization for
-    retention policy management and safe restoration with ownership preservation.
+    Encapsulates a backup archive file with its timestamp information, ownership settings, and methods for restoration and deletion. Provides time-based categorization for retention policy management and safe restoration with ownership preservation.
     """
 
-    path: Path
-    timestamp: str
-    year: str
-    month: str
-    week: str
-    day: str
-    hour: str
-    minute: str
-    zoned_datetime: ZonedDateTime | SystemDateTime
+    def __init__(
+        self,
+        name: str,
+        storage_type: StorageType,
+        path: Path | None = None,
+        storage_path: Path | str | None = None,
+    ) -> None:
+        self.name = name
 
-    @staticmethod
-    def _chown_all_files(directory: Path | str) -> None:
-        """Recursively change ownership of all files in a directory to backup settings.
+        self.storage_type = storage_type
+        self.storage_path = (
+            settings.aws_s3_bucket_path if storage_type == StorageType.AWS else storage_path
+        )
 
-        Updates file ownership for all files and subdirectories in the specified directory to match the backup's configured user and group IDs. Used during restoration to preserve original file ownership from the backup.
+        # Used for local backups
+        self.path = path
 
-        Args:
-            directory (Path | str): Directory path to recursively update file ownership.
-        """
-        if os.getuid() != 0:
-            logger.warning("Not running as root, skip chown operations")
-            return
-
-        if isinstance(directory, str):
-            directory = Path(directory)
-
-        uid = int(settings.chown_uid)
-        gid = int(settings.chown_gid)
-
-        for path in directory.rglob("*"):
-            try:
-                os.chown(path.resolve(), uid, gid)
-            except (OSError, PermissionError) as e:
-                logger.warning(f"Failed to chown {path}: {e}")
-                break
-
-            logger.trace(f"chown: {path.resolve()}")
-
-        logger.info(f"chown all restored files to '{uid}:{gid}'")
-
-    def delete(self) -> Path:
-        """Remove the backup archive file from the filesystem.
-
-        Permanently deletes the backup archive file and returns the path of the deleted file.
-        Used by retention policies to clean up old backups when storage limits are exceeded.
-
-        Returns:
-            Path: Path to the deleted backup archive file.
-        """
-        logger.debug(f"Delete: {self.path.name}")
-        self.path.unlink()
-        return self.path
-
-    def restore(self, destination: Path) -> bool:
-        """Extract backup archive contents to the specified destination directory.
-
-        Extracts all files from the backup archive to the destination path while preserving file structure. Optionally restores original file ownership if chown settings are configured. Used for disaster recovery and backup verification.
-
-        Args:
-            destination (Path): Directory path where backup contents will be extracted.
-
-        Returns:
-            bool: True if restoration completed successfully, False if extraction failed.
-        """
-        logger.debug(f"Restoring backup: {self.path.name}")
         try:
-            with tarfile.open(self.path) as archive:
-                archive.extractall(path=destination, filter="data")
-        except tarfile.TarError as e:
-            logger.error(f"Failed to restore backup: {e}")
-            return False
+            self.timestamp = TIMESTAMP_REGEX.search(name).group(0)
+        except AttributeError:
+            logger.warning(f"Could not parse timestamp: {name}")
+            raise
 
-        if settings.chown_uid and settings.chown_gid:
-            self._chown_all_files(destination)
+        plain_dt = PlainDateTime.parse_strptime(self.timestamp, format=DEFAULT_DATE_FORMAT)
+        try:
+            self.zoned_datetime = (
+                plain_dt.assume_tz(settings.tz) if settings.tz else plain_dt.assume_system_tz()
+            )
+        except TimeZoneNotFoundError as e:
+            logger.error(e)
+            raise
 
-        logger.info(f"Restored backup to {destination}")
-        return True
+        self.year = str(self.zoned_datetime.year)
+        self.month = str(self.zoned_datetime.month)
+        self.week = str(self.zoned_datetime.py_datetime().strftime("%W"))
+        self.day = str(self.zoned_datetime.day)
+        self.hour = str(self.zoned_datetime.hour)
+        self.minute = str(self.zoned_datetime.minute)
+
+    def __repr__(self) -> str:
+        """Return a string representation of the backup."""
+        return f"<Backup: {self.name} ({self.storage_type.name}) {self.storage_path}>"
