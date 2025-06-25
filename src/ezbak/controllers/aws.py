@@ -66,7 +66,7 @@ class AWSService:
 
         return f"{normalized_bucket_path}{key}"
 
-    def file_exists(self, key: str) -> bool:
+    def object_exists(self, key: str) -> bool:
         """Check if a file exists in the S3 bucket.
 
         Verify the existence of a file in S3 before performing operations on it. Use this method when you need to check if a file exists before attempting to download, delete, or modify it. The method automatically handles bucket path prefixes and provides detailed logging of the existence check.
@@ -110,16 +110,17 @@ class AWSService:
         """
         full_key = self._build_full_key(key)
 
+        logger.trace(f"S3: Attempting to delete {full_key}")
         try:
             self.s3.delete_object(Bucket=self.bucket, Key=full_key)
         except ClientError as e:
             logger.error(e)
             raise
 
-        logger.info(f"S3: Delete {key}")
+        logger.trace(f"S3: Deleted {key}")
         return True
 
-    def delete_objects(self, keys: list[str]) -> bool:
+    def delete_objects(self, keys: list[str]) -> int:
         """Delete multiple files from the configured S3 bucket.
 
         Remove multiple files from the S3 bucket by their keys using batch deletion. Use this method when you need to efficiently delete multiple files at once, such as cleaning up multiple outdated backups or removing a batch of files. The method automatically handles bucket path prefixes and provides detailed logging of the deletion process.
@@ -136,7 +137,7 @@ class AWSService:
         """
         if not keys:
             logger.warning("S3: No keys provided for deletion")
-            return True
+            return 0
 
         if len(keys) > 1000:  # noqa: PLR2004
             msg = "S3: Cannot delete more than 1000 objects at once"
@@ -144,7 +145,7 @@ class AWSService:
             raise ValueError(msg)
 
         objects_to_delete = [{"Key": self._build_full_key(key)} for key in keys]
-        logger.trace(f"S3: Deleting {len(objects_to_delete)} objects")
+        logger.trace(f"S3: Attempting to delete {len(objects_to_delete)} objects")
 
         try:
             response = self.s3.delete_objects(
@@ -158,7 +159,7 @@ class AWSService:
             # Log successful deletions
             deleted_objects = response.get("Deleted", [])
             for obj in deleted_objects:
-                logger.debug(f"S3: Delete {obj['Key']}")
+                logger.trace(f"S3: Deleted {obj['Key']}")
 
             # Handle any errors that occurred during deletion
             errors = response.get("Errors", [])
@@ -167,9 +168,9 @@ class AWSService:
                     logger.error(
                         f"S3: Failed to delete '{error['Key']}': {error['Code']} - {error['Message']}"
                     )
-                return False
+                return len(deleted_objects)
 
-            logger.info(f"S3: Successfully deleted {len(deleted_objects)} objects")
+            logger.trace(f"S3: Successfully deleted {len(deleted_objects)} objects")
 
         except ClientError as e:
             logger.error(f"S3: Failed to delete objects: {e}")
@@ -193,6 +194,7 @@ class AWSService:
             ClientError: If the object cannot be downloaded.
         """
         full_key = self._build_full_key(key)
+        logger.trace(f"S3: Attempting to download '{full_key}' to '{destination}'")
         try:
             response = self.s3.get_object(Bucket=self.bucket, Key=full_key)
 
@@ -203,6 +205,7 @@ class AWSService:
             logger.error(f"S3: Failed to download {key}: {e}")
             raise
 
+        logger.trace(f"S3: Downloaded '{full_key}' to '{destination}'")
         return destination
 
     def list_objects(self, prefix: str = "") -> list[str]:
@@ -218,6 +221,8 @@ class AWSService:
         """
         full_prefix = self._build_full_key(prefix)
         object_keys: list[str] = []
+
+        logger.trace(f"S3: Attempting to list objects with prefix '{full_prefix}'")
         try:
             paginator = self.s3.get_paginator("list_objects_v2")
             pages = paginator.paginate(Bucket=self.bucket, Prefix=full_prefix)
@@ -226,9 +231,11 @@ class AWSService:
         except ClientError as e:
             logger.error(f"Failed to list objects with prefix '{prefix}': {e}")
             return []
+
+        logger.trace(f"S3: Listed {len(object_keys)} objects with prefix '{full_prefix}'")
         return object_keys
 
-    def rename_file(self, current_name: str, new_name: str) -> bool:
+    def rename_object(self, current_name: str, new_name: str) -> bool:
         """Rename a file in the configured S3 bucket by copying and then deleting the old one.
 
         Change the name of a file in S3 while preserving its content and metadata. Use this method when you need to reorganize files in S3, implement versioning schemes, or correct file naming conventions. The method performs a copy operation followed by deletion to ensure data integrity.
@@ -256,7 +263,7 @@ class AWSService:
             logger.error(f"S3: Failed to rename '{current_name}' to '{new_name}': {e}")
             raise
 
-        if not self.file_exists(full_new_name):
+        if not self.object_exists(full_new_name):
             raise ClientError(
                 {
                     "Error": {
@@ -269,14 +276,15 @@ class AWSService:
 
         try:
             self.s3.delete_object(Bucket=self.bucket, Key=full_current_name)
-            logger.debug(f"S3: Renamed '{current_name}' to '{new_name}'.")
+
         except ClientError as e:
             logger.error(f"S3: Failed to rename '{current_name}' to '{new_name}': {e}")
             raise
 
+        logger.trace(f"S3: Renamed '{current_name}' to '{new_name}'.")
         return True
 
-    def upload_file(self, file: Path, name: str = "") -> bool:
+    def upload_object(self, file: Path, name: str = "") -> bool:
         """Upload a local file to the configured S3 bucket.
 
         Store a file from the local filesystem to the S3 bucket using the configured bucket path. Use this method when you need to store files in S3 for backup, sharing, or cloud storage purposes. The method automatically handles the bucket path prefix and provides detailed logging.
@@ -297,10 +305,10 @@ class AWSService:
         full_name = self._build_full_key(name)
 
         try:
-            self.s3.upload_file(file, self.bucket, full_name)
+            self.s3.upload_object(file, self.bucket, full_name)
         except ClientError as e:
             logger.error(e)
             raise
 
-        logger.debug(f"S3 upload: {name}")
+        logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
         return True

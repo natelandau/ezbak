@@ -36,7 +36,7 @@ class MongoManager:
             Path: The path to the backup file.
         """
         backup_file = Path(settings.tmp_dir.name) / f"{self.mongo_db_name}.gz"
-
+        logger.trace("Attempting to create tmp backup file")
         try:
             run_command(
                 "mongodump",
@@ -52,5 +52,5 @@ class MongoManager:
         except ShellCommandFailedError as e:
             logger.error(e.stderr)
             sys.exit(1)
-
+        logger.trace(f"Created tmp backup file: {backup_file}")
         return backup_file

@@ -3,12 +3,13 @@
 import atexit
 import contextlib
 import os
+import re
 from pathlib import Path
 
 from nclutils import logger
 from rich.console import Console
 
-from ezbak.constants import LogLevel
+from ezbak.constants import ALWAYS_EXCLUDE_FILENAMES, LogLevel
 from ezbak.models import settings
 
 err_console = Console(stderr=True)
@@ -41,6 +42,7 @@ def chown_files(directory: Path | str) -> None:
     Args:
         directory (Path | str): Directory path to recursively update file ownership.
     """
+    logger.trace(f"Attempting to chown files in '{directory}'")
     if os.getuid() != 0:
         logger.warning("Not running as root, skip chown operations")
         return
@@ -58,6 +60,34 @@ def chown_files(directory: Path | str) -> None:
             logger.warning(f"Failed to chown {path}: {e}")
             break
 
-        logger.trace(f"chown: {path.resolve()}")
-
     logger.info(f"chown all restored files to '{uid}:{gid}'")
+
+
+def should_include_file(path: Path) -> bool:
+    """Determine whether a file should be included in the backup based on configured regex filters.
+
+    Apply include and exclude regex patterns to filter files during backup creation. Use this to implement fine-grained control over which files are backed up, such as excluding temporary files or including only specific file types.
+
+    Args:
+        path (Path): The file path to evaluate against the configured regex patterns.
+
+    Returns:
+        bool: True if the file should be included in the backup, False if it should be excluded.
+    """
+    if path.is_symlink():
+        logger.warning(f"Skip backup of symlink: {path}")
+        return False
+
+    if path.name in ALWAYS_EXCLUDE_FILENAMES:
+        logger.trace(f"Excluded file: {path.name}")
+        return False
+
+    if settings.include_regex and re.search(rf"{settings.include_regex}", str(path)) is None:
+        logger.trace(f"Exclude by include regex: {path.name}")
+        return False
+
+    if settings.exclude_regex and re.search(rf"{settings.exclude_regex}", str(path)):
+        logger.trace(f"Exclude by regex: {path.name}")
+        return False
+
+    return True

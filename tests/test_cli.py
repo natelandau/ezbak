@@ -240,8 +240,8 @@ def test_cli_restore_backup(filesystem, debug, clean_stderr, tmp_path):
         deps=[initialize_ezbak],
     )
     output = clean_stderr()
-    debug(output)
+    # debug(output)
     # debug(restore_path)
 
-    assert "INFO     | Restored backup to …/restore" in output
+    assert "INFO     | Backup restored to '…/restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()

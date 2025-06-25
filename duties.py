@@ -146,7 +146,22 @@ def lint(ctx: Context) -> None:
     """Run all linting duties."""
 
 
-@duty(capture=CI)
+@duty()
+def update_dockerfile(ctx: Context) -> None:
+    """Update the Dockerfile with the uv version."""
+    dockerfile = PROJECT_ROOT / "Dockerfile"
+    version = ctx.run(["uv", "--version"], title="uv version", capture=True)
+    version = re.search(r"(\d+\.\d+\.\d+)", version).group(1)
+    dockerfile_content = dockerfile.read_text(encoding="utf-8")
+    if not re.search(rf"uv:{version}", dockerfile_content):
+        dockerfile_content = re.sub(r"uv:\d+\.\d+\.\d+", f"uv:{version}", dockerfile_content)
+        dockerfile.write_text(dockerfile_content, encoding="utf-8")
+        console.print(
+            f"[green]✓[/green] [bold]Dockerfile updated with uv version: {version}[/bold]"
+        )
+
+
+@duty(capture=CI, post=[update_dockerfile])
 def update(ctx: Context) -> None:
     """Update the project."""
     ctx.run(["uv", "lock", "--upgrade"], title="update uv lock")
@@ -210,6 +225,12 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
             if not file.exists():
                 file.touch()
     console.print(f"✓ Development env set up in '{DEV_DIR.name}/'")
+
+    # copy eztest.py to .dev/eztest.py
+    eztest_template = TEMPLATES_DIR / "eztest.py"
+    eztest = DEV_DIR / "eztest.py"
+    shutil.copy2(eztest_template, eztest)
+    console.print(f"✓ eztest.py file created in '{DEV_DIR.name}/{eztest.name}'")
 
     # copy .env.template to .env
     env_template = TEMPLATES_DIR / ".env.template"

@@ -23,6 +23,13 @@ class StorageLocation:
         self.backups = backups
         self.backups_by_time_unit, self.dates_in_use = self._categorize_backups_by_time_unit()
 
+        # This variable is only used for logging purposes.
+        self.logging_name = (
+            "S3"
+            if self.storage_type == StorageType.AWS
+            else self.storage_path or self.storage_type.value
+        )
+
     def _categorize_backups_by_time_unit(
         self,
     ) -> tuple[dict[BackupType, list[Backup]], dict[BackupType, list[str]]]:
