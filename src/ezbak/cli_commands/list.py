@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-
-from nclutils import console
+from nclutils import logger
 
 from ezbak import ezbak
 from ezbak.constants import StorageType
+from ezbak.models.settings import settings
 
 
 def main() -> None:
@@ -16,20 +15,20 @@ def main() -> None:
     backups = backup_manager.list_backups()
 
     if len(backups) == 0:
-        console.print("No backups found")
+        logger.info("No backups found")
         return
 
-    if any(x.storage_type == StorageType.AWS for x in backups):
-        console.rule("AWS Backups")
-        for backup in backups:
-            console.print(backup.name)
+    aws_backups = [x for x in backups if x.storage_type == StorageType.AWS]
+    local_backups = [x for x in backups if x.storage_type == StorageType.LOCAL]
 
-    if any(x.storage_type == StorageType.LOCAL for x in backups):
-        backup_by_path = defaultdict(list)
-        for backup in backups:
-            backup_by_path[backup.path].append(backup.name)
+    if (
+        aws_backups and settings.storage_location == StorageType.AWS
+    ) or settings.storage_location == StorageType.ALL:
+        print_backups = "\n  - ".join([x.name for x in aws_backups])
+        logger.info(f"Found {len(aws_backups)} AWS backups\n  - {print_backups}")
 
-        for path, names in sorted(backup_by_path.items()):
-            console.rule(str(path))
-            for name in names:
-                console.print(name)
+    if local_backups and settings.storage_location == StorageType.LOCAL:
+        print_backups = "\n  - ".join(
+            [str(x.path) for x in sorted(local_backups, key=lambda x: x.path)]
+        )
+        logger.info(f"Found {len(local_backups)} local backups\n  - {print_backups}")

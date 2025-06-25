@@ -268,6 +268,9 @@ class BackupManager:
         Returns:
             list[StorageLocation]: A list of StorageLocation objects containing S3 backup objects.
         """
+        if not self.aws_service:
+            return []
+
         logger.trace("Indexing S3 storage location")
         found_backups = self.aws_service.list_objects(prefix=settings.name)
 

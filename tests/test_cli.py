@@ -191,7 +191,7 @@ def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
         assert not Path(tmp_path / filename).exists()
 
 
-def test_cli_list_backups(debug, clean_stdout, tmp_path):
+def test_cli_list_backups(debug, clean_stderr, tmp_path):
     """Verify listing backups."""
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -207,7 +207,7 @@ def test_cli_list_backups(debug, clean_stdout, tmp_path):
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
         deps=[initialize_ezbak],
     )
-    output = clean_stdout()
+    output = clean_stderr()
     debug(output)
 
     assert "test-20250609T101857-hourly.tgz" in output

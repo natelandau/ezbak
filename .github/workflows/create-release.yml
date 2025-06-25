@@ -29,7 +29,7 @@ jobs:
 
             - name: Run tests
               shell: bash
-              run: uv run duty test
+              run: uv run --frozen duty test
 
     test-dockerfile:
         runs-on: ubuntu-latest

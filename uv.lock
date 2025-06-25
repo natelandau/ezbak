@@ -308,12 +308,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apscheduler", specifier = ">=3.11.0" },
     { name = "apscheduler", specifier = ">=3.11.0,<4.0.0" },
     { name = "boto3", specifier = ">=1.38.43" },
     { name = "cappa", specifier = ">=0.28.0" },
     { name = "environs", specifier = ">=14.2.0" },
-    { name = "nclutils", specifier = ">=0.6.0" },
+    { name = "nclutils", specifier = ">=1.0.1" },
     { name = "rich", specifier = ">=14.0.0" },
     { name = "whenever", specifier = ">=0.8.6" },
 ]
@@ -559,7 +558,7 @@ wheels = [
 
 [[package]]
 name = "nclutils"
-version = "0.6.0"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "loguru" },
@@ -567,9 +566,9 @@ dependencies = [
     { name = "rich" },
     { name = "sh" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/18/16/fae874d8f0df6c9f1c63abf851bb3aa1de3ed1985b148f5223bf26da4cbe/nclutils-0.6.0.tar.gz", hash = "sha256:e46b750ac1ed133b7fbb877aae093a71a2b37178977c0755098bf9540b8e36e9", size = 95208, upload-time = "2025-06-21T13:20:05.685Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/5d/d3f43e48be0daf47cd00f23461f47b7e72c0b17d2927b7d53b9bfadb96eb/nclutils-1.0.1.tar.gz", hash = "sha256:9cbc78776f29d4d4919b1046b0d62c24e8908509a8e46cdd4a7c83837b4f3366", size = 95695, upload-time = "2025-06-25T14:51:57.296Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/48/922032faac30f6071409241a669d46fbf218a637d6438ea63de967c5e299/nclutils-0.6.0-py3-none-any.whl", hash = "sha256:35b410c59f857750c8167bc1c0d09ef25808566c7643cf8c54fe8b97b96390d8", size = 36222, upload-time = "2025-06-21T13:20:04.56Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/e1/2703a29a7d62108f1b9ba7a50ff93b7c9f0ca02bf24707e87b69059a558d/nclutils-1.0.1-py3-none-any.whl", hash = "sha256:d719fd8092d14f4cf49ffb9cb272762c9a29faa7faa6581f3451b3c679a4a5d8", size = 36279, upload-time = "2025-06-25T14:51:56.434Z" },
 ]
 
 [[package]]

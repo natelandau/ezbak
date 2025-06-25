@@ -8,7 +8,7 @@ from typing import Annotated
 import cappa
 from nclutils import pp
 
-from ezbak.constants import CLILogLevel
+from ezbak.constants import CLILogLevel, StorageType
 from ezbak.models import settings
 
 
@@ -17,6 +17,7 @@ def initialize_ezbak(ezbak_cli: EZBakCLI) -> None:
     settings.update(
         {
             "name": ezbak_cli.name,
+            "storage_location": StorageType.LOCAL,
             "source_paths": getattr(ezbak_cli.command, "sources", [Path.cwd()]),
             "storage_paths": ezbak_cli.storage_paths,
             "strip_source_paths": getattr(ezbak_cli.command, "strip_source_paths", None),
