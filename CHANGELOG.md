@@ -1,3 +1,10 @@
+## v0.8.2 (2025-06-25)
+
+### Fix
+
+- **cli**: improve command output (#20)
+- decrease backup indexing frequency (#19)
+
 ## v0.8.1 (2025-06-25)
 
 ### Fix
