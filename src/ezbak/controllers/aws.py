@@ -120,7 +120,7 @@ class AWSService:
         logger.trace(f"S3: Deleted {key}")
         return True
 
-    def delete_objects(self, keys: list[str]) -> int:
+    def delete_objects(self, keys: list[str]) -> list[str]:
         """Delete multiple files from the configured S3 bucket.
 
         Remove multiple files from the S3 bucket by their keys using batch deletion. Use this method when you need to efficiently delete multiple files at once, such as cleaning up multiple outdated backups or removing a batch of files. The method automatically handles bucket path prefixes and provides detailed logging of the deletion process.
@@ -137,7 +137,7 @@ class AWSService:
         """
         if not keys:
             logger.warning("S3: No keys provided for deletion")
-            return 0
+            return []
 
         if len(keys) > 1000:  # noqa: PLR2004
             msg = "S3: Cannot delete more than 1000 objects at once"
@@ -157,8 +157,8 @@ class AWSService:
             )
 
             # Log successful deletions
-            deleted_objects = response.get("Deleted", [])
-            for obj in deleted_objects:
+            response_deleted_objects = response.get("Deleted", [])
+            for obj in response_deleted_objects:
                 logger.trace(f"S3: Deleted {obj['Key']}")
 
             # Handle any errors that occurred during deletion
@@ -168,15 +168,14 @@ class AWSService:
                     logger.error(
                         f"S3: Failed to delete '{error['Key']}': {error['Code']} - {error['Message']}"
                     )
-                return len(deleted_objects)
 
-            logger.trace(f"S3: Successfully deleted {len(deleted_objects)} objects")
+            logger.trace(f"S3: Successfully deleted {len(response_deleted_objects)} objects")
 
         except ClientError as e:
             logger.error(f"S3: Failed to delete objects: {e}")
             raise
 
-        return True
+        return [str(obj["Key"]) for obj in response.get("Deleted", [])]
 
     def get_object(self, key: str, destination: Path) -> Path:
         """Retrieve the contents of an object from the S3 bucket using streaming.
@@ -310,5 +309,8 @@ class AWSService:
             logger.error(e)
             raise
 
-        logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
+        if name != file.name:
+            logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
+        else:
+            logger.trace(f"S3: Uploaded '{file.name}'")
         return True

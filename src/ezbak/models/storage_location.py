@@ -74,6 +74,7 @@ class StorageLocation:
         Raises:
             TimeZoneNotFoundError: If the configured timezone identifier is invalid.
         """
+        logger.trace("Generating new backup name")
         i = Instant.now()
         try:
             now = i.to_tz(settings.tz) if settings.tz else i.to_system_tz()
@@ -111,4 +112,5 @@ class StorageLocation:
                 f"{filename.rstrip(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
             )
 
+        logger.trace(f"Backup name: {filename}")
         return filename

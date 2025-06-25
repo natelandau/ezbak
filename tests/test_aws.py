@@ -199,15 +199,13 @@ def test_delete_objects(mocker, debug, clean_stderr, tmp_path):
         }
     )
     aws_service = AWSService()
-    assert (
-        aws_service.delete_objects(
-            ["test-20240609T000000-yearly.tgz", "test-20240609T000000-yearly.tgz"]
-        )
-        == 1
-    )
+
+    # When: Deleting objects
+    assert aws_service.delete_objects(
+        ["test-20240609T000000-yearly.tgz", "test-20240609T000000-yearly.tgz"]
+    ) == ["test-20240609T000000-yearly.tgz"]
     output = clean_stderr()
-    debug(output)
+    # debug(output)
     assert "S3: Attempting to delete 2 objects" in output
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
     assert "S3: Failed to delete 'test-20240609T000000-yearly.tgz': 404 - Not Found" in output
-    # assert "S3: Successfully deleted 2 objects" in output
