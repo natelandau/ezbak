@@ -1,3 +1,9 @@
+## v0.8.1 (2025-06-25)
+
+### Fix
+
+- fix error uploading to S3
+
 ## v0.8.0 (2025-06-25)
 
 ### Feat
