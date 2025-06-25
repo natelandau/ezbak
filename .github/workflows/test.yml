@@ -45,7 +45,7 @@ jobs:
 
             - name: Run tests
               shell: bash
-              run: uv run duty test
+              run: uv run --frozenduty test
 
             - name: Upload coverage to Codecov
               if: ${{ matrix.python-version == '3.12' }}
@@ -98,4 +98,4 @@ jobs:
 
             - name: run all linters
               shell: bash
-              run: uv run duty lint
+              run: uv run --frozen duty lint

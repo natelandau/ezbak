@@ -2,7 +2,7 @@
 
 # ezbak
 
-A simple backup management tool. ezbak automates backup creation, management, and restores with support for multiple destinations, compression, and intelligent retention policies.
+A simple backup management tool automating backup creation, management, and restores with support for multiple destinations and intelligent retention policies.
 
 Use ezbak as a Python package in your code, run it from the command line, or deploy it as a Docker container.
 
@@ -14,7 +14,7 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 -   File filtering with regex patterns
 -   Intelligent retention policies (time-based and count-based)
 -   Automatic cleanup of old backups
--   Time-based backup labeling (yearly, monthly, weekly, daily, hourly, minutely)
+-   Time-based backup labeling (`yearly`, `monthly`, `weekly`, `daily`, `hourly`, `minutely`)
 -   Restore backups to any location
 -   Python package for integration into your projects
 -   Command-line interface for scripts and automation

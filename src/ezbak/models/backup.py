@@ -30,7 +30,7 @@ class Backup:
             settings.aws_s3_bucket_path if storage_type == StorageType.AWS else storage_path
         )
 
-        # Used for local backups
+        # Full path to the backup file, used for local backups
         self.path = path
 
         try:
