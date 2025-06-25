@@ -1,3 +1,17 @@
+## v0.8.0 (2025-06-25)
+
+### Feat
+
+- support S3 as a storage location (#16)
+- support mongodb backups (#15)
+- **docker**: log cron next run (#14)
+
+### Fix
+
+- improve logging (#18)
+- add aws options to ezbak package (#17)
+- rename env variables (#13)
+
 ## v0.7.0 (2025-06-22)
 
 ### Feat
