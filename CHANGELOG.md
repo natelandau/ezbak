@@ -1,3 +1,9 @@
+## v0.8.3 (2025-06-25)
+
+### Fix
+
+- **docker**: fix reduce memory for long running deployments
+
 ## v0.8.2 (2025-06-25)
 
 ### Fix
