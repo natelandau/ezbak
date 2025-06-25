@@ -29,6 +29,8 @@ def do_backup(scheduler: BackgroundScheduler | None = None) -> None:
         if job and job.next_run_time:
             logger.info(f"Next scheduled run: {job.next_run_time}")
 
+    del backup_manager
+
 
 def do_restore(scheduler: BackgroundScheduler | None = None) -> None:
     """Restore a backup of the service data directory from the specified path.
@@ -42,6 +44,8 @@ def do_restore(scheduler: BackgroundScheduler | None = None) -> None:
         job = scheduler.get_job(job_id="restore")
         if job and job.next_run_time:
             logger.info(f"Next scheduled run: {job.next_run_time}")
+
+    del backup_manager
 
 
 def log_debug_info() -> None:
