@@ -305,7 +305,7 @@ class AWSService:
         full_name = self._build_full_key(name)
 
         try:
-            self.s3.upload_object(file, self.bucket, full_name)
+            self.s3.upload_file(file, self.bucket, full_name)
         except ClientError as e:
             logger.error(e)
             raise
