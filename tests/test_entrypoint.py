@@ -109,5 +109,5 @@ def test_entrypoint_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     # debug(output)
     debug(restore_path)
 
-    assert "INFO     | Restored backup to …/restore" in output
+    assert "INFO     | Backup restored to '…/restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()

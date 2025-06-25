@@ -76,6 +76,13 @@ def ezbak(  # noqa: PLR0913
     Returns:
         BackupManager: Configured backup manager instance ready to execute backup operations.
     """
+    source_paths = (
+        [Path(source).expanduser().absolute() for source in source_paths] if source_paths else None
+    )
+    storage_paths = (
+        [Path(path).expanduser().absolute() for path in storage_paths] if storage_paths else None
+    )
+
     settings.update(
         {
             "storage_location": storage_location or None,

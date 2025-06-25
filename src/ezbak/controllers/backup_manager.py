@@ -10,14 +10,13 @@ from typing import assert_never
 from nclutils import clean_directory, copy_file, find_files, logger, new_uid
 
 from ezbak.constants import (
-    ALWAYS_EXCLUDE_FILENAMES,
     BACKUP_EXTENSION,
     BACKUP_NAME_REGEX,
     RetentionPolicyType,
     StorageType,
 )
 from ezbak.models import Backup, StorageLocation, settings
-from ezbak.utils import chown_files, cleanup_tmp_dir
+from ezbak.utils import chown_files, cleanup_tmp_dir, should_include_file
 
 from .aws import AWSService
 from .mongodb import MongoManager
@@ -80,10 +79,10 @@ class BackupManager:
                 self._storage_locations = self._find_existing_backups_local()
 
             case StorageType.AWS:
-                self._storage_locations = self._find_existing_backups_aws()
+                self._storage_locations = self._find_existing_backups_s3()
             case StorageType.ALL:
                 self._storage_locations = (
-                    self._find_existing_backups_local() + self._find_existing_backups_aws()
+                    self._find_existing_backups_local() + self._find_existing_backups_s3()
                 )
             case _:
                 assert_never(settings.storage_location)
@@ -110,6 +109,7 @@ class BackupManager:
             relative_path: Path | str
             is_dir: bool = False
 
+        logger.trace("Determining files to add to backup")
         files_to_add = []
         for source in self.source_paths:
             if source.is_dir():
@@ -122,11 +122,11 @@ class BackupManager:
                             else f"{source.name}/{f.relative_to(source)}",
                         )
                         for f in source.rglob("*")
-                        if f.is_file() and self._include_file_in_backup(f)
+                        if f.is_file() and should_include_file(f)
                     ]
                 )
             elif source.is_file() and not source.is_symlink():
-                if self._include_file_in_backup(source):
+                if should_include_file(source):
                     files_to_add.extend([FileToAdd(full_path=source, relative_path=source.name)])
             else:
                 msg = f"Not a file or directory: {source}"
@@ -134,7 +134,7 @@ class BackupManager:
                 raise ValueError(msg)
 
         temp_tarfile = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
-        logger.trace(f"Temp tarfile: {temp_tarfile}")
+        logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
         try:
             with tarfile.open(
                 temp_tarfile, "w:gz", compresslevel=settings.compression_level
@@ -146,6 +146,7 @@ class BackupManager:
             logger.error(f"Failed to create backup: {e}")
             return None
 
+        logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile
 
     def _delete_backup(self, backup: Backup) -> None:
@@ -162,6 +163,7 @@ class BackupManager:
                 logger.info(f"Delete: {backup.path}")
             case StorageType.AWS:
                 self.aws_service.delete_object(key=backup.name)
+                logger.info(f"Deleted from S3: {backup.name}")
             case StorageType.ALL:  # pragma: no cover
                 pass
             case _:  # pragma: no cover
@@ -186,10 +188,11 @@ class BackupManager:
                 tarfile_path = backup.path
 
             case StorageType.AWS:
-                if not self.aws_service.file_exists(backup.name):
-                    logger.error(f"Backup file does not exist in AWS: {backup.name}")
+                if not self.aws_service.object_exists(backup.name):
+                    logger.error(f"Backup file does not exist in S3: {backup.name}")
                     return False
 
+                logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
                 tmp_file = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
                 self.aws_service.get_object(key=backup.name, destination=tmp_file)
 
@@ -200,6 +203,7 @@ class BackupManager:
             case _:
                 assert_never(backup.storage_type)
 
+        logger.trace(f"Attempting to extract backup to '{destination}'")
         try:
             with tarfile.open(tarfile_path) as archive:
                 archive.extractall(path=destination, filter="data")
@@ -210,7 +214,7 @@ class BackupManager:
         if settings.chown_uid and settings.chown_gid:
             chown_files(destination)
 
-        logger.info(f"Restored backup to {destination}")
+        logger.info(f"Backup restored to '{destination}'")
         return True
 
     @staticmethod
@@ -240,6 +244,8 @@ class BackupManager:
                 ],
                 key=lambda x: x.zoned_datetime,
             )
+
+            logger.debug(f"Found {len(found_backups)} backups in '{storage_path}'")
             backups_by_storage_path.append(
                 StorageLocation(
                     storage_path=storage_path,
@@ -250,13 +256,13 @@ class BackupManager:
 
         return backups_by_storage_path
 
-    def _find_existing_backups_aws(self) -> list[StorageLocation]:
-        """Find all existing backups in AWS storage locations.
+    def _find_existing_backups_s3(self) -> list[StorageLocation]:
+        """Find all existing backups in an S3 bucket.
 
         Query AWS S3 bucket for backup objects matching the configured naming pattern. Use this to discover existing cloud backups for inventory management and cleanup operations.
 
         Returns:
-            list[StorageLocation]: A list of StorageLocation objects containing AWS backup objects.
+            list[StorageLocation]: A list of StorageLocation objects containing S3 backup objects.
         """
         found_backups = self.aws_service.list_objects(prefix=settings.name)
 
@@ -269,6 +275,7 @@ class BackupManager:
             [Backup(storage_type=StorageType.AWS, name=x) for x in found_backups],
             key=lambda x: x.zoned_datetime,
         )
+        logger.debug(f"Found {len(backups)} backups in S3 bucket")
         return [
             StorageLocation(
                 storage_path=settings.aws_s3_bucket_path,
@@ -276,36 +283,6 @@ class BackupManager:
                 backups=backups,
             )
         ]
-
-    @staticmethod
-    def _include_file_in_backup(path: Path) -> bool:
-        """Determine whether a file should be included in the backup based on configured regex filters.
-
-        Apply include and exclude regex patterns to filter files during backup creation. Use this to implement fine-grained control over which files are backed up, such as excluding temporary files or including only specific file types.
-
-        Args:
-            path (Path): The file path to evaluate against the configured regex patterns.
-
-        Returns:
-            bool: True if the file should be included in the backup, False if it should be excluded.
-        """
-        if path.is_symlink():
-            logger.warning(f"Skip backup of symlink: {path}")
-            return False
-
-        if path.name in ALWAYS_EXCLUDE_FILENAMES:
-            logger.trace(f"Excluded file: {path.name}")
-            return False
-
-        if settings.include_regex and re.search(rf"{settings.include_regex}", str(path)) is None:
-            logger.trace(f"Exclude by include regex: {path.name}")
-            return False
-
-        if settings.exclude_regex and re.search(rf"{settings.exclude_regex}", str(path)):
-            logger.trace(f"Exclude by regex: {path.name}")
-            return False
-
-        return True
 
     def _rename_no_labels(self) -> list[FileForRename]:
         """Rename backup files to remove time unit labels.
@@ -387,6 +364,7 @@ class BackupManager:
         Returns:
             list[Backup]: A list of Backup objects which were created.
         """
+        logger.trace("Creating new backup")
         tmp_backup = self._create_tmp_backup_file()
         created_backups: list[Backup] = []
 
@@ -395,6 +373,7 @@ class BackupManager:
 
             if storage_location.storage_type == StorageType.LOCAL:
                 backup_path = Path(storage_location.storage_path) / backup_name
+                logger.trace(f"Copying tmp backup to '{backup_path}'")
                 copy_file(src=tmp_backup, dst=backup_path)
                 logger.info(f"Created: {backup_path}")
                 created_backups.append(
@@ -407,7 +386,8 @@ class BackupManager:
                 )
                 self.rebuild_storage_locations = True
             elif storage_location.storage_type == StorageType.AWS:
-                self.aws_service.upload_file(file=tmp_backup, name=backup_name)
+                logger.trace(f"Uploading tmp backup to S3: {backup_name}")
+                self.aws_service.upload_object(file=tmp_backup, name=backup_name)
                 created_backups.append(Backup(storage_type=StorageType.AWS, name=backup_name))
                 logger.info(f"S3 create: {backup_name}")
                 self.rebuild_storage_locations = True
@@ -458,26 +438,36 @@ class BackupManager:
                 case RetentionPolicyType.COUNT_BASED:
                     max_keep = settings.retention_policy.get_retention()
                     if len(storage_location.backups) > max_keep:
+                        logger.trace(
+                            f"Found {len(storage_location.backups) - max_keep} backups to prune from '{storage_location.logging_name}'"
+                        )
                         deleted_backups.extend(list(reversed(storage_location.backups))[max_keep:])
 
                 case RetentionPolicyType.TIME_BASED:
                     for backup_type, backups in storage_location.backups_by_time_unit.items():
                         max_keep = settings.retention_policy.get_retention(backup_type)
                         if len(backups) > max_keep:
+                            logger.trace(
+                                f"Found {len(backups) - max_keep} {backup_type.value} backups to prune from '{storage_location.logging_name}'"
+                            )
                             deleted_backups.extend(list(reversed(backups))[max_keep:])
 
                 case _:
                     assert_never(settings.retention_policy.policy_type)
 
+        num_deleted = 0
         for backup in [x for x in deleted_backups if x.storage_type == StorageType.LOCAL]:
             self._delete_backup(backup)
+            num_deleted += 1
 
         if any(x.storage_type == StorageType.AWS for x in deleted_backups):
-            self.aws_service.delete_objects(
+            num_deleted += self.aws_service.delete_objects(
                 keys=[x.name for x in deleted_backups if x.storage_type == StorageType.AWS]
             )
 
-        logger.info(f"Pruned {len(deleted_backups)} backups")
+        logger.info(
+            f"Pruned {num_deleted} backups across {len(self.storage_locations)} storage locations"
+        )
         return deleted_backups
 
     def rename_backups(self) -> None:
@@ -505,13 +495,16 @@ class BackupManager:
                     > 1
                 )
                 if target_exists:
+                    logger.trace(
+                        f"Attempting to rename backup: {file.backup.name} -> {file.new_name}"
+                    )
                     file.new_name = f"{file.new_name.rstrip(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
 
                 if file.backup.storage_type == StorageType.LOCAL:
                     file.backup.path.rename(file.backup.path.parent / file.new_name)
                     logger.debug(f"Rename: {file.backup.path} -> {file.new_name}")
                 elif file.backup.storage_type == StorageType.AWS:
-                    self.aws_service.rename_file(
+                    self.aws_service.rename_object(
                         current_name=file.backup.name, new_name=file.new_name
                     )
                     logger.debug(f"S3: Rename {file.backup.name} -> {file.new_name}")
@@ -554,6 +547,7 @@ class BackupManager:
         if clean_before_restore or settings.clean_before_restore:
             clean_directory(dest)
             logger.info("Cleaned all files in backup destination before restore")
+
         most_recent_backup = self.get_latest_backup()
         if not most_recent_backup:
             logger.error("No backup found to restore")

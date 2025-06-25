@@ -206,13 +206,13 @@ class Settings:
             logger.error(msg)
             raise ValueError(msg)
 
-        if not self.source_paths:
+        if not self.source_paths and self.action != "restore":
             msg = "No source paths provided"
             logger.error(msg)
             raise ValueError(msg)
 
         for source in self.source_paths:
-            if not isinstance(source, Path) or not source.exists():
+            if not source.exists():
                 msg = f"Source does not exist: {source}"
                 logger.error(msg)
                 raise FileNotFoundError(msg) from None

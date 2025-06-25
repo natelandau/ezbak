@@ -87,6 +87,7 @@ def test_aws_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
         name="test",
         source_paths=[src_dir],
         label_time_units=False,
+        log_level="TRACE",
     )
 
     # When: Creating a backup
@@ -151,10 +152,10 @@ def test_delete_object(mocker, debug, clean_stderr, tmp_path):
     backup_manager._delete_backup(backup)
     output = clean_stderr()
     # debug(output)
-    assert "S3: Delete test-20240609T000000-yearly.tgz" in output
+    assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
 
 
-def test_rename_file(mocker, debug, clean_stderr, tmp_path):
+def test_rename_object(mocker, debug, clean_stderr, tmp_path):
     """Verify the aws service renames a file."""
     # Given: A backup manager configured with test parameters
     logger.configure(log_level="TRACE", show_source_reference=False)
@@ -169,7 +170,7 @@ def test_rename_file(mocker, debug, clean_stderr, tmp_path):
     )
 
     aws_service = AWSService()
-    aws_service.rename_file(
+    aws_service.rename_object(
         current_name="test-20240609T000000-yearly.tgz", new_name="test-20240609T000000-yearly.tgz"
     )
     output = clean_stderr()
@@ -198,12 +199,15 @@ def test_delete_objects(mocker, debug, clean_stderr, tmp_path):
         }
     )
     aws_service = AWSService()
-    assert not aws_service.delete_objects(
-        ["test-20240609T000000-yearly.tgz", "test-20240609T000000-yearly.tgz"]
+    assert (
+        aws_service.delete_objects(
+            ["test-20240609T000000-yearly.tgz", "test-20240609T000000-yearly.tgz"]
+        )
+        == 1
     )
     output = clean_stderr()
     debug(output)
-    assert "S3: Deleting 2 objects" in output
-    assert "S3: Delete test-20240609T000000-yearly.tgz" in output
+    assert "S3: Attempting to delete 2 objects" in output
+    assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
     assert "S3: Failed to delete 'test-20240609T000000-yearly.tgz': 404 - Not Found" in output
     # assert "S3: Successfully deleted 2 objects" in output
