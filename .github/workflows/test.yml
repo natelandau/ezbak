@@ -45,7 +45,7 @@ jobs:
 
             - name: Run tests
               shell: bash
-              run: uv run --frozenduty test
+              run: uv run --frozen duty test
 
             - name: Upload coverage to Codecov
               if: ${{ matrix.python-version == '3.12' }}
