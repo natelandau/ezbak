@@ -565,3 +565,30 @@ def test_mongodb_backup(debug, clean_stderr, tmp_path, mocker, filesystem):
 
     assert "Backup MongoDB database" in output
     assert "Add to tar: mongodb.gz" in output
+
+
+def test_delete_src_after_backup(debug, clean_stderr, tmp_path, filesystem):
+    """Verify that source paths are deleted after backup."""
+    src_dir, dest1, _ = filesystem
+    test_file = tmp_path / "test_file.txt"
+    test_file.touch()
+
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir, test_file],
+        storage_paths=[dest1],
+        log_level="trace",
+        delete_src_after_backup=True,
+    )
+    assert len(list(src_dir.iterdir())) != 0
+    backup_manager.create_backup()
+    output = clean_stderr()
+    debug(output)
+    debug(tmp_path)
+
+    assert "Cleaned source: " in output
+    assert src_dir.exists()
+    assert src_dir.is_dir()
+    assert len(list(src_dir.iterdir())) == 0
+    assert "Deleted source: " in output
+    assert not test_file.exists()

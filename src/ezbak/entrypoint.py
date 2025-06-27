@@ -98,16 +98,20 @@ def main() -> None:
 
         logger.info("Scheduler started")
 
-        while scheduler.running:
-            time.sleep(1)
+        try:
+            while scheduler.running:
+                time.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Exiting...")
+            scheduler.shutdown()
 
     elif settings.action == "backup":
         do_backup()
-        time.sleep(2)
+        time.sleep(1)
         logger.info("Backup complete. Exiting.")
     elif settings.action == "restore":
         do_restore()
-        time.sleep(2)
+        time.sleep(1)
         logger.info("Restore complete. Exiting.")
 
 
