@@ -1,3 +1,9 @@
+## v0.9.0 (2025-06-27)
+
+### Feat
+
+- add delete_src_after_backup option (#21)
+
 ## v0.8.3 (2025-06-25)
 
 ### Fix

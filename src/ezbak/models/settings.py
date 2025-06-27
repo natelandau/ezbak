@@ -7,8 +7,7 @@ from tempfile import TemporaryDirectory
 
 from environs import Env, validate
 from environs.exceptions import EnvValidationError
-from nclutils import logger
-from rich.console import Console
+from nclutils import err_console, logger
 
 from ezbak.constants import (
     DEFAULT_COMPRESSION_LEVEL,
@@ -22,7 +21,6 @@ from ezbak.controllers.retention_policy_manager import RetentionPolicyManager
 
 env = Env(prefix=ENVAR_PREFIX)
 env.read_env()
-err_console = Console(stderr=True)
 
 
 @dataclass
@@ -73,9 +71,8 @@ class Settings:
     aws_s3_bucket_path: str | None = None
     aws_secret_key: str | None = None
 
-    _tmp_dir: TemporaryDirectory | None = None
-
     _retention_policy: RetentionPolicyManager | None = None
+    _tmp_dir: TemporaryDirectory | None = None
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
@@ -164,7 +161,7 @@ class Settings:
             try:
                 getattr(self, key)
             except AttributeError:
-                msg = f"'ERROR: {key}' does not exist in settings"
+                msg = f"ERROR    | '{key}' does not exist in settings"
                 err_console.print(msg)
                 sys.exit(1)
 
@@ -366,7 +363,7 @@ class SettingsManager:
         """
         settings = cls._instance
         if settings is None:  # pragma: no cover
-            msg = "ERROR: Settings not initialized"
+            msg = "ERROR    | Settings not initialized"
             err_console.print(msg)
             sys.exit(1)
 

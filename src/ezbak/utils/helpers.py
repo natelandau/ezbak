@@ -6,13 +6,10 @@ import os
 import re
 from pathlib import Path
 
-from nclutils import logger
-from rich.console import Console
+from nclutils import err_console, logger
 
 from ezbak.constants import ALWAYS_EXCLUDE_FILENAMES, LogLevel
 from ezbak.models import settings
-
-err_console = Console(stderr=True)
 
 
 def cleanup_tmp_dir() -> None:
