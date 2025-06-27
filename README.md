@@ -23,7 +23,6 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 ## Table of Contents
 
 -   [Installation](#installation)
--   [Quick Start](#quick-start)
 -   [Usage](#usage)
 -   [Core Concepts](#core-concepts)
 -   [Common Use Cases](#common-use-cases)
@@ -31,8 +30,6 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 -   [Contributing](#contributing)
 
 ## Installation
-
-ezbak can be used as a python package, cli script, or docker container.
 
 **Note:** ezbak requires Python 3.11 or higher.
 
@@ -56,38 +53,9 @@ uv tool install ezbak
 python -m pip install --user ezbak
 ```
 
-## Quick Start
-
-### Create your first backup
-
-```python
-from pathlib import Path
-from ezbak import ezbak
-
-# Simple backup with 7-day retention
-backup_manager = ezbak(
-    name="my-documents",
-    source_paths=[Path("~/Documents")],
-    storage_paths=[Path("~/Backups")],
-    retention_daily=7,
-)
-
-# Create the backup
-backup_files = backup_manager.create_backup()
-print(f"Created backup: {backup_files}")
-```
-
-### or, using the CLI
-
-```bash
-# Create a backup
-ezbak create --name my-documents --source ~/Documents --storage ~/Backups --daily 7
-
-# List your backups
-ezbak list --name my-documents --storage ~/Backups
-```
-
 ## Usage
+
+ezbak can be used as a python package, cli script, or docker container.
 
 ### Python Package
 
@@ -113,20 +81,13 @@ backup_manager = ezbak(
 
 # Create a backup
 backup_files = backup_manager.create_backup()
-print(f"Backup created: {backup_files}")
-
-# List existing backups
 backups = backup_manager.list_backups()
-print(f"Found {len(backups)} backups")
-
-# Clean up old backups based on retention policy
-deleted_files = backup_manager.prune_backups()
-print(f"Deleted {len(deleted_files)} old backups")
+print([x.name for x in backups])
+backup_manager.prune_backups()
 
 # Restore latest backup (with optional cleanup)
 backup_manager.restore_backup(
-    destination=Path("/path/to/restore"),
-    clean_before_restore=True
+    destination=Path("/path/to/restore_location"),
 )
 ```
 
@@ -137,32 +98,30 @@ backup_manager.restore_backup(
 ezbak --help
 ezbak create --help
 
-# Create a backup with 7-day retention
+# Create a backup
 ezbak create --name my-documents \
     --source ~/Documents \
-    --storage ~/Backups \
-    --daily 7
+    --storage ~/path/to/backup/storage \
 
 # List all backups for a specific backup name
 ezbak list --name my-documents --storage ~/Backups
 
 # Clean up old backups (keep only 10 most recent)
 ezbak prune --name my-documents \
-    --storage ~/Backups \
+    --storage ~/path/to/backup/storage \
     --max-backups 10
 
 # Restore the latest backup
 ezbak restore --name my-documents \
-    --storage ~/Backups \
-    --destination ~/Restored \
-    --clean-before-restore  # Optional: clear destination before restore
+    --storage ~/path/to/backup/storage \
+    --destination ~/path/to/restore_location \
 
 ```
 
 ### Docker Container
 
 ```bash
-# Create a backup using Docker
+# Create a backup using Docker and keep the most recent 7 backups
 docker run -it \
     -v /path/to/source:/source:ro \
     -v /path/to/backups:/backups \
@@ -170,7 +129,7 @@ docker run -it \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_SOURCE_PATHS=/source \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_RETENTION_DAILY=7 \
+    -e EZBAK_MAX_BACKUPS=7 \
     ghcr.io/natelandau/ezbak:latest
 
 # Run backups on a schedule (daily at 2 AM)
@@ -183,7 +142,7 @@ docker run -d \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_SOURCE_PATHS=/source \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_RETENTION_DAILY=7 \
+    -e EZBAK_MAX_BACKUPS=7 \
     -e EZBAK_CRON="0 2 * * *" \
     -e TZ=America/New_York \
     ghcr.io/natelandau/ezbak:latest
