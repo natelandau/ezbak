@@ -539,34 +539,6 @@ def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
     assert not (restore_dir / test_file.name).exists()
 
 
-def test_mongodb_backup(debug, clean_stderr, tmp_path, mocker, filesystem):
-    """Verify that a MongoDB backup is created correctly."""
-    src_dir, dest1, _ = filesystem
-    mock_backup_file = tmp_path / "mongodb.gz"
-    mock_backup_file.touch()
-
-    mocker.patch(
-        "ezbak.controllers.mongodb.MongoManager.make_tmp_backup",
-        return_value=mock_backup_file,
-    )
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        log_level="trace",
-        mongo_uri="mongodb://localhost:27017",
-        mongo_db_name="my-database",
-    )
-    backup_manager.create_backup()
-    output = clean_stderr()
-    debug(output)
-    debug(tmp_path)
-
-    assert "Backup MongoDB database" in output
-    assert "Add to tar: mongodb.gz" in output
-
-
 def test_delete_src_after_backup(debug, clean_stderr, tmp_path, filesystem):
     """Verify that source paths are deleted after backup."""
     src_dir, dest1, _ = filesystem

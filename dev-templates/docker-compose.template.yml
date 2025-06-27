@@ -26,6 +26,7 @@ services:
             - EZBAK_COMPRESSION_LEVEL=6
             - EZBAK_LABEL_TIME_UNITS=true
             - EZBAK_RENAME_FILES=false
+
             # Retention Policies
             # ---------------------------
             - EZBAK_MAX_BACKUPS=4
@@ -35,25 +36,25 @@ services:
             - EZBAK_RETENTION_DAILY=4
             - EZBAK_RETENTION_HOURLY=4
             - EZBAK_RETENTION_MINUTELY=4
+
             # Scheduling
             # ---------------------------
             # - EZBAK_CRON=*/1 * * * *
             - EZBAK_TZ=America/New_York
+
             # Logging
             # ---------------------------
             - EZBAK_LOG_LEVEL=TRACE
             - EZBAK_LOG_FILE=/logs/ezbak.log
             - EZBAK_LOG_PREFIX=docker
+
             # Restore
             # ---------------------------
             - EZBAK_RESTORE_PATH=/restore
             - EZBAK_CLEAN_BEFORE_RESTORE=true
             # - EZBAK_CHOWN_UID=
             # - EZBAK_CHOWN_GID=
-            # MongoDB Backup
-            # ---------------------------
-            # - EZBAK_MONGO_URI=mongodb://localhost:27017
-            # - EZBAK_MONGO_DB_NAME=ezbak
+
             # AWS Storage Backend
             # ---------------------------
             # - EZBAK_AWS_ACCESS_KEY=
