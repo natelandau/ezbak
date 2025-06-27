@@ -1,3 +1,13 @@
+## v0.10.0 (2025-06-27)
+
+### Feat
+
+- drop support for mongodump (#22)
+
+### Fix
+
+- correct error updating storage location
+
 ## v0.9.0 (2025-06-27)
 
 ### Feat
