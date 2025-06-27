@@ -204,7 +204,12 @@ class Settings:
             logger.error(msg)
             raise ValueError(msg)
 
-        if not self.source_paths and self.action != "restore":
+        if (
+            not self.source_paths
+            and self.action != "restore"
+            and not self.mongo_uri
+            and not self.mongo_db_name
+        ):
             msg = "No source paths provided"
             logger.error(msg)
             raise ValueError(msg)
