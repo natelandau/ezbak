@@ -164,11 +164,11 @@ class Settings:
 
             if value is not None:
                 if key == "log_level" and isinstance(value, str):
-                    setattr(self, key, LogLevel(value.upper()))
+                    setattr(self, key, LogLevel[value.upper()])
                     continue
 
                 if key == "storage_location" and isinstance(value, str):
-                    setattr(self, key, StorageType(value.upper()))
+                    setattr(self, key, StorageType[value.upper()])
                     continue
 
                 setattr(self, key, value)
