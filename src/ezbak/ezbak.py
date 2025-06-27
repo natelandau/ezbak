@@ -27,6 +27,7 @@ def ezbak(  # noqa: PLR0913
     retention_hourly: int | None = None,
     retention_minutely: int | None = None,
     strip_source_paths: bool | None = None,
+    delete_src_after_backup: bool | None = None,
     exclude_regex: str | None = None,
     include_regex: str | None = None,
     chown_uid: int | None = None,
@@ -49,6 +50,7 @@ def ezbak(  # noqa: PLR0913
         storage_paths (list[Path | str] | None, optional): Destination paths where backups will be stored. Defaults to None.
         storage_location (str | None, optional): Storage location for backups. Defaults to None.
         strip_source_paths (bool | None, optional): Strip source paths from directory sources. Defaults to None.
+        delete_src_after_backup (bool | None, optional): Delete source paths after backup. Defaults to None.
         tz (str | None, optional): Timezone for timestamp formatting in backup names. Defaults to None.
         log_level (str, optional): Logging verbosity level. Defaults to "info".
         log_file (str | Path | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
@@ -90,6 +92,7 @@ def ezbak(  # noqa: PLR0913
             "source_paths": source_paths or None,
             "storage_paths": storage_paths or None,
             "strip_source_paths": strip_source_paths or None,
+            "delete_src_after_backup": delete_src_after_backup or None,
             "tz": tz or None,
             "log_level": log_level or None,
             "log_file": log_file or None,

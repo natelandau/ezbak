@@ -39,6 +39,7 @@ class Settings:
     storage_location: StorageType = StorageType.LOCAL
 
     strip_source_paths: bool = False
+    delete_src_after_backup: bool = False
     exclude_regex: str | None = None
     include_regex: str | None = None
     compression_level: int = DEFAULT_COMPRESSION_LEVEL
@@ -290,6 +291,7 @@ class SettingsManager:
                 ),
                 # Backup settings
                 strip_source_paths=env.bool("STRIP_SOURCE_PATHS", default=False),
+                delete_src_after_backup=env.bool("DELETE_SRC_AFTER_BACKUP", default=False),
                 exclude_regex=env.str("EXCLUDE_REGEX", None),
                 include_regex=env.str("INCLUDE_REGEX", None),
                 compression_level=env.int(

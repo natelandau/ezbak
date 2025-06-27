@@ -371,11 +371,12 @@ exclude_regex=r"temp|cache", # Optional: Exclude temp and cache files
 ### Backup Options
 
 ```python
-compression_level=9,         # Compression level (1-9, default: 9)
-label_time_units=True,       # Include time labels in filenames (default: True)
-rename_files=False,          # Rename existing files (default: False)
-strip_source_paths=False,    # Optional: Strip source paths from directory sources to flatten
-                             #            the tarfile (e.g. /source/foo.txt -> foo.txt)
+compression_level=9,             # Compression level (1-9, default: 9)
+label_time_units=True,           # Include time labels in filenames (default: True)
+rename_files=False,              # Rename existing files (default: False)
+strip_source_paths=False,        # Optional: Strip source paths from directory sources to flatten
+                                 #            the tarfile (e.g. /source/foo.txt -> foo.txt)
+delete_src_after_backup=False,   # Optional: Delete source paths after backup.
 ```
 
 ### MongoDB Backup Options

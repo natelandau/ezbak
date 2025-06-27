@@ -20,6 +20,7 @@ services:
             # Backup Options
             # ---------------------------
             - EZBAK_STRIP_SOURCE_PATHS=false
+            - EZBAK_DELETE_SRC_AFTER_BACKUP=false
             - EZBAK_EXCLUDE_REGEX=
             - EZBAK_INCLUDE_REGEX=
             - EZBAK_COMPRESSION_LEVEL=6

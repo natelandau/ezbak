@@ -403,6 +403,16 @@ class BackupManager:
                 logger.trace("Require storage location re-index on next call")
                 self.rebuild_storage_locations = True
 
+        if settings.delete_src_after_backup:
+            logger.trace("Cleaning source paths after backup")
+            for source in self.source_paths:
+                if source.is_dir():
+                    clean_directory(source)
+                    logger.info(f"Cleaned source: {source}")
+                else:
+                    source.unlink()
+                    logger.info(f"Deleted source: {source}")
+
         return created_backups
 
     def get_latest_backup(self) -> Backup:
