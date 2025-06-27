@@ -63,9 +63,6 @@ class Settings:
     chown_uid: int | None = None
     chown_gid: int | None = None
 
-    mongo_uri: str | None = None
-    mongo_db_name: str | None = None
-
     aws_access_key: str | None = None
     aws_s3_bucket_name: str | None = None
     aws_s3_bucket_path: str | None = None
@@ -330,9 +327,6 @@ class SettingsManager:
                 clean_before_restore=env.bool("CLEAN_BEFORE_RESTORE", default=False),
                 chown_uid=env.int("CHOWN_UID", None),
                 chown_gid=env.int("CHOWN_GID", None),
-                # MongoDB settings
-                mongo_uri=env.str("MONGO_URI", None),
-                mongo_db_name=env.str("MONGO_DB_NAME", None),
                 # AWS settings
                 aws_access_key=env.str("AWS_ACCESS_KEY", None),
                 aws_s3_bucket_name=env.str("AWS_S3_BUCKET_NAME", None),

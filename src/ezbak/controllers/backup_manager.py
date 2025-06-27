@@ -19,7 +19,6 @@ from ezbak.models import Backup, StorageLocation, settings
 from ezbak.utils import chown_files, cleanup_tmp_dir, should_include_file
 
 from .aws import AWSService
-from .mongodb import MongoManager
 
 
 @dataclass
@@ -40,19 +39,11 @@ class BackupManager:
         Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
         """
         self.aws_service = None
-        self.mongo_manager = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
         self.tmp_dir = Path(settings.tmp_dir.name)
 
-        if settings.mongo_uri and settings.mongo_db_name:
-            logger.info("Backup MongoDB database")
-            mongo_manager = MongoManager()
-            mongo_backup_file = mongo_manager.make_tmp_backup()
-            settings.update({"source_paths": [mongo_backup_file]})
-            self.source_paths = [mongo_backup_file]
-        else:
-            self.source_paths = settings.source_paths
+        self.source_paths = settings.source_paths
 
         if settings.storage_location in {StorageType.AWS, StorageType.ALL}:
             try:

@@ -9,7 +9,6 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 **Features**
 
 -   Create tar-gzipped (`.tgz`) compressed backups of files and directories
--   Creates MongoDB backups (via `mongodump`)
 -   Support for local filesystems and AWS S3 storage locations
 -   File filtering with regex patterns
 -   Intelligent retention policies (time-based and count-based)
@@ -336,14 +335,6 @@ rename_files=False,              # Rename existing files (default: False)
 strip_source_paths=False,        # Optional: Strip source paths from directory sources to flatten
                                  #            the tarfile (e.g. /source/foo.txt -> foo.txt)
 delete_src_after_backup=False,   # Optional: Delete source paths after backup.
-```
-
-### MongoDB Backup Options
-
-```python
-# Setting these will disable file backups and only backup the MongoDB database
-mongo_uri="mongodb://[username]:[password]@localhost:27017",        # MongoDB URI
-mongo_db_name="my-database",                                        # MongoDB database name
 ```
 
 ### Restore Options

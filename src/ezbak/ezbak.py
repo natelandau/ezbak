@@ -33,8 +33,6 @@ def ezbak(  # noqa: PLR0913
     chown_uid: int | None = None,
     chown_gid: int | None = None,
     label_time_units: bool | None = None,
-    mongo_uri: str | None = None,
-    mongo_db_name: str | None = None,
     aws_access_key: str | None = None,
     aws_secret_key: str | None = None,
     aws_s3_bucket_name: str | None = None,
@@ -68,8 +66,6 @@ def ezbak(  # noqa: PLR0913
         chown_uid (int | None, optional): User ID to set ownership of backup files. Defaults to None.
         chown_gid (int | None, optional): Group ID to set ownership of backup files. Defaults to None.
         label_time_units (bool, optional): Include time units in backup filenames. Defaults to True.
-        mongo_uri (str | None, optional): MongoDB URI for backup history. Defaults to None.
-        mongo_db_name (str | None, optional): MongoDB database name for backup history. Defaults to None.
         aws_access_key (str | None, optional): AWS access key for S3 backup storage. Defaults to None.
         aws_secret_key (str | None, optional): AWS secret key for S3 backup storage. Defaults to None.
         aws_s3_bucket_name (str | None, optional): AWS S3 bucket name for backup storage. Defaults to None.
@@ -110,8 +106,6 @@ def ezbak(  # noqa: PLR0913
             "label_time_units": label_time_units if label_time_units is not None else None,
             "chown_uid": chown_uid or None,
             "chown_gid": chown_gid or None,
-            "mongo_uri": mongo_uri or None,
-            "mongo_db_name": mongo_db_name or None,
             "aws_access_key": aws_access_key or None,
             "aws_secret_key": aws_secret_key or None,
             "aws_s3_bucket_name": aws_s3_bucket_name or None,
