@@ -75,7 +75,7 @@ jobs:
 
             - name: Run docker compose
               shell: bash
-              run: docker compose -f .dev/docker-compose.yml up --build
+              run: docker compose up --build
 
             - name: Confirm backup was created
               shell: bash

@@ -238,18 +238,6 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
     shutil.copy2(env_template, env)
     console.print(f"✓ .env file created in '{PROJECT_ROOT.name}/{env.name}'")
 
-    # copy docker-compose.override.yml to .dev/docker-compose.override.yml
-    docker_compose_template = TEMPLATES_DIR / "docker-compose.template.yml"
-    docker_compose = DEV_DIR / "docker-compose.yml"
-    shutil.copy2(docker_compose_template, docker_compose)
-    console.print(f"✓ Docker compose file created in '{DEV_DIR.name}/{docker_compose.name}'")
-    replacements = {"_ROOT_DIR_": str(PROJECT_ROOT)}
-
-    if not replace_in_file(docker_compose, replacements):
-        console.print(f"Error replacing text in '{DEV_DIR.name}/{docker_compose.name}'")
-        return
-    console.print(f"✓ Replaced text in '{DEV_DIR.name}/{docker_compose.name}'")
-
     console.print(
-        f"✓ Development environment setup complete.\n  Start the development environment with one of the following commands:\n    [green]docker compose -f {DEV_DIR.name}/{docker_compose.name} up --build[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
+        "✓ Development environment setup complete.\n  Start the development environment with one of the following commands:\n    [green]docker compose up[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
     )
