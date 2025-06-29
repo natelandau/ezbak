@@ -1,0 +1,29 @@
+---
+services:
+    backup-mongodb:
+        build: .
+        env_file:
+            - .env
+        volumes:
+            - .dev/backups:/backups
+            - .dev/logs:/logs
+            - .dev/restore:/restore
+            - .dev/source:/source
+
+        develop:
+            # Create a `watch` configuration to update the app
+            # https://docs.docker.com/compose/file-watch/#compose-watch-versus-bind-mounts
+            watch:
+                # Sync the working directory with the `/app` directory in the container
+                - action: sync
+                  path: ./src
+                  target: /app/src
+                # Rebuild the image if dependencies change by checking uv.lock
+                - action: rebuild
+                  path: ./uv.lock
+                  target: /app/uv.lock
+                - action: rebuild
+                  path: ./pyproject.toml
+                  target: /app/pyproject.toml
+                - action: rebuild
+                  path: ./Dockerfile
