@@ -1,7 +1,8 @@
 ---
-name: "Dockerfile Tests"
+name: "Test Build Multi-Arch Container"
 
 on:
+    workflow_dispatch:
     pull_request:
         types:
             - opened
