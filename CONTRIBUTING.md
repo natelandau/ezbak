@@ -39,7 +39,6 @@ To set up a local development environment, run `duty dev-setup`. This will creat
 ```
 .dev
 ├── backups
-├── docker-compose.yml
 ├── logs
 ├── restore
 └── source

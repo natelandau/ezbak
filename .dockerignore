@@ -20,6 +20,6 @@ __pycache__/
 codecov.yml
 committed.toml
 dev-templates/
-docker-compose.yml
+compose.yml
 duties.py
 tests/
