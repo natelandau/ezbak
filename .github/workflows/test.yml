@@ -10,6 +10,8 @@ on:
             - "**.py"
             - "pyproject.toml"
             - "uv.lock"
+            - "Dockerfile"
+            - "compose.yml"
         branches:
             - main
     pull_request:
@@ -23,6 +25,8 @@ on:
             - "**.py"
             - "pyproject.toml"
             - "uv.lock"
+            - "Dockerfile"
+            - "compose.yml"
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
