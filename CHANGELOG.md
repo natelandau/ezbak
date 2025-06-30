@@ -1,3 +1,9 @@
+## v0.10.2 (2025-06-30)
+
+### Fix
+
+- fix broken release workflow
+
 ## v0.10.1 (2025-06-30)
 
 ### Fix
