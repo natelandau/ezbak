@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 # Set labels
 LABEL org.opencontainers.image.source=https://github.com/natelandau/ezbak
@@ -9,8 +9,6 @@ LABEL org.opencontainers.image.title="ezbak"
 
 # Install Apt Packages
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar tzdata postgresql-client cron
-
-# COPY --from=ghcr.io/astral-sh/uv:0.7.15 /uv /uvx /bin/
 
 # Set timezone
 ENV TZ=Etc/UTC
