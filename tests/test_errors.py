@@ -19,12 +19,13 @@ def test_no_name(filesystem):
 def test_source_paths(filesystem):
     """Test EZBak errors."""
     _, dest1, _ = filesystem
-    with pytest.raises(ValueError, match="No source paths provided"):
-        ezbak(
-            name="test",
-            source_paths=[],
-            storage_paths=[dest1],
-        )
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[],
+        storage_paths=[dest1],
+    )
+    with pytest.raises(SystemExit):
+        backup_manager.create_backup()
 
 
 def test_source_paths_not_found(filesystem):

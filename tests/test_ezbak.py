@@ -48,6 +48,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
         storage_paths=[dest1, dest2],
         label_time_units=True,
         log_level="trace",
+        delete_src_after_backup=False,
     )
 
     # When: Creating multiple backups
