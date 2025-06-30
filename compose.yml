@@ -1,6 +1,6 @@
 ---
 services:
-    backup-mongodb:
+    ezbak:
         build: .
         env_file:
             - .env
