@@ -104,7 +104,7 @@ jobs:
               shell: bash
               run: uv run --frozen duty lint
 
-    test-publish-container:
+    test-build-multiarch--container:
         if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
         needs: test-from-dockerfile
         runs-on: ubuntu-latest

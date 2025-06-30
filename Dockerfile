@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.url=https://github.com/natelandau/ezbak
 LABEL org.opencontainers.image.title="ezbak"
 
 # Install Apt Packages
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar tzdata postgresql-client cron
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar tzdata cron
 
 # Set timezone
 ENV TZ=Etc/UTC
