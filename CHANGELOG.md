@@ -1,3 +1,13 @@
+## v0.10.1 (2025-06-30)
+
+### Fix
+
+- move source path validation to BackupManager (#24)
+
+### Refactor
+
+- **docker**: optimize build with layer caching (#23)
+
 ## v0.10.0 (2025-06-27)
 
 ### Feat
