@@ -2,6 +2,7 @@
 
 import atexit
 import re
+import sys
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,8 +43,6 @@ class BackupManager:
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
         self.tmp_dir = Path(settings.tmp_dir.name)
-
-        self.source_paths = settings.source_paths
 
         if settings.storage_location in {StorageType.AWS, StorageType.ALL}:
             try:
@@ -105,7 +104,12 @@ class BackupManager:
 
         logger.trace("Determining files to add to backup")
         files_to_add = []
-        for source in self.source_paths:
+
+        if not settings.source_paths:
+            logger.error("No source paths provided")
+            sys.exit(1)
+
+        for source in settings.source_paths:
             if source.is_dir():
                 files_to_add.extend(
                     [
@@ -396,13 +400,15 @@ class BackupManager:
 
         if settings.delete_src_after_backup:
             logger.trace("Cleaning source paths after backup")
-            for source in self.source_paths:
-                if source.is_dir():
-                    clean_directory(source)
-                    logger.info(f"Cleaned source: {source}")
-                else:
-                    source.unlink()
-                    logger.info(f"Deleted source: {source}")
+
+            if settings.source_paths:
+                for source in settings.source_paths:
+                    if source.is_dir():
+                        clean_directory(source)
+                        logger.info(f"Cleaned source: {source}")
+                    else:
+                        source.unlink()
+                        logger.info(f"Deleted source: {source}")
 
         return created_backups
 

@@ -201,16 +201,12 @@ class Settings:
             logger.error(msg)
             raise ValueError(msg)
 
-        if not self.source_paths and self.action != "restore":
-            msg = "No source paths provided"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        for source in self.source_paths:
-            if not source.exists():
-                msg = f"Source does not exist: {source}"
-                logger.error(msg)
-                raise FileNotFoundError(msg) from None
+        if self.source_paths:
+            for source in self.source_paths:
+                if not source.exists():
+                    msg = f"Source does not exist: {source}"
+                    logger.error(msg)
+                    raise FileNotFoundError(msg) from None
 
         if not self.storage_paths and self.storage_location != StorageType.AWS:
             msg = "No storage paths provided"
