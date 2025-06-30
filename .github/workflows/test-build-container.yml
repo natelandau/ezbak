@@ -1,0 +1,39 @@
+---
+name: "Dockerfile Tests"
+
+on:
+    pull_request:
+        types:
+            - opened
+            - reopened
+            - synchronize
+        paths:
+            - "Dockerfile"
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    test-build-multiarch-container:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            pull-requests: read
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  platforms: linux/amd64,linux/arm64
+                  outputs: type=cacheonly
+                  tags: user/app:latest
