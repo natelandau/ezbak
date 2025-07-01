@@ -41,16 +41,14 @@ jobs:
     test-from-dockerfile:
         if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
         runs-on: ubuntu-latest
-        strategy:
-            fail-fast: true
-            matrix:
-                python-version: ["3.13"]
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env
+              with:
+                  python-version: "3.13"
 
             - name: Setup development environment
               shell: bash
