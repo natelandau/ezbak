@@ -23,6 +23,14 @@ runs:
       shell: bash
       run: uv sync --all-extras --dev
 
+    - name: Debug Python version
+      shell: bash
+      run: |
+        echo "Input python-version: ${{ inputs.python-version }}"
+        echo "Python version: $(python --version)"
+        echo "Python location: $(which python)"
+        echo "uv Python version: $(uv python --version)"
+
     - name: Minimize uv cache
       shell: bash
       run: uv cache prune --ci
