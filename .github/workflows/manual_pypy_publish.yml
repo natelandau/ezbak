@@ -19,7 +19,7 @@ jobs:
             TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
         strategy:
             matrix:
-                python-version: ["3.11"]
+                python-version: ["3.13"]
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4

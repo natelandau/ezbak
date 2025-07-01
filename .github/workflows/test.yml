@@ -33,73 +33,49 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    test-python-code:
+    run-tests:
+        if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
+        uses: ./.github/workflows/reusable-tests.yml
+        secrets: inherit
+        with:
+            run-coverage: true
+
+    test-build-container:
         if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
         runs-on: ubuntu-latest
-        strategy:
-            fail-fast: true
-            matrix:
-                python-version: ["3.11", "3.12", "3.13"]
+        needs: run-tests
+        permissions:
+            contents: read
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
-
-            - name: Setup Python, uv, and the package
-              uses: ./.github/actions/setup_python_env
-
-            - name: Run tests
-              shell: bash
-              run: uv run --frozen duty test
-
-            - name: Upload coverage to Codecov
-              if: ${{ matrix.python-version == '3.12' }}
-              uses: codecov/codecov-action@v5
               with:
-                  files: .cache/coverage.xml
-              env:
-                  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+                  fetch-depth: 2 # Need at least 2 commits to compare
 
-    test-from-dockerfile:
-        if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
-        runs-on: ubuntu-latest
-        strategy:
-            fail-fast: true
-            matrix:
-                python-version: ["3.13"]
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
+            - name: Check if Dockerfile changed
+              id: dockerfile-changes
+              run: |
+                  if git diff --name-only HEAD~1 HEAD | grep -q "^Dockerfile$"; then
+                    echo "dockerfile=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "dockerfile=false" >> $GITHUB_OUTPUT
+                  fi
 
-            - name: Setup Python, uv, and the package
-              uses: ./.github/actions/setup_python_env
+            - name: Set up QEMU
+              if: steps.dockerfile-changes.outputs.dockerfile == 'true'
+              uses: docker/setup-qemu-action@v3
 
-            - name: Setup development environment
-              shell: bash
-              run: uv run duty dev-setup
+            - name: Set up Docker Buildx
+              if: steps.dockerfile-changes.outputs.dockerfile == 'true'
+              uses: docker/setup-buildx-action@v3
 
-            - name: Run docker compose
-              shell: bash
-              run: docker compose up --build
-
-            - name: Confirm backup was created
-              shell: bash
-              run: ls -l .dev/backups/*-yearly.tgz
-
-    lint-project:
-        if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-
-            - uses: actions/cache@v4
+            - name: Build multi-arch Docker image
+              if: steps.dockerfile-changes.outputs.dockerfile == 'true'
+              uses: docker/build-push-action@v6
               with:
-                  path: ~/.cache/pre-commit
-                  key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-
-            - name: Setup Python, uv, and the package
-              uses: ./.github/actions/setup_python_env
-
-            - name: run all linters
-              shell: bash
-              run: uv run --frozen duty lint
+                  context: .
+                  platforms: linux/amd64,linux/arm64
+                  outputs: type=cacheonly
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  tags: user/app:latest
