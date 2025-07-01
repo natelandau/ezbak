@@ -12,51 +12,10 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    test-package:
-        runs-on: ubuntu-latest
-        permissions:
-            contents: read
-        strategy:
-            fail-fast: true
-            matrix:
-                python-version: ["3.13"]
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-
-            - name: Setup Python, uv, and the package
-              uses: ./.github/actions/setup_python_env
-
-            - name: Run tests
-              shell: bash
-              run: uv run --frozen duty test
-
-    test-dockerfile:
-        runs-on: ubuntu-latest
-        permissions:
-            contents: read
-        strategy:
-            fail-fast: true
-            matrix:
-                python-version: ["3.13"]
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-
-            - name: Setup Python, uv, and the package
-              uses: ./.github/actions/setup_python_env
-
-            - name: Setup development environment
-              shell: bash
-              run: uv run duty dev-setup
-
-            - name: Run docker compose
-              shell: bash
-              run: docker compose up --build
-
-            - name: Confirm backup was created
-              shell: bash
-              run: ls -l .dev/backups/*-yearly.tgz
+    run-tests:
+        if: ${{ !contains(github.event.head_commit.message, 'bump(release)') }}
+        uses: ./.github/workflows/reusable-tests.yml
+        secrets: inherit
 
     auto-release:
         name: Create Release
@@ -64,8 +23,7 @@ jobs:
         permissions:
             contents: write
         needs:
-            - test-package
-            - test-dockerfile
+            - run-tests
         strategy:
             fail-fast: true
             matrix:
