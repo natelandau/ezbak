@@ -1,3 +1,9 @@
+## v0.11.2 (2025-07-02)
+
+### Fix
+
+- **docker**: remove --locked from uv sync (#27)
+
 ## v0.11.1 (2025-07-02)
 
 ### Fix
