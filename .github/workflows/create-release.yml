@@ -100,7 +100,7 @@ jobs:
         needs: auto-release
         runs-on: ubuntu-latest
         permissions:
-            contents: read
+            contents: write
             packages: write
         env:
             REGISTRY: ghcr.io
