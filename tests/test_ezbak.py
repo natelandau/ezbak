@@ -30,6 +30,9 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
     test_exclude_file = src_dir / ".DS_Store"
     test_file.touch()
     test_exclude_file.touch()
+    # Create an empty directory
+    empty_dir = src_dir / "empty_dir"
+    empty_dir.mkdir()
 
     # Given: Expected backup filenames for different time units
     filenames = [
@@ -69,6 +72,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
         assert Path(dest2 / filename).exists()
         assert f"INFO     | Created: …/dest1/{filename}" in output
         assert f"INFO     | Created: …/dest2/{filename}" in output
+        assert "TRACE    | Add to tar: src/empty_dir" in output
         assert "Excluded file: .DS_Store" in output
 
     # Then: Minutely backups have UUID suffixes
@@ -78,6 +82,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # Then: List backups returns correct count
     list_backups = backup_manager.list_backups()
+    clean_stderr()
     assert len(list_backups) == 14
     assert all(Path(dest1 / filename).exists() for filename in filenames)
     assert all(Path(dest2 / filename).exists() for filename in filenames)
@@ -127,6 +132,7 @@ def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
         source_paths=[src_dir],
         storage_paths=[dest1],
         exclude_regex=r"foo\.txt$",
+        log_level="error",
     )
 
     # When: Creating a backup
@@ -162,6 +168,7 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
         source_paths=[src_dir],
         storage_paths=[dest1],
         include_regex=r"foo\.txt$",
+        log_level="error",
     )
 
     # When: Creating a backup
@@ -207,6 +214,7 @@ def test_restore_backup(filesystem, debug, clean_stderr, tmp_path):
         name="test",
         source_paths=[src_dir],
         storage_paths=[tmp_dst],
+        log_level="error",
     )
     latest_backup = backup_manager.get_latest_backup()
     assert latest_backup.name == "test-20250624T084727-hourly-Tr5J7.tgz"
@@ -242,6 +250,7 @@ def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
         source_paths=[src_dir],
         storage_paths=[dst1],
         strip_source_paths=True,
+        log_level="error",
     )
 
     backup_manager.create_backup()
@@ -251,8 +260,8 @@ def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
     restore_dir.mkdir()
     backup_manager.restore_backup(restore_dir)
 
-    debug(src_dir, "src_dir")
-    debug(restore_dir)
+    # debug(src_dir, "src_dir")
+    # debug(restore_dir)
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
@@ -406,7 +415,7 @@ def test_prune_max_backups(debug, clean_stderr, tmp_path):
     )
     backup_manager.prune_backups()
     output = clean_stderr()
-    debug(output)
+    # debug(output)
     # debug(tmp_path)
 
     assert "Pruned 10 backups" in output
@@ -532,6 +541,7 @@ def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
     test_file = restore_dir / "test_file.txt"
     test_file.touch()
     backup_manager.restore_backup(restore_dir, clean_before_restore=True)
+    clean_stderr()
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
@@ -556,8 +566,8 @@ def test_delete_src_after_backup(debug, clean_stderr, tmp_path, filesystem):
     assert len(list(src_dir.iterdir())) != 0
     backup_manager.create_backup()
     output = clean_stderr()
-    debug(output)
-    debug(tmp_path)
+    # debug(output)
+    # debug(tmp_path)
 
     assert "Cleaned source: " in output
     assert src_dir.exists()
