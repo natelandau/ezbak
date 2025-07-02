@@ -120,7 +120,7 @@ class BackupManager:
                             else f"{source.name}/{f.relative_to(source)}",
                         )
                         for f in source.rglob("*")
-                        if f.is_file() and should_include_file(f)
+                        if (f.is_file() or f.is_dir()) and should_include_file(f)
                     ]
                 )
             elif source.is_file() and not source.is_symlink():
