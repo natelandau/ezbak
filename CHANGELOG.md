@@ -1,3 +1,9 @@
+## v0.11.0 (2025-07-02)
+
+### Feat
+
+- **backup**: include empty directories in archive (#26)
+
 ## v0.10.2 (2025-06-30)
 
 ### Fix
