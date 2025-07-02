@@ -6,6 +6,9 @@ dist/
 wheels/
 *.egg-info
 
+# macOS
+.DS_Store
+
 # Virtual environments
 .venv
 
@@ -14,9 +17,6 @@ wheels/
 .development/
 .cursor/
 tmp/
-.development/
-.dev
+.dev/
 .env
-
-# macOS
-.DS_Store
+GEMINI.md

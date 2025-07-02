@@ -23,36 +23,6 @@ DEV_DIR = PROJECT_ROOT / ".dev"
 TEMPLATES_DIR = PROJECT_ROOT / "dev-templates"
 
 
-def replace_in_file(file_path: str | Path, replacements: dict[str, str]) -> bool:
-    """Replace text in a file with a dictionary of replacements.
-
-    Args:
-        file_path (str): Path to the file to replace text in.
-        replacements (dict[str, str]): Dictionary of old text to new text.
-
-    Returns:
-        bool: True if the replacements were successful, False otherwise.
-    """
-    path = Path(file_path) if not isinstance(file_path, Path) else file_path
-    try:
-        if not path.exists():
-            console.print(f"File {file_path} does not exist")
-            return False
-
-        content = path.read_text(encoding="utf-8")
-
-        for old_text, new_text in replacements.items():
-            content = content.replace(old_text, new_text)
-
-        path.write_text(content, encoding="utf-8")
-
-    except Exception as e:  # noqa: BLE001
-        console.print(f"Error processing {file_path}: {e}")
-        return False
-
-    return True
-
-
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape sequences from a string.
 
