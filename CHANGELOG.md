@@ -1,3 +1,10 @@
+## v0.11.3 (2025-07-07)
+
+### Fix
+
+- **docker**: specify uv version in dockerfile (#29)
+- add logging of restore location (#28)
+
 ## v0.11.2 (2025-07-02)
 
 ### Fix
