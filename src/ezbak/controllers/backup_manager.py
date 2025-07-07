@@ -144,6 +144,7 @@ class BackupManager:
             logger.error(f"Failed to create backup: {e}")
             return None
 
+        del files_to_add
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile
 
@@ -179,7 +180,7 @@ class BackupManager:
         Returns:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
         """
-        logger.debug(f"Restoring backup: {backup.name}")
+        logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
         tarfile_path = None
         match backup.storage_type:
             case StorageType.LOCAL:
@@ -289,6 +290,50 @@ class BackupManager:
             )
         ]
 
+    def _identify_backups_to_delete(self) -> list[Backup]:
+        """Identify backups to delete based on retention policy configuration.
+
+        Analyze all storage locations and determine which backup files should be removed according to the configured retention policy. For count-based policies, identify excess backups beyond the maximum count. For time-based policies, identify excess backups within each time unit category (hourly, daily, weekly, monthly) beyond their respective retention limits.
+
+        Returns:
+            list[Backup]: A list of Backup objects that should be deleted to comply with retention policy.
+        """
+        logger.trace("Identifying backups to delete")
+        backups_to_delete: list[Backup] = []
+
+        for storage_location in self.storage_locations:
+            match settings.retention_policy.policy_type:
+                case RetentionPolicyType.KEEP_ALL:
+                    logger.info("Will not delete backups because no retention policy is set")
+                    return backups_to_delete
+
+                case RetentionPolicyType.COUNT_BASED:
+                    max_keep = settings.retention_policy.get_retention()
+                    if len(storage_location.backups) > max_keep:
+                        logger.trace(
+                            f"Found {len(storage_location.backups) - max_keep} backups to prune from '{storage_location.logging_name}'"
+                        )
+                        backups_to_delete.extend(
+                            list(reversed(storage_location.backups))[max_keep:]
+                        )
+
+                case RetentionPolicyType.TIME_BASED:
+                    for backup_type, backups in storage_location.backups_by_time_unit.items():
+                        max_keep = settings.retention_policy.get_retention(backup_type)
+                        if len(backups) > max_keep:
+                            logger.trace(
+                                f"Found {len(backups) - max_keep} {backup_type.value} backups to prune from '{storage_location.logging_name}'"
+                            )
+                            backups_to_delete.extend(list(reversed(backups))[max_keep:])
+
+                case _:
+                    assert_never(settings.retention_policy.policy_type)
+
+        logger.trace(
+            f"Identified {len(backups_to_delete)} backups to delete across {len(self.storage_locations)} storage locations"
+        )
+        return backups_to_delete
+
     def _rename_no_labels(self) -> list[FileForRename]:
         """Rename backup files to remove time unit labels.
 
@@ -378,7 +423,7 @@ class BackupManager:
 
             if storage_location.storage_type == StorageType.LOCAL:
                 backup_path = Path(storage_location.storage_path) / backup_name
-                logger.trace(f"Copying tmp backup to '{backup_path}'")
+                logger.debug(f"Copy tmp backup to local: {backup_path}")
                 copy_file(src=tmp_backup, dst=backup_path)
                 logger.info(f"Created: {backup_path}")
                 created_backups.append(
@@ -389,19 +434,15 @@ class BackupManager:
                         storage_path=storage_location.storage_path,
                     )
                 )
-                logger.trace("Require storage location re-index on next call")
-                self.rebuild_storage_locations = True
+
             elif storage_location.storage_type == StorageType.AWS:
-                logger.trace(f"Uploading tmp backup to S3: {backup_name}")
+                logger.debug(f"Upload tmp backup to S3: {backup_name}")
                 self.aws_service.upload_object(file=tmp_backup, name=backup_name)
                 created_backups.append(Backup(storage_type=StorageType.AWS, name=backup_name))
-                logger.info(f"S3 create: {backup_name}")
-
-                logger.trace("Require storage location re-index on next call")
-                self.rebuild_storage_locations = True
+                logger.info(f"S3 created: {backup_name}")
 
         if settings.delete_src_after_backup:
-            logger.trace("Cleaning source paths after backup")
+            logger.debug("Clean source paths after backup")
 
             if settings.source_paths:
                 for source in settings.source_paths:
@@ -412,6 +453,8 @@ class BackupManager:
                         source.unlink()
                         logger.info(f"Deleted source: {source}")
 
+        logger.trace("Require storage location re-index on next call")
+        self.rebuild_storage_locations = True
         return created_backups
 
     def get_latest_backup(self) -> Backup:
@@ -427,7 +470,11 @@ class BackupManager:
             logger.error("No backups found")
             return None
 
-        return max(all_backups, key=lambda x: x.zoned_datetime.timestamp())
+        latest_backup = max(all_backups, key=lambda x: x.zoned_datetime.timestamp())
+        logger.debug(
+            f"Identified latest backup: {latest_backup.name} ({latest_backup.storage_type.value})"
+        )
+        return latest_backup
 
     def list_backups(self) -> list[Backup]:
         """Retrieve all existing backup files for this backup configuration.
@@ -438,50 +485,6 @@ class BackupManager:
             list[Backup]: A list of backup objects sorted by creation time from oldest to newest.
         """
         return [x for y in self.storage_locations for x in y.backups]
-
-    def _identify_backups_to_delete(self) -> list[Backup]:
-        """Identify backups to delete based on retention policy configuration.
-
-        Analyze all storage locations and determine which backup files should be removed according to the configured retention policy. For count-based policies, identify excess backups beyond the maximum count. For time-based policies, identify excess backups within each time unit category (hourly, daily, weekly, monthly) beyond their respective retention limits.
-
-        Returns:
-            list[Backup]: A list of Backup objects that should be deleted to comply with retention policy.
-        """
-        logger.trace("Identifying backups to delete")
-        backups_to_delete: list[Backup] = []
-
-        for storage_location in self.storage_locations:
-            match settings.retention_policy.policy_type:
-                case RetentionPolicyType.KEEP_ALL:
-                    logger.info("Will not delete backups because no retention policy is set")
-                    return backups_to_delete
-
-                case RetentionPolicyType.COUNT_BASED:
-                    max_keep = settings.retention_policy.get_retention()
-                    if len(storage_location.backups) > max_keep:
-                        logger.trace(
-                            f"Found {len(storage_location.backups) - max_keep} backups to prune from '{storage_location.logging_name}'"
-                        )
-                        backups_to_delete.extend(
-                            list(reversed(storage_location.backups))[max_keep:]
-                        )
-
-                case RetentionPolicyType.TIME_BASED:
-                    for backup_type, backups in storage_location.backups_by_time_unit.items():
-                        max_keep = settings.retention_policy.get_retention(backup_type)
-                        if len(backups) > max_keep:
-                            logger.trace(
-                                f"Found {len(backups) - max_keep} {backup_type.value} backups to prune from '{storage_location.logging_name}'"
-                            )
-                            backups_to_delete.extend(list(reversed(backups))[max_keep:])
-
-                case _:
-                    assert_never(settings.retention_policy.policy_type)
-
-        logger.trace(
-            f"Identified {len(backups_to_delete)} backups to delete across {len(self.storage_locations)} storage locations"
-        )
-        return backups_to_delete
 
     def prune_backups(self) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.
@@ -499,12 +502,12 @@ class BackupManager:
         ]
         s3_backups_to_delete = [x for x in backups_to_delete if x.storage_type == StorageType.AWS]
 
-        logger.trace(f"Deleting {len(local_backups_to_delete)} local backups")
+        logger.debug(f"Deleting {len(local_backups_to_delete)} local backups")
         for backup in local_backups_to_delete:
             self._delete_backup(backup)
 
         if s3_backups_to_delete:
-            logger.trace(f"Deleting {len(s3_backups_to_delete)} S3 backups")
+            logger.debug(f"Deleting {len(s3_backups_to_delete)} S3 backups")
             deleted_s3_backups = self.aws_service.delete_objects(
                 keys=[x.name for x in s3_backups_to_delete]
             )
