@@ -183,9 +183,11 @@ class BackupManager:
         tarfile_path = None
         match backup.storage_type:
             case StorageType.LOCAL:
+                logger.info(f"Restoring backup from local: {backup.name}")
                 tarfile_path = backup.path
 
             case StorageType.AWS:
+                logger.info(f"Restoring backup from S3: {backup.name}")
                 if not self.aws_service.object_exists(backup.name):
                     logger.error(f"Backup file does not exist in S3: {backup.name}")
                     return False
