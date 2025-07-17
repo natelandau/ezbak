@@ -29,7 +29,7 @@ runs:
         echo "Input python-version: ${{ inputs.python-version }}"
         echo "Python version: $(python --version)"
         echo "Python location: $(which python)"
-        echo "uv Python version: $(uv python --version)"
+        echo "uv Python version: $(uv run python --version)"
 
     - name: Minimize uv cache
       shell: bash

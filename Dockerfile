@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.7.19-python3.13-bookworm-slim
+FROM ghcr.io/astral-sh/uv:0.7.21-python3.13-bookworm-slim
 
 # Set labels
 LABEL org.opencontainers.image.source=https://github.com/natelandau/ezbak
@@ -29,7 +29,6 @@ ADD . /app
 WORKDIR /app
 RUN uv sync --no-dev
 
-# Sync the project into a new environment, asserting the lockfile is up to date
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
