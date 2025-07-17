@@ -53,7 +53,10 @@ def log_debug_info() -> None:
     logger.debug(f"ezbak v{__version__}")
     for key, value in settings.model_dump().items():
         if not key.startswith("_") and value is not None:
-            logger.debug(f"Config: {key}: {value}")
+            if key.endswith("_key"):
+                logger.debug(f"Config: {key}: **********")
+            else:
+                logger.debug(f"Config: {key}: {value}")
     retention_policy = settings.retention_policy.get_full_policy()
     logger.debug(f"Config: retention_policy: {retention_policy}")
 
