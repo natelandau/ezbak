@@ -303,7 +303,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apscheduler", specifier = ">=3.11.0" },
+    { name = "apscheduler", specifier = ">=3.11.0,<4.0.0" },
     { name = "boto3", specifier = ">=1.40.1" },
     { name = "cappa", specifier = ">=0.29.1" },
     { name = "nclutils", specifier = ">=2.0.0" },
