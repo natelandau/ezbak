@@ -21,12 +21,14 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 
 ## Table of Contents
 
--   [Installation](#installation)
--   [Usage](#usage)
--   [Core Concepts](#core-concepts)
--   [Common Use Cases](#common-use-cases)
--   [Configuration Options](#configuration-options)
--   [Contributing](#contributing)
+-   [ezbak](#ezbak)
+    -   [Table of Contents](#table-of-contents)
+    -   [Installation](#installation)
+    -   [Usage](#usage)
+    -   [Core Concepts](#core-concepts)
+    -   [Common Use Cases](#common-use-cases)
+    -   [Configuration Options](#configuration-options)
+    -   [Contributing](#contributing)
 
 ## Installation
 
@@ -299,7 +301,7 @@ backup_manager = ezbak(
     name="my-backup",                    # Backup identifier
     source_paths=[Path("/path/to/src")], # What to backup
     storage_paths=[Path("/backups")],    # Where to store backups
-    storage_location="local",            # Optional: Where to store backups.
+    storage_type="local",                # Optional: Where to store backups.
                                          # One of "local", "aws", or "all" (default: "local")
 )
 ```

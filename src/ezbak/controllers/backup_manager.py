@@ -1,6 +1,5 @@
 """Backup management controller."""
 
-import atexit
 import re
 import sys
 import tarfile
@@ -16,8 +15,14 @@ from ezbak.constants import (
     RetentionPolicyType,
     StorageType,
 )
-from ezbak.models import Backup, StorageLocation, settings
-from ezbak.utils import chown_files, cleanup_tmp_dir, should_include_file
+from ezbak.models import Backup, StorageLocation
+from ezbak.models.settings import Settings
+from ezbak.utils import (
+    chown_files,
+    should_include_file,
+    validate_source_paths,
+    validate_storage_paths,
+)
 
 from .aws import AWSService
 
@@ -34,23 +39,27 @@ class FileForRename:
 class BackupManager:
     """Manage and control backup operations for specified sources and storage_paths."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: Settings) -> None:
         """Initialize a backup manager to automate backup creation, management, and cleanup operations.
 
         Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
         """
+        self.settings = config
         self.aws_service = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
-        self.tmp_dir = Path(settings.tmp_dir.name)
+        self.tmp_dir = Path(self.settings.tmp_dir.name)
 
-        if settings.storage_location in {StorageType.AWS, StorageType.ALL}:
+        if self.settings.storage_type in {StorageType.AWS, StorageType.ALL}:
             try:
-                self.aws_service = AWSService()
+                self.aws_service = AWSService(
+                    aws_access_key=self.settings.aws_access_key,
+                    aws_secret_key=self.settings.aws_secret_key,
+                    bucket_name=self.settings.aws_s3_bucket_name,
+                    bucket_path=self.settings.aws_s3_bucket_path,
+                )
             except ValueError as e:
                 logger.error(e)
-
-        atexit.register(cleanup_tmp_dir)
 
     @property
     def storage_locations(self) -> list[StorageLocation]:
@@ -64,19 +73,20 @@ class BackupManager:
         if not self.rebuild_storage_locations and self._storage_locations:
             return self._storage_locations
 
-        logger.trace(f"Indexing storage locations for: {settings.name}")
-        match settings.storage_location:
+        logger.trace(f"Indexing storage locations for: {self.settings.name}")
+        match self.settings.storage_type:
             case StorageType.LOCAL:
                 self._storage_locations = self._find_existing_backups_local()
 
             case StorageType.AWS:
                 self._storage_locations = self._find_existing_backups_s3()
+
             case StorageType.ALL:
                 self._storage_locations = (
                     self._find_existing_backups_local() + self._find_existing_backups_s3()
                 )
             case _:
-                assert_never(settings.storage_location)
+                assert_never(self.settings.storage_type)
 
         logger.trace(f"Indexed {len(self._storage_locations)} storage locations")
         self.rebuild_storage_locations = False
@@ -105,26 +115,35 @@ class BackupManager:
         logger.trace("Determining files to add to backup")
         files_to_add = []
 
-        if not settings.source_paths:
+        if not self.settings.source_paths:
             logger.error("No source paths provided")
             sys.exit(1)
 
-        for source in settings.source_paths:
+        for source in self.settings.source_paths:
             if source.is_dir():
                 files_to_add.extend(
                     [
                         FileToAdd(
                             full_path=f,
                             relative_path=f"{f.relative_to(source)}"
-                            if settings.strip_source_paths
+                            if self.settings.strip_source_paths
                             else f"{source.name}/{f.relative_to(source)}",
                         )
                         for f in source.rglob("*")
-                        if (f.is_file() or f.is_dir()) and should_include_file(f)
+                        if (f.is_file() or f.is_dir())
+                        and should_include_file(
+                            path=f,
+                            include_regex=self.settings.include_regex,
+                            exclude_regex=self.settings.exclude_regex,
+                        )
                     ]
                 )
             elif source.is_file() and not source.is_symlink():
-                if should_include_file(source):
+                if should_include_file(
+                    path=source,
+                    include_regex=self.settings.include_regex,
+                    exclude_regex=self.settings.exclude_regex,
+                ):
                     files_to_add.extend([FileToAdd(full_path=source, relative_path=source.name)])
             else:
                 msg = f"Not a file or directory: {source}"
@@ -135,7 +154,7 @@ class BackupManager:
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
         try:
             with tarfile.open(
-                temp_tarfile, "w:gz", compresslevel=settings.compression_level
+                temp_tarfile, "w:gz", compresslevel=self.settings.compression_level
             ) as tar:
                 for file in files_to_add:
                     logger.trace(f"Add to tar: {file.relative_path}")
@@ -212,14 +231,15 @@ class BackupManager:
             logger.error(f"Failed to restore backup: {tarfile_path}\n{e}")
             return False
 
-        if settings.chown_uid and settings.chown_gid:
-            chown_files(destination)
+        if self.settings.chown_uid and self.settings.chown_gid:
+            chown_files(
+                directory=destination, uid=self.settings.chown_uid, gid=self.settings.chown_gid
+            )
 
         logger.info(f"Backup restored to '{destination}'")
         return True
 
-    @staticmethod
-    def _find_existing_backups_local() -> list[StorageLocation]:
+    def _find_existing_backups_local(self) -> list[StorageLocation]:
         """Find all existing backups in local storage locations.
 
         Scan local filesystem directories for backup files matching the configured naming pattern. Use this to discover existing local backups for inventory management and cleanup operations.
@@ -227,12 +247,15 @@ class BackupManager:
         Returns:
             list[StorageLocation]: A list of StorageLocation objects containing local backup files.
         """
+        validate_source_paths(settings=self.settings)
+        validate_storage_paths(settings=self.settings, create_if_missing=True)
+
         backups_by_storage_path: list[StorageLocation] = []
-        for storage_path in settings.storage_paths:
+        for storage_path in self.settings.storage_paths:
             logger.trace(f"Indexing: {storage_path}")
             found_backups: list[Backup] = []
             found_files = find_files(
-                path=storage_path, globs=[f"*{settings.name}*.{BACKUP_EXTENSION}"]
+                path=storage_path, globs=[f"*{self.settings.name}*.{BACKUP_EXTENSION}"]
             )
             found_backups = sorted(
                 [
@@ -241,6 +264,7 @@ class BackupManager:
                         name=x.name,
                         path=x,
                         storage_path=storage_path,
+                        tz=self.settings.tz,
                     )
                     for x in found_files
                 ],
@@ -250,6 +274,9 @@ class BackupManager:
             logger.debug(f"Found existing backups: {len(found_backups)} in '{storage_path}'")
             backups_by_storage_path.append(
                 StorageLocation(
+                    name=self.settings.name,
+                    label_time_units=self.settings.label_time_units,
+                    tz=self.settings.tz,
                     storage_path=storage_path,
                     storage_type=StorageType.LOCAL,
                     backups=found_backups,
@@ -270,21 +297,33 @@ class BackupManager:
             return []
 
         logger.trace("Indexing S3 storage location")
-        found_backups = self.aws_service.list_objects(prefix=settings.name)
+        found_backups = self.aws_service.list_objects(prefix=self.settings.name)
 
-        if settings.aws_s3_bucket_path:
+        if self.settings.aws_s3_bucket_path:
             found_backups = [
-                x.replace(f"{settings.aws_s3_bucket_path.rstrip('/')}/", "") for x in found_backups
+                x.replace(f"{self.settings.aws_s3_bucket_path.rstrip('/')}/", "")
+                for x in found_backups
             ]
 
         backups = sorted(
-            [Backup(storage_type=StorageType.AWS, name=x) for x in found_backups],
+            [
+                Backup(
+                    storage_type=StorageType.AWS,
+                    name=x,
+                    tz=self.settings.tz,
+                    storage_path=self.settings.aws_s3_bucket_path,
+                )
+                for x in found_backups
+            ],
             key=lambda x: x.zoned_datetime,
         )
         logger.debug(f"Found existing backups: {len(backups)} in S3 bucket")
         return [
             StorageLocation(
-                storage_path=settings.aws_s3_bucket_path,
+                name=self.settings.name,
+                label_time_units=self.settings.label_time_units,
+                tz=self.settings.tz,
+                storage_path=self.settings.aws_s3_bucket_path,
                 storage_type=StorageType.AWS,
                 backups=backups,
             )
@@ -302,13 +341,13 @@ class BackupManager:
         backups_to_delete: list[Backup] = []
 
         for storage_location in self.storage_locations:
-            match settings.retention_policy.policy_type:
+            match self.settings.retention_policy.policy_type:
                 case RetentionPolicyType.KEEP_ALL:
                     logger.info("Will not delete backups because no retention policy is set")
                     return backups_to_delete
 
                 case RetentionPolicyType.COUNT_BASED:
-                    max_keep = settings.retention_policy.get_retention()
+                    max_keep = self.settings.retention_policy.get_retention()
                     if len(storage_location.backups) > max_keep:
                         logger.trace(
                             f"Found {len(storage_location.backups) - max_keep} backups to prune from '{storage_location.logging_name}'"
@@ -319,7 +358,7 @@ class BackupManager:
 
                 case RetentionPolicyType.TIME_BASED:
                     for backup_type, backups in storage_location.backups_by_time_unit.items():
-                        max_keep = settings.retention_policy.get_retention(backup_type)
+                        max_keep = self.settings.retention_policy.get_retention(backup_type)
                         if len(backups) > max_keep:
                             logger.trace(
                                 f"Found {len(backups) - max_keep} {backup_type.value} backups to prune from '{storage_location.logging_name}'"
@@ -327,7 +366,7 @@ class BackupManager:
                             backups_to_delete.extend(list(reversed(backups))[max_keep:])
 
                 case _:
-                    assert_never(settings.retention_policy.policy_type)
+                    assert_never(self.settings.retention_policy.policy_type)
 
         logger.trace(
             f"Identified {len(backups_to_delete)} backups to delete across {len(self.storage_locations)} storage locations"
@@ -414,6 +453,8 @@ class BackupManager:
         Returns:
             list[Backup]: A list of Backup objects which were created.
         """
+        validate_source_paths(settings=self.settings)
+
         logger.trace("Creating new backup")
         tmp_backup = self._create_tmp_backup_file()
         created_backups: list[Backup] = []
@@ -432,20 +473,28 @@ class BackupManager:
                         name=backup_path.name,
                         path=backup_path,
                         storage_path=storage_location.storage_path,
+                        tz=self.settings.tz,
                     )
                 )
 
             elif storage_location.storage_type == StorageType.AWS:
                 logger.debug(f"Upload tmp backup to S3: {backup_name}")
                 self.aws_service.upload_object(file=tmp_backup, name=backup_name)
-                created_backups.append(Backup(storage_type=StorageType.AWS, name=backup_name))
+                created_backups.append(
+                    Backup(
+                        storage_type=StorageType.AWS,
+                        name=backup_name,
+                        tz=self.settings.tz,
+                        storage_path=self.settings.aws_s3_bucket_path,
+                    )
+                )
                 logger.info(f"S3 created: {backup_name}")
 
-        if settings.delete_src_after_backup:
+        if self.settings.delete_src_after_backup:
             logger.debug("Clean source paths after backup")
 
-            if settings.source_paths:
-                for source in settings.source_paths:
+            if self.settings.source_paths:
+                for source in self.settings.source_paths:
                     if source.is_dir():
                         clean_directory(source)
                         logger.info(f"Cleaned source: {source}")
@@ -533,7 +582,7 @@ class BackupManager:
         Apply consistent naming patterns to all existing backups, either adding time unit labels or removing them based on configuration. Use this to standardize backup naming across all storage locations for better organization and retention policy management.
         """
         logger.trace("Begin renaming backups")
-        if settings.label_time_units:
+        if self.settings.label_time_units:
             files_for_rename = self._rename_with_labels()
         else:
             files_for_rename = self._rename_no_labels()
@@ -590,23 +639,28 @@ class BackupManager:
 
         Returns:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
+
+        Raises:
+            ValueError: If the destination is not provided and no restore directory is configured.
+            ValueError: If the destination does not exist or is not a directory.
         """
-        destination = destination or settings.restore_path
-        if not destination:
-            logger.error("No destination provided and no restore directory configured")
-            return False
+        destination = destination or self.settings.restore_path
 
-        dest = Path(destination).expanduser().absolute()
+        try:
+            dest = Path(destination).expanduser().absolute()
+        except Exception as e:
+            msg = f"Invalid destination: {destination}"
+            raise ValueError(msg) from e
 
-        if not dest.exists():
-            logger.error(f"Restore destination does not exist: {dest}")
-            return False
+        if not dest:
+            msg = "No destination provided and no restore directory configured"
+            raise ValueError(msg)
 
-        if not dest.is_dir():
-            logger.error(f"Restore destination is not a directory: {dest}")
-            return False
+        if not dest.exists() or not dest.is_dir():
+            msg = f"Restore destination does not exist: {dest}"
+            raise ValueError(msg)
 
-        if clean_before_restore or settings.clean_before_restore:
+        if clean_before_restore or self.settings.clean_before_restore:
             clean_directory(dest)
             logger.info("Cleaned all files in backup destination before restore")
 

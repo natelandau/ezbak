@@ -74,3 +74,10 @@ class LogLevel(Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
+
+class Action(Enum):
+    """Action."""
+
+    BACKUP = "backup"
+    RESTORE = "restore"

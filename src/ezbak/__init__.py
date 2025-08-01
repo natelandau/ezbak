@@ -1,5 +1,5 @@
 """EZBak package for automated backup operations with retention policies and compression."""
 
-from .ezbak import ezbak
+from .app import EZBakApp, ezbak
 
-__all__ = ["ezbak"]
+__all__ = ["EZBakApp", "ezbak"]

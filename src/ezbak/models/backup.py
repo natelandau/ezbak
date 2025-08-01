@@ -7,8 +7,6 @@ from whenever import PlainDateTime, TimeZoneNotFoundError
 
 from ezbak.constants import DEFAULT_DATE_FORMAT, TIMESTAMP_REGEX, StorageType
 
-from .settings import settings
-
 
 class Backup:
     """Represent a single backup archive with metadata and restoration capabilities.
@@ -22,13 +20,13 @@ class Backup:
         storage_type: StorageType,
         path: Path | None = None,
         storage_path: Path | str | None = None,
+        tz: str | None = None,
     ) -> None:
         self.name = name
+        self.tz = tz
 
         self.storage_type = storage_type
-        self.storage_path = (
-            settings.aws_s3_bucket_path if storage_type == StorageType.AWS else storage_path
-        )
+        self.storage_path = storage_path
 
         # Full path to the backup file, used for local backups
         self.path = path
@@ -42,8 +40,9 @@ class Backup:
         plain_dt = PlainDateTime.parse_strptime(self.timestamp, format=DEFAULT_DATE_FORMAT)
         try:
             self.zoned_datetime = (
-                plain_dt.assume_tz(settings.tz) if settings.tz else plain_dt.assume_system_tz()
+                plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
             )
+            logger.warning(self.zoned_datetime)
         except TimeZoneNotFoundError as e:
             logger.error(e)
             raise

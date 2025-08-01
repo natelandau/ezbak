@@ -4,6 +4,7 @@ services:
         build: .
         env_file:
             - .env
+            - .env.secrets
         volumes:
             - .dev:/app/.dev
 

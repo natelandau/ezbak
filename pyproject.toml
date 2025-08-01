@@ -10,8 +10,9 @@
         "apscheduler>=3.11.0,<4.0.0",
         "boto3>=1.39.7",
         "cappa>=0.28.1",
-        "environs>=14.2.0",
         "nclutils>=2.0.0",
+        "pydantic-settings>=2.10.1",
+        "pydantic>=2.11.7",
         "rich>=14.0.0",
         "whenever>=0.8.6",
     ]
@@ -165,6 +166,7 @@
             "PLR2004",
             "PLR6301",
             "S101",
+            "S106",    # Possible hardcoded password
             "SLF001",
 
         ], "duties.py" = ["ANN001"] }

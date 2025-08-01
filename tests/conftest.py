@@ -8,9 +8,6 @@ from pathlib import Path
 import pytest
 from nclutils.pytest_fixtures import clean_stderr, clean_stdout, debug  # noqa: F401
 
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, LogLevel, StorageType
-from ezbak.models.settings import settings
-
 
 @pytest.fixture
 def filesystem(tmp_path: Path) -> Generator[Path, None, None]:
@@ -41,24 +38,6 @@ def filesystem(tmp_path: Path) -> Generator[Path, None, None]:
     shutil.rmtree(src_dir)
     shutil.rmtree(dest1)
     shutil.rmtree(dest2)
-
-
-@pytest.fixture(autouse=True)
-def reset_settings() -> None:
-    """Reset the settings singleton."""
-    for key in settings.__dict__:
-        if key == "compression_level":
-            setattr(settings, key, DEFAULT_COMPRESSION_LEVEL)
-        elif key == "label_time_units":
-            setattr(settings, key, True)
-        elif key == "rename_files":
-            setattr(settings, key, False)
-        elif key == "log_level":
-            setattr(settings, key, LogLevel.INFO)
-        elif key == "storage_location":
-            setattr(settings, key, StorageType.LOCAL)
-        else:
-            setattr(settings, key, None)
 
 
 @pytest.fixture(autouse=True)

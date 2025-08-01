@@ -1,18 +1,16 @@
 """The prune command for the EZBak CLI."""
 
-from __future__ import annotations
-
 from nclutils import logger
 from rich.prompt import Confirm
 
-from ezbak import ezbak
-from ezbak.models import settings
+from ezbak.cli import EZBakCLI
+from ezbak.cli_commands import get_app_for_cli
 
 
-def main() -> None:
+def main(cmd: EZBakCLI) -> None:
     """The main function for the prune command."""
-    backup_manager = ezbak()
-    policy = settings.retention_policy.get_full_policy()
+    app = get_app_for_cli(cmd)
+    policy = app.settings.retention_policy.get_full_policy()
 
     if not policy:
         logger.info("No retention policy configured. Skipping...")
@@ -26,7 +24,7 @@ def main() -> None:
         logger.info("Aborting...")
         return
 
-    deleted_files = backup_manager.prune_backups()
+    deleted_files = app.prune_backups()
     if deleted_files:
         print_backups = "\n  - ".join([str(x.path) for x in deleted_files])
         logger.info(f"Deleted {len(deleted_files)} backups:\n   - {print_backups}")

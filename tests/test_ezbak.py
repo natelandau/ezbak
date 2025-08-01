@@ -52,6 +52,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
         label_time_units=True,
         log_level="trace",
         delete_src_after_backup=False,
+        tz="Etc/UTC",
     )
 
     # When: Creating multiple backups
@@ -68,6 +69,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # Then: All expected backup files exist in both storage paths
     for filename in filenames:
+        debug(filename)
         assert Path(dest1 / filename).exists()
         assert Path(dest2 / filename).exists()
         assert f"INFO     | Created: …/dest1/{filename}" in output
@@ -101,6 +103,7 @@ def test_without_labels(debug, clean_stderr, filesystem, tmp_path):
         storage_paths=[dest1, dest2],
         label_time_units=False,
         log_level="info",
+        tz="Etc/UTC",
     )
 
     # When: Creating multiple backups
@@ -133,6 +136,7 @@ def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
         storage_paths=[dest1],
         exclude_regex=r"foo\.txt$",
         log_level="error",
+        tz="Etc/UTC",
     )
 
     # When: Creating a backup
@@ -169,6 +173,7 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
         storage_paths=[dest1],
         include_regex=r"foo\.txt$",
         log_level="error",
+        tz="Etc/UTC",
     )
 
     # When: Creating a backup

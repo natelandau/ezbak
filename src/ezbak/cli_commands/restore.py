@@ -1,18 +1,17 @@
 """The CLI command for restoring a backup."""
 
-from __future__ import annotations
-
 import cappa
 
-from ezbak import ezbak
+from ezbak.cli import EZBakCLI
+from ezbak.cli_commands import get_app_for_cli
 
 
-def main() -> None:
+def main(cmd: EZBakCLI) -> None:
     """Restores the latest backup to the destination path.
 
     Raises:
         cappa.Exit: If the restore fails.
     """
-    backup_manager = ezbak()
-    if not backup_manager.restore_backup():
+    app = get_app_for_cli(cmd)
+    if not app.restore_backup():
         raise cappa.Exit(code=1)

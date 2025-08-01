@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -10,9 +11,8 @@ from zoneinfo import ZoneInfo
 import pytest
 import time_machine
 
-from ezbak.constants import DEFAULT_DATE_FORMAT
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT
 from ezbak.entrypoint import main as entrypoint
-from ezbak.models.settings import settings
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
@@ -30,21 +30,35 @@ def mock_run(mocker):
     mocker.patch("time.sleep", return_value=None)
 
 
+@pytest.fixture(autouse=True)
+def mock_os_environ(mocker):
+    """Override items from .env file."""
+    os.environ["EZBAK_AWS_ACCESS_KEY"] = ""
+    os.environ["EZBAK_AWS_S3_BUCKET_NAME"] = ""
+    os.environ["EZBAK_AWS_SECRET_KEY"] = ""
+    os.environ["EZBAK_COMPRESSION_LEVEL"] = str(DEFAULT_COMPRESSION_LEVEL)
+    os.environ["EZBAK_CRON"] = ""
+    os.environ["EZBAK_EXCLUDE_REGEX"] = ""
+    os.environ["EZBAK_INCLUDE_REGEX"] = ""
+    os.environ["EZBAK_LOG_FILE"] = ""
+    os.environ["EZBAK_LOG_LEVEL"] = ""
+    os.environ["EZBAK_LOG_PREFIX"] = ""
+    os.environ["EZBAK_RENAME_FILES"] = "false"
+    os.environ["EZBAK_STORAGE_TYPE"] = "local"
+    os.environ["EZBAK_TZ"] = "Etc/UTC"
+
+
 @time_machine.travel(frozen_time, tick=False)
 def test_entrypoint_create_backup(filesystem, debug, clean_stderr):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
 
-    settings.update(
-        {
-            "name": "test",
-            "action": "backup",
-            "source_paths": [src_dir],
-            "storage_paths": [dest1, dest2],
-            # "log_level": "TRACE",
-        }
-    )
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1) + "," + str(dest2)
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
 
     entrypoint()
 
@@ -64,15 +78,12 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
 
-    settings.update(
-        {
-            "name": "test",
-            "action": "backup",
-            "source_paths": [src_dir],
-            "storage_paths": [dest1, dest2],
-            "cron": "*/1 * * * *",
-        }
-    )
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1) + "," + str(dest2)
+    os.environ["EZBAK_CRON"] = "*/1 * * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
 
     entrypoint()
 
@@ -93,15 +104,12 @@ def test_entrypoint_restore_backup(filesystem, debug, clean_stderr, tmp_path):
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    settings.update(
-        {
-            "name": "test",
-            "action": "restore",
-            "source_paths": [src_dir],
-            "storage_paths": [dest1],
-            "restore_path": restore_path,
-        }
-    )
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
 
     entrypoint()
 
