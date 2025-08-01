@@ -20,3 +20,5 @@ tmp/
 .dev/
 .env
 GEMINI.md
+.github/copilot-instructions.md
+.github/instructions/

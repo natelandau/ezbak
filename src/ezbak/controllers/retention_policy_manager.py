@@ -13,6 +13,7 @@ class RetentionPolicyManager:
 
     def __init__(
         self,
+        *,
         policy_type: RetentionPolicyType,
         time_based_policy: dict[BackupType, int] | None = None,
         count_based_policy: int | None = None,
@@ -27,6 +28,10 @@ class RetentionPolicyManager:
         self.policy_type = policy_type
         self._time_based_policy = time_based_policy or {}
         self._count_based_policy = count_based_policy
+
+    def __str__(self) -> str:
+        """Return a string representation of the retention policy."""
+        return f"RetentionPolicyManager(policy_type={self.policy_type}, time_based_policy={self._time_based_policy}, count_based_policy={self._count_based_policy})"
 
     def get_retention(self, backup_type: BackupType | None = None) -> int:
         """Get retention limit for a specific backup type based on current policy.

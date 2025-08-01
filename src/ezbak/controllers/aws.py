@@ -8,13 +8,17 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from nclutils import logger
 
-from ezbak.models import settings
-
 
 class AWSService:
     """Manage file operations on Amazon S3 buckets with automatic credential validation."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        aws_access_key: str,
+        aws_secret_key: str,
+        bucket_name: str,
+        bucket_path: str | None = None,
+    ) -> None:
         """Initialize AWS S3 client with credentials and validate bucket access.
 
         Set up the S3 client with retry configuration and validate that the bucket exists and is accessible. Use this class when you need to perform file operations on a specific S3 bucket with predefined credentials.
@@ -24,10 +28,10 @@ class AWSService:
         """
         logger.debug("AWSService: Initializing")
 
-        self.aws_access_key = settings.aws_access_key
-        self.aws_secret_key = settings.aws_secret_key
-        self.bucket_path = settings.aws_s3_bucket_path or ""
-        self.bucket = settings.aws_s3_bucket_name
+        self.aws_access_key = aws_access_key
+        self.aws_secret_key = aws_secret_key
+        self.bucket_path = bucket_path or ""
+        self.bucket = bucket_name
 
         if not all([self.aws_access_key, self.aws_secret_key, self.bucket]):
             msg = "AWS credentials are not set"

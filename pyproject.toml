@@ -7,13 +7,14 @@
         "Programming Language :: Python :: 3.13",
     ]
     dependencies = [
-        "apscheduler>=3.11.0,<4.0.0",
-        "boto3>=1.39.7",
-        "cappa>=0.28.1",
-        "environs>=14.2.0",
+        "apscheduler>=3.11.0, <4.0.0",
+        "boto3>=1.40.1",
+        "cappa>=0.29.1",
         "nclutils>=2.0.0",
-        "rich>=14.0.0",
-        "whenever>=0.8.6",
+        "pydantic-settings>=2.10.1",
+        "pydantic>=2.11.7",
+        "rich>=14.1.0",
+        "whenever>=0.8.8",
     ]
     description = "A simple tool to backup and restore data as tgz files."
     license = "MIT"
@@ -33,9 +34,9 @@
 [dependency-groups]
     dev = [
         "commitizen>=4.8.3",
-        "coverage>=7.9.2",
-        "duty>=1.6.0",
-        "mypy>=1.17.0",
+        "coverage>=7.10.1",
+        "duty>=1.6.2",
+        "mypy>=1.17.1",
         "pre-commit>=4.2.0",
         "pytest-clarity>=1.0.1",
         "pytest-cov>=6.2.1",
@@ -43,8 +44,8 @@
         "pytest-pretty-terminal>=1.1.0",
         "pytest-sugar>=1.0.0",
         "pytest>=8.4.1",
-        "rich>=14.0.0",
-        "ruff>=0.12.3",
+        "rich>=14.1.0",
+        "ruff>=0.12.7",
         "time-machine>=2.16.0",
         "typos>=1.34.0",
         "yamllint>=1.37.1",
@@ -165,6 +166,7 @@
             "PLR2004",
             "PLR6301",
             "S101",
+            "S106",    # Possible hardcoded password
             "SLF001",
 
         ], "duties.py" = ["ANN001"] }

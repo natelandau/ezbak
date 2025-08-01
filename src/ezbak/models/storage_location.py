@@ -9,19 +9,28 @@ from whenever import Instant, TimeZoneNotFoundError
 from ezbak.constants import BACKUP_EXTENSION, DEFAULT_DATE_FORMAT, BackupType, StorageType
 
 from .backup import Backup
-from .settings import settings
 
 
 class StorageLocation:
     """Class to store backups by storage location."""
 
     def __init__(
-        self, storage_path: str | Path, storage_type: StorageType, backups: list[Backup]
+        self,
+        *,
+        storage_path: str | Path,
+        storage_type: StorageType,
+        backups: list[Backup],
+        name: str,
+        label_time_units: bool,
+        tz: str | None = None,
     ) -> None:
         self.storage_path = storage_path
         self.storage_type = storage_type
         self.backups = backups
+        self.name = name
         self.backups_by_time_unit, self.dates_in_use = self._categorize_backups_by_time_unit()
+        self.tz = tz
+        self.label_time_units = label_time_units
 
         # This variable is only used for logging purposes.
         self.logging_name = (
@@ -77,15 +86,15 @@ class StorageLocation:
         logger.trace("Generating new backup name")
         i = Instant.now()
         try:
-            now = i.to_tz(settings.tz) if settings.tz else i.to_system_tz()
+            now = i.to_tz(self.tz) if self.tz else i.to_system_tz()
         except TimeZoneNotFoundError as e:
             logger.error(e)
             raise
 
         timestamp = now.py_datetime().strftime(DEFAULT_DATE_FORMAT)
 
-        if not settings.label_time_units:
-            filename = f"{settings.name}-{timestamp}.{BACKUP_EXTENSION}"
+        if not self.label_time_units:
+            filename = f"{self.name}-{timestamp}.{BACKUP_EXTENSION}"
         else:
             period_checks = [
                 ("yearly", BackupType.YEARLY, str(now.year)),
@@ -105,7 +114,7 @@ class StorageLocation:
                 period = period_name
                 break
 
-            filename = f"{settings.name}-{timestamp}-{period}.{BACKUP_EXTENSION}"
+            filename = f"{self.name}-{timestamp}-{period}.{BACKUP_EXTENSION}"
 
         if filename in [x.name for x in self.backups]:
             filename = (

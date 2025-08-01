@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import cappa
 import time_machine
 
-from ezbak.cli import EZBakCLI, initialize_ezbak
+from ezbak.cli import EZBakCLI
 from ezbak.constants import DEFAULT_DATE_FORMAT
 
 UTC = ZoneInfo("UTC")
@@ -38,7 +38,6 @@ def test_cli_create_backup(filesystem, debug, clean_stderr, tmp_path):
             "--storage",
             str(dest2),
         ],
-        deps=[initialize_ezbak],
     )
     output = clean_stderr()
     # debug(output)
@@ -70,7 +69,6 @@ def test_cli_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
             str(src_dir),
             "--no-label",
         ],
-        deps=[initialize_ezbak],
     )
 
     output = clean_stderr()
@@ -116,7 +114,6 @@ def test_cli_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
             "--max-backups",
             "3",
         ],
-        deps=[initialize_ezbak],
     )
     output = clean_stderr()
     # debug(output)
@@ -175,7 +172,6 @@ def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
             "--minutely",
             "4",
         ],
-        deps=[initialize_ezbak],
     )
     output = clean_stderr()
     # debug(output)
@@ -205,7 +201,6 @@ def test_cli_list_backups(debug, clean_stderr, tmp_path):
     cappa.invoke(
         obj=EZBakCLI,
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
-        deps=[initialize_ezbak],
     )
     output = clean_stderr()
     debug(output)
@@ -237,7 +232,6 @@ def test_cli_restore_backup(filesystem, debug, clean_stderr, tmp_path):
             "--destination",
             str(restore_path),
         ],
-        deps=[initialize_ezbak],
     )
     output = clean_stderr()
     # debug(output)
