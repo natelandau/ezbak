@@ -21,14 +21,16 @@ Use ezbak as a Python package in your code, run it from the command line, or dep
 
 ## Table of Contents
 
--   [ezbak](#ezbak)
-    -   [Table of Contents](#table-of-contents)
-    -   [Installation](#installation)
-    -   [Usage](#usage)
-    -   [Core Concepts](#core-concepts)
-    -   [Common Use Cases](#common-use-cases)
-    -   [Configuration Options](#configuration-options)
-    -   [Contributing](#contributing)
+* [ezbak](#ezbak)
+  * [Table of Contents](#table-of-contents)
+  * [Installation](#installation)
+  * [Usage](#usage)
+  * [Core Concepts](#core-concepts)
+  * [Common Use Cases](#common-use-cases)
+  * [Configuration the ezbak instance](#configuration-the-ezbak-instance)
+  * [Use environment variables for Docker](#use-environment-variables-for-docker)
+  * [CLI Configurations](#cli-configurations)
+  * [Contributing](#contributing)
 
 ## Installation
 
@@ -290,9 +292,9 @@ backup_manager.create_backup()
 Path("/tmp/db_backup.sql").unlink()
 ```
 
-## Configuration Options
+## Configuration the ezbak instance
 
-Configure ezbak using any combination of Python parameters, CLI arguments, or environment variables:
+The ezbak instance is the main class that manages the backup process. It is initialized with a set of settings that control the backup process.
 
 ### Core Settings
 
@@ -367,9 +369,9 @@ aws_s3_bucket_name="your-bucket-name",
 aws_s3_bucket_path="your-bucket-path", # Optional: Path within the bucket
 ```
 
-### Environment Variables
+## Use environment variables for Docker
 
-All options can be set via environment variables using the `EZBAK_` prefix. For example:
+All options specified above can be set via environment variables for use in Docker by adding the `EZBAK_` prefix. For example:
 
 ```bash
 export EZBAK_NAME="my-backup"
@@ -387,9 +389,9 @@ EZBAK_CRON="0 2 * * *"        # Cron schedule (daily at 2 AM)
 EZBAK_TZ="America/New_York"   # Timezone for timestamps
 ```
 
-### CLI Equivalents
+## CLI Configurations
 
-Most Python options have CLI equivalents. Use --help for details:
+Most options have CLI equivalents. Use --help for details:
 
 ```bash
 ezbak create --help     # See all create options
