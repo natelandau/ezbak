@@ -1,3 +1,14 @@
+## v0.11.4 (2025-08-11)
+
+### Fix
+
+- **cli**: remove completions (#32)
+- suppress secrets from debug logs (#30)
+
+### Refactor
+
+- shift to instance-based application model (#31)
+
 ## v0.11.3 (2025-07-07)
 
 ### Fix
