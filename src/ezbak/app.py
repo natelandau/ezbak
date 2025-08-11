@@ -1,4 +1,4 @@
-"""The main EzBak application class."""
+"""Provide the high-level application API for creating, listing, pruning, renaming, and restoring backups using validated settings."""
 
 from __future__ import annotations
 
@@ -47,44 +47,44 @@ def ezbak(  # noqa: PLR0913
     aws_s3_bucket_name: str | None = None,
     aws_s3_bucket_path: str | None = None,
 ) -> EZBakApp:
-    """Execute automated backups with configurable retention policies and compression.
+    """Create an `EZBakApp` configured for automated backups with retention and compression.
 
-    Creates timestamped backups of specified source directories/files to destination locations using the BackupManager. Supports flexible retention policies (count-based or time-based), file filtering with regex patterns, compression, and ownership changes. Ideal for automated backup scripts and scheduled backup operations.
+    Validate inputs via `Settings`, wire logging, and return an application object that exposes high-level backup operations. Use as a convenience factory from scripts and CLIs.
 
     Args:
-        name (str): Unique identifier for the backup operation. Used for logging and backup labeling.
-        source_paths (list[Path | str] | None, optional): Source paths to backup. Can be files or directories. Defaults to None.
-        storage_paths (list[Path | str] | None, optional): Destination paths where backups will be stored. Defaults to None.
-        storage_type (str | None, optional): Storage location for backups. Defaults to None.
-        strip_source_paths (bool | None, optional): Strip source paths from directory sources. Defaults to None.
-        delete_src_after_backup (bool | None, optional): Delete source paths after backup. Defaults to None.
-        tz (str | None, optional): Timezone for timestamp formatting in backup names. Defaults to None.
-        log_level (str, optional): Logging verbosity level. Defaults to "info".
-        log_file (str | Path | None, optional): Path to log file. If None, logs to stdout. Defaults to None.
-        log_prefix (str | None, optional): Prefix for log messages. Defaults to None.
-        compression_level (int | None, optional): Compression level (1-9) for backup archives. Defaults to None.
-        max_backups (int | None, optional): Maximum number of backups to retain (count-based retention). Defaults to None.
-        retention_yearly (int | None, optional): Number of yearly backups to retain. Defaults to None.
-        retention_monthly (int | None, optional): Number of monthly backups to retain. Defaults to None.
-        retention_weekly (int | None, optional): Number of weekly backups to retain. Defaults to None.
-        retention_daily (int | None, optional): Number of daily backups to retain. Defaults to None.
-        retention_hourly (int | None, optional): Number of hourly backups to retain. Defaults to None.
-        retention_minutely (int | None, optional): Number of minutely backups to retain. Defaults to None.
-        exclude_regex (str | None, optional): Regex pattern to exclude files from backup. Defaults to None.
-        include_regex (str | None, optional): Regex pattern to include only matching files. Defaults to None.
-        chown_uid (int | None, optional): User ID to set ownership of backup files. Defaults to None.
-        chown_gid (int | None, optional): Group ID to set ownership of backup files. Defaults to None.
-        label_time_units (bool, optional): Include time units in backup filenames. Defaults to True.
-        aws_access_key (str | None, optional): AWS access key for S3 backup storage. Defaults to None.
-        aws_secret_key (str | None, optional): AWS secret key for S3 backup storage. Defaults to None.
-        aws_s3_bucket_name (str | None, optional): AWS S3 bucket name for backup storage. Defaults to None.
-        aws_s3_bucket_path (str | None, optional): AWS S3 bucket path for backup storage. Defaults to None.
+        name (str): Unique identifier for the backup set used for labeling and logging.
+        storage_type (str): Storage backend to use (e.g., "local", "s3").
+        source_paths (list[Path | str] | None): Source files or directories to back up. Defaults to None.
+        storage_paths (list[Path | str] | None): Destination paths for storing backups. Defaults to None.
+        tz (str | None): Timezone for timestamps in backup names. Defaults to None.
+        log_level (str | None): Log verbosity. Defaults to None.
+        log_file (str | Path | None): File path for log output. Defaults to None.
+        log_prefix (str | None): Prefix to include in each log line. Defaults to None.
+        compression_level (int): Compression level (1-9). Defaults to DEFAULT_COMPRESSION_LEVEL.
+        max_backups (int | None): Maximum number of backups to retain. Defaults to None.
+        retention_yearly (int | None): Number of yearly backups to retain. Defaults to None.
+        retention_monthly (int | None): Number of monthly backups to retain. Defaults to None.
+        retention_weekly (int | None): Number of weekly backups to retain. Defaults to None.
+        retention_daily (int | None): Number of daily backups to retain. Defaults to None.
+        retention_hourly (int | None): Number of hourly backups to retain. Defaults to None.
+        retention_minutely (int | None): Number of minutely backups to retain. Defaults to None.
+        strip_source_paths (bool): Remove source path prefix when archiving directories. Defaults to False.
+        delete_src_after_backup (bool): Delete source files after a successful backup. Defaults to False.
+        exclude_regex (str | None): Regex pattern for paths to exclude. Defaults to None.
+        include_regex (str | None): Regex pattern for paths to include. Defaults to None.
+        chown_uid (int | None): UID to assign to created files. Defaults to None.
+        chown_gid (int | None): GID to assign to created files. Defaults to None.
+        label_time_units (bool): Include time units in backup labels. Defaults to True.
+        aws_access_key (str | None): AWS access key for S3. Defaults to None.
+        aws_secret_key (str | None): AWS secret key for S3. Defaults to None.
+        aws_s3_bucket_name (str | None): S3 bucket name. Defaults to None.
+        aws_s3_bucket_path (str | None): S3 bucket prefix or path. Defaults to None.
 
     Returns:
-        BackupManager: Configured backup manager instance ready to execute backup operations.
+        EZBakApp: Application instance ready to perform backup operations.
 
     Raises:
-        ValidationError: If the provided settings are invalid.
+        ValidationError: If provided settings are invalid.
     """
     func_args = locals()
     settings_kwargs = {key: value for key, value in func_args.items() if value is not None}
@@ -100,14 +100,13 @@ def ezbak(  # noqa: PLR0913
 
 
 class EZBakApp:
-    """The main EzBak application class."""
+    """Expose high-level operations to create, list, prune, rename, and restore backups backed by `BackupManager`."""
 
     def __init__(self, config: Settings | None = None) -> None:
-        """Initialize the EzBak application.
+        """Initialize the application with validated `Settings` and prepare logging and the backup manager.
 
         Args:
-            config (Settings | None, optional): The configuration for the application.
-                If not provided, the global settings will be used. Defaults to None.
+            config (Settings | None): Application settings. Prefer using `ezbak()` to construct a validated configuration. Defaults to None.
         """
         self.settings = config
         if self.settings.log_level:
@@ -115,7 +114,7 @@ class EZBakApp:
         self.backup_manager = BackupManager(config=self.settings)
 
     def _configure_logging(self) -> None:
-        """Configure the logger."""
+        """Configure structured logging according to `Settings`."""
         logger.configure(
             log_level=self.settings.log_level.value,
             show_source_reference=False,
@@ -125,51 +124,49 @@ class EZBakApp:
         logger.info(f"Run ezbak for '{self.settings.name}'")
 
     def create_backup(self) -> None:
-        """Create a backup."""
+        """Create a new backup using the current settings."""
         self.backup_manager.create_backup()
 
     def restore_backup(
         self, restore_path: Path | str | None = None, *, clean_before_restore: bool = False
     ) -> bool:
-        """Restore a backup.
+        """Restore the latest or specified backup to `restore_path`.
 
         Args:
-            restore_path (Path | str | None, optional): The path to restore the backup from. If not provided, the latest backup will be used. Defaults to None.
-            clean_before_restore (bool, optional): Clean the restore path before restoring. Defaults to False.
+            restore_path (Path | str | None): Target directory to restore into. When None, restore the latest backup to its original path or default target. Defaults to None.
+            clean_before_restore (bool): Remove existing contents at the target before restoring. Defaults to False.
 
         Returns:
-            bool: True if the backup was restored successfully, False otherwise.
+            bool: True when a backup is successfully restored; otherwise False.
         """
         return self.backup_manager.restore_backup(
             restore_path, clean_before_restore=clean_before_restore
         )
 
     def prune_backups(self) -> list[Backup]:
-        """Prune backups.
+        """Apply retention policy and delete expired backups.
 
         Returns:
-            list[Backup]: The list of pruned backups.
+            list[Backup]: Backups that were pruned.
         """
         return self.backup_manager.prune_backups()
 
     def list_backups(self) -> list[Backup]:
-        """List backups.
+        """List all discovered backups across storage locations.
 
         Returns:
-            list[Backup]: The list of backups.
+            list[Backup]: Available backups.
         """
         return self.backup_manager.list_backups()
 
     def rename_backups(self) -> None:
-        """Rename backups."""
+        """Rename backups to match the current labeling configuration."""
         self.backup_manager.rename_backups()
 
     def get_latest_backup(self) -> Backup:
-        """Get the latest backup from the storage locations.
-
-        Find the most recent backup across all configured storage locations based on timestamp. Use this to identify the newest backup for restoration operations or to determine if new backups are needed.
+        """Return the most recent backup across all storage locations.
 
         Returns:
-            Backup: The latest backup, or None if no backups exist.
+            Backup: Latest backup object.
         """
         return self.backup_manager.get_latest_backup()
