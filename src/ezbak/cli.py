@@ -268,7 +268,7 @@ class ListCommand:
 def main() -> None:  # pragma: no cover
     """Main function."""  # noqa: DOC501
     try:
-        cappa.invoke(obj=EZBakCLI)
+        cappa.invoke(obj=EZBakCLI, completion=False)
     except KeyboardInterrupt as e:
         pp.info("Exiting...")
         raise cappa.Exit(code=1) from e
