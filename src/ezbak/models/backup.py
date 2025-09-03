@@ -42,7 +42,7 @@ class Backup:
             self.zoned_datetime = (
                 plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
             )
-            logger.warning(self.zoned_datetime)
+            logger.trace(f"Zoned datetime: {self.zoned_datetime}")
         except TimeZoneNotFoundError as e:
             logger.error(e)
             raise
