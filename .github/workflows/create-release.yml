@@ -24,7 +24,7 @@ jobs:
         needs: run-tests
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
               with:
                   fetch-depth: 0
 
@@ -81,7 +81,7 @@ jobs:
             TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env
@@ -107,7 +107,7 @@ jobs:
             IMAGE_NAME: ${{ github.repository }}
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Extract metadata (tags, labels) for Docker
               id: meta
