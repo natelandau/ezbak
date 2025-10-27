@@ -85,6 +85,7 @@ class StorageLocation:
         """
         logger.trace("Generating new backup name")
         i = Instant.now()
+
         try:
             now = i.to_tz(self.tz) if self.tz else i.to_system_tz()
         except TimeZoneNotFoundError as e:

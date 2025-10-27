@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from typing import Annotated, Self
 
 from nclutils import logger
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import BeforeValidator, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ezbak.constants import (
@@ -167,8 +167,8 @@ class Settings(BaseSettings):
     aws_s3_bucket_path: str | None = None
     aws_secret_key: str | None = None
 
-    _cached_retention_policy: RetentionPolicyManager | None = None
-    _cached_tmp_dir: TemporaryDirectory | None = None
+    _cached_retention_policy: RetentionPolicyManager | None = PrivateAttr(default=None)
+    _cached_tmp_dir: TemporaryDirectory | None = PrivateAttr(default=None)
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
