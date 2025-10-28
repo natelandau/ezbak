@@ -1,3 +1,9 @@
+## v0.11.5 (2025-10-28)
+
+### Fix
+
+- adjust log level for backup timestamp (#35)
+
 ## v0.11.4 (2025-08-11)
 
 ### Fix
