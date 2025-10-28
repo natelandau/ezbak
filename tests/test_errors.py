@@ -37,7 +37,7 @@ def test_source_paths_not_found(filesystem):
         source_paths=[src_dir / "not_found"],
         storage_paths=[dest1],
     )
-    with pytest.raises(ValueError, match="Source does not exis"):
+    with pytest.raises(ValueError, match="Source does not exist"):
         backup_manager.create_backup()
 
 
