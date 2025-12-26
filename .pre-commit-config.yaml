@@ -5,7 +5,7 @@ default_stages: [pre-commit, manual]
 fail_fast: true
 repos:
   - repo: "https://github.com/commitizen-tools/commitizen"
-    rev: v4.9.1
+    rev: v4.10.1
     hooks:
       - id: commitizen
       - id: commitizen-branch
@@ -61,7 +61,7 @@ repos:
         entry: yamllint --strict --config-file .yamllint.yml
 
   - repo: "https://github.com/astral-sh/ruff-pre-commit"
-    rev: v0.14.2
+    rev: v0.14.10
     hooks:
       - id: ruff-check
         args: [--no-fix]
@@ -69,20 +69,20 @@ repos:
         args: [--check]
 
   - repo: "https://github.com/adhtruong/mirrors-typos"
-    rev: v1.38.1
+    rev: v1.40.0
     hooks:
       - id: typos
         args: ["--force-exclude"]
         stages: [commit-msg, pre-commit]
 
   - repo: "https://github.com/crate-ci/committed"
-    rev: v1.1.7
+    rev: v1.1.8
     hooks:
       - id: committed
         stages: [commit-msg]
 
   - repo: "https://github.com/gitleaks/gitleaks"
-    rev: v8.28.0
+    rev: v8.30.0
     hooks:
       - id: gitleaks
 

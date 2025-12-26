@@ -490,6 +490,9 @@ class BackupManager:
                 )
                 logger.info(f"S3 created: {backup_name}")
 
+        logger.debug(f"Deleting tmp backup: {tmp_backup}")
+        tmp_backup.unlink()
+
         if self.settings.delete_src_after_backup:
             logger.debug("Clean source paths after backup")
 
