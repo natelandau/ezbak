@@ -1,3 +1,13 @@
+## v0.12.0 (2025-12-26)
+
+### Feat
+
+- support python 3.14 (#37)
+
+### Fix
+
+- cleanup temp files
+
 ## v0.11.6 (2025-10-28)
 
 ### Fix
