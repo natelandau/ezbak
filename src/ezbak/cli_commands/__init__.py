@@ -8,7 +8,7 @@ from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, LogLevel, StorageType
 from ezbak.models import Settings
 
 
-def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBakApp:
+def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBakApp:  # noqa: RUF067
     """Get the EZBak app.
 
     Args:
@@ -18,7 +18,7 @@ def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBakApp:
         EZBakApp: The EZBak app.
     """
     return EZBakApp(
-        Settings(  # type: ignore[call-arg]
+        Settings(  # type: ignore [call-arg]
             name=ezbak_cli.name,
             storage_type=StorageType.LOCAL,
             source_paths=getattr(ezbak_cli.command, "sources", [Path.cwd()]),

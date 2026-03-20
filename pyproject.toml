@@ -9,13 +9,13 @@
     ]
     dependencies = [
         "apscheduler>=3.11.2,<4.0.0",
-        "boto3>=1.42.16",
+        "boto3>=1.42.72",
         "cappa>=0.31.0",
         "nclutils>=2.1.0",
-        "pydantic-settings>=2.10.1,<3.0.0",
-        "pydantic>=2.11.7,<3.0.0",
-        "rich>=14.1.0",
-        "whenever>=0.9.4",
+        "pydantic-settings>=2.13.1,<3.0.0",
+        "pydantic>=2.12.5,<3.0.0",
+        "rich>=14.3.3",
+        "whenever>=0.9.5",
     ]
     description = "A simple tool to backup and restore data as tgz files."
     license = "MIT"
@@ -34,21 +34,21 @@
 
 [dependency-groups]
     dev = [
-        "commitizen>=4.10.1",
-        "coverage>=7.13.0",
-        "duty>=1.6.2",
+        "commitizen>=4.13.9",
+        "coverage>=7.13.5",
+        "duty>=1.9.0",
         "mypy>=1.19.1",
-        "prek>=0.2.24",
+        "prek>=0.3.6",
         "pytest-clarity>=1.0.1",
-        "pytest-cov>=6.2.1",
-        "pytest-mock>=3.14.1",
-        "pytest-sugar>=1.0.0",
+        "pytest-cov>=7.0.0",
+        "pytest-mock>=3.15.1",
+        "pytest-sugar>=1.1.1",
         "pytest>=9.0.2",
-        "rich>=14.1.0",
-        "ruff>=0.14.10",
-        "time-machine>=2.17.0",
-        "typos>=1.40.0",
-        "yamllint>=1.37.1",
+        "rich>=14.3.3",
+        "ruff>=0.15.7",
+        "time-machine>=3.2.0",
+        "typos>=1.44.0",
+        "yamllint>=1.38.0",
     ]
 
 [build-system]
