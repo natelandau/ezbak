@@ -63,7 +63,7 @@ jobs:
 
             - name: Set up QEMU
               if: steps.dockerfile-changes.outputs.dockerfile == 'true'
-              uses: docker/setup-qemu-action@v3
+              uses: docker/setup-qemu-action@v4
 
             - name: Set up Docker Buildx
               if: steps.dockerfile-changes.outputs.dockerfile == 'true'
