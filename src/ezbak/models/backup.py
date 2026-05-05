@@ -5,7 +5,7 @@ from pathlib import Path
 from nclutils import logger
 from whenever import PlainDateTime, TimeZoneNotFoundError
 
-from ezbak.constants import DEFAULT_DATE_FORMAT, TIMESTAMP_REGEX, StorageType
+from ezbak.constants import DEFAULT_DATE_PATTERN, TIMESTAMP_REGEX, StorageType
 
 
 class Backup:
@@ -37,7 +37,7 @@ class Backup:
             logger.warning(f"Could not parse timestamp: {name}")
             raise
 
-        plain_dt = PlainDateTime.parse_strptime(self.timestamp, format=DEFAULT_DATE_FORMAT)
+        plain_dt = PlainDateTime.parse(self.timestamp, format=DEFAULT_DATE_PATTERN)
         try:
             self.zoned_datetime = (
                 plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
@@ -49,7 +49,7 @@ class Backup:
 
         self.year = str(self.zoned_datetime.year)
         self.month = str(self.zoned_datetime.month)
-        self.week = str(self.zoned_datetime.py_datetime().strftime("%W"))
+        self.week = str(self.zoned_datetime.to_stdlib().strftime("%W"))
         self.day = str(self.zoned_datetime.day)
         self.hour = str(self.zoned_datetime.hour)
         self.minute = str(self.zoned_datetime.minute)

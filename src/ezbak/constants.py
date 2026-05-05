@@ -6,6 +6,8 @@ from enum import Enum
 __version__ = "0.12.0"
 
 DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
+# whenever's parse pattern equivalent of DEFAULT_DATE_FORMAT — Y/M/D for date, h/m/s for time, 'T' is a quoted literal
+DEFAULT_DATE_PATTERN = "YYYYMMDD'T'hhmmss"
 TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
 BACKUP_NAME_REGEX = re.compile(
     r"(?P<name>.+)-(?P<timestamp>\d{8}T\d{6})(?:-(?P<period>(?:yearly|monthly|weekly|daily|hourly|minutely)))?-?(?P<uuid>[0-9a-z]{5,6})?\.(?P<extension>.+)",
