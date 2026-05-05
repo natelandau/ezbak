@@ -1,3 +1,9 @@
+## v0.12.1 (2026-05-05)
+
+### Refactor
+
+- migrate off deprecated whenever APIs (#43)
+
 ## v0.12.0 (2025-12-26)
 
 ### Feat

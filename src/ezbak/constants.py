@@ -3,7 +3,7 @@
 import re
 from enum import Enum
 
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 
 DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
 # whenever's parse pattern equivalent of DEFAULT_DATE_FORMAT — Y/M/D for date, h/m/s for time, 'T' is a quoted literal
