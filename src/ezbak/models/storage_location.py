@@ -92,7 +92,7 @@ class StorageLocation:
             logger.error(e)
             raise
 
-        timestamp = now.py_datetime().strftime(DEFAULT_DATE_FORMAT)
+        timestamp = now.to_stdlib().strftime(DEFAULT_DATE_FORMAT)
 
         if not self.label_time_units:
             filename = f"{self.name}-{timestamp}.{BACKUP_EXTENSION}"
@@ -100,7 +100,7 @@ class StorageLocation:
             period_checks = [
                 ("yearly", BackupType.YEARLY, str(now.year)),
                 ("monthly", BackupType.MONTHLY, str(now.month)),
-                ("weekly", BackupType.WEEKLY, now.py_datetime().strftime("%W")),
+                ("weekly", BackupType.WEEKLY, now.to_stdlib().strftime("%W")),
                 ("daily", BackupType.DAILY, str(now.day)),
                 ("hourly", BackupType.HOURLY, str(now.hour)),
                 ("minutely", BackupType.MINUTELY, str(now.minute)),
