@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nclutils import pp
+from loguru import logger
 from pydantic import ValidationError
 
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL
@@ -91,10 +91,11 @@ def ezbak(  # noqa: PLR0913
     settings_kwargs = {key: value for key, value in func_args.items() if value is not None}
 
     try:
+        # _env_file="" suppresses .env loading so explicit caller args aren't silently overridden
         config = Settings(**settings_kwargs, _env_file="")  # type: ignore [call-arg]
     except ValidationError as e:
         for error in e.errors():
-            pp.error(f"ERROR: {error['msg']}")
+            logger.error(error["msg"])
         raise
 
     return EZBakApp(config)
@@ -103,19 +104,18 @@ def ezbak(  # noqa: PLR0913
 class EZBakApp:
     """Expose high-level operations to create, list, prune, rename, and restore backups backed by `BackupManager`."""
 
-    def __init__(self, config: Settings | None = None) -> None:
+    def __init__(self, config: Settings) -> None:
         """Initialize the application with validated `Settings` and prepare logging and the backup manager.
 
         Args:
-            config (Settings | None): Application settings. Prefer using `ezbak()` to construct a validated configuration. Defaults to None.
+            config (Settings): Application settings. Prefer using `ezbak()` to construct a validated configuration.
         """
         self.settings = config
-        if self.settings is not None:
-            instantiate_logger(
-                log_level=self.settings.log_level,
-                log_file=self.settings.log_file,
-                prefix=self.settings.log_prefix,
-            )
+        instantiate_logger(
+            log_level=self.settings.log_level,
+            log_file=self.settings.log_file,
+            prefix=self.settings.log_prefix,
+        )
         self.backup_manager = BackupManager(config=self.settings)
 
     def create_backup(self) -> None:
