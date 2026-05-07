@@ -9,12 +9,12 @@
     ]
     dependencies = [
         "apscheduler>=3.11.2,<4.0.0",
-        "boto3>=1.43.3",
+        "boto3>=1.43.5",
         "cappa>=0.31.0",
         "loguru>=0.7.3",
-        "nclutils>=2.1.0",
+        "nclutils>=3.0.1,<4.0.0",
         "pydantic-settings>=2.14.0,<3.0.0",
-        "pydantic>=2.13.3,<3.0.0",
+        "pydantic>=2.13.4,<3.0.0",
         "rich>=15.0.0",
         "whenever>=0.10.0",
     ]
@@ -35,11 +35,11 @@
 
 [dependency-groups]
     dev = [
-        "commitizen>=4.15.0",
+        "commitizen>=4.15.1",
         "coverage>=7.13.5",
         "duty>=1.9.0",
-        "mypy>=1.20.2",
-        "prek>=0.3.12",
+        "mypy>=2.0.0",
+        "prek>=0.3.13",
         "pytest-clarity>=1.0.1",
         "pytest-cov>=7.1.0",
         "pytest-devtools>=1.2.0",
