@@ -22,3 +22,6 @@ docs/plans/
 docs/specs/
 docs/superpowers/
 .superpowers/
+.env
+.env.secrets
+.dev
