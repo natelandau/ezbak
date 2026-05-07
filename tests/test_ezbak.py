@@ -18,7 +18,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_create_backup(filesystem, debug, capsys, tmp_path):
     """Verify that a backups are created and restored correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -60,7 +60,7 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
         backup_manager.create_backup()
 
     # When: Capturing stderr output
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(src_dir)
     # debug(dest1)
@@ -72,8 +72,8 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
         debug(filename)
         assert Path(dest1 / filename).exists()
         assert Path(dest2 / filename).exists()
-        assert f"INFO     | Created: …/dest1/{filename}" in output
-        assert f"INFO     | Created: …/dest2/{filename}" in output
+        assert f"INFO     | Created: dest1/{filename}" in output
+        assert f"INFO     | Created: dest2/{filename}" in output
         assert "TRACE    | Add to tar: src/empty_dir" in output
         assert "Excluded file: .DS_Store" in output
 
@@ -84,14 +84,14 @@ def test_create_backup(filesystem, debug, clean_stderr, tmp_path):
 
     # Then: List backups returns correct count
     list_backups = backup_manager.list_backups()
-    clean_stderr()
+    capsys.readouterr()
     assert len(list_backups) == 14
     assert all(Path(dest1 / filename).exists() for filename in filenames)
     assert all(Path(dest2 / filename).exists() for filename in filenames)
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_without_labels(debug, clean_stderr, filesystem, tmp_path):
+def test_without_labels(debug, capsys, filesystem, tmp_path):
     """Verify that backups are created without labels."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -110,18 +110,18 @@ def test_without_labels(debug, clean_stderr, filesystem, tmp_path):
     for _ in range(2):
         backup_manager.create_backup()
 
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 
-    assert f"INFO     | Created: …/dest2/test-{frozen_time_str}.tgz" in output
-    assert f"INFO     | Created: …/dest1/test-{frozen_time_str}.tgz" in output
+    assert f"INFO     | Created: dest2/test-{frozen_time_str}.tgz" in output
+    assert f"INFO     | Created: dest1/test-{frozen_time_str}.tgz" in output
     assert re.search(rf"dest1/test-{frozen_time_str}-[a-z0-9]{{5}}\.tgz", output)
     assert re.search(rf"dest2/test-{frozen_time_str}-[a-z0-9]{{5}}\.tgz", output)
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
+def test_exclude_regex(filesystem, debug, capsys, tmp_path):
     """Verify that files are excluded from the backup."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, _ = filesystem
@@ -142,7 +142,7 @@ def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
     # When: Creating a backup
     backup_manager.create_backup()
     backup_manager.restore_backup(restore_dir)
-    # output = clean_stderr()
+    # output = capsys.readouterr().err
     # debug(output)
     # debug(restore_dir)
 
@@ -158,7 +158,7 @@ def test_exclude_regex(filesystem, debug, clean_stderr, tmp_path):
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
+def test_include_regex(filesystem, debug, capsys, tmp_path):
     """Verify that files are excluded from the backup."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, _ = filesystem
@@ -179,7 +179,7 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
     # When: Creating a backup
     backup_manager.create_backup()
     backup_manager.restore_backup(restore_dir)
-    # output = clean_stderr()
+    # output = capsys.readouterr().err
     # debug(output)
     # debug(restore_dir)
 
@@ -194,7 +194,7 @@ def test_include_regex(filesystem, debug, clean_stderr, tmp_path):
     assert i == len(list(src_dir.rglob("*")))
 
 
-def test_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_restore_backup(filesystem, debug, capsys, tmp_path):
     """Verify the correct backup is selected and restored."""
     # Given: Source and destination directories from fixture
     src_dir, _, _ = filesystem
@@ -244,7 +244,7 @@ def test_restore_backup(filesystem, debug, clean_stderr, tmp_path):
         assert (restore_dir / src_dir.name / file.name).exists()
 
 
-def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
+def test_create_backup_strip_path(filesystem, debug, capsys, tmp_path):
     """Verify that the path is stripped from the backup."""
     # Given: Source and destination directories from fixture
     src_dir, dst1, _ = filesystem
@@ -273,7 +273,7 @@ def test_create_backup_strip_path(filesystem, debug, clean_stderr, tmp_path):
         assert (restore_dir / file.name).exists()
 
 
-def test_rename_backups_with_labels(debug, clean_stderr, tmp_path):
+def test_rename_backups_with_labels(debug, capsys, tmp_path):
     """Verify that backups are renamed correctly."""
     # Given: Source and destination directories from fixture
 
@@ -306,7 +306,7 @@ def test_rename_backups_with_labels(debug, clean_stderr, tmp_path):
         label_time_units=True,
     )
     backup_manager.rename_backups()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 
@@ -338,7 +338,7 @@ def test_rename_backups_with_labels(debug, clean_stderr, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
+def test_rename_backups_without_labels(debug, capsys, tmp_path):
     """Verify that backups are renamed correctly."""
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -361,15 +361,15 @@ def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
         label_time_units=False,
     )
     backup_manager.rename_backups()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 
-    assert "Rename: …/test-20240609T090932-yearly.tgz -> test-20240609T090932.tgz" in output
-    assert "Rename: …/test-20250609T090932-yearly.tgz -> test-20250609T090932.tgz" in output
-    assert "Rename: …/test-20250609T095751-minutely.tgz -> test-20250609T095751.tgz" in output
+    assert "Rename: test-20240609T090932-yearly.tgz -> test-20240609T090932.tgz" in output
+    assert "Rename: test-20250609T090932-yearly.tgz -> test-20250609T090932.tgz" in output
+    assert "Rename: test-20250609T095751-minutely.tgz -> test-20250609T095751.tgz" in output
     assert (
-        "DEBUG    | Rename: …/test-20250609T095804-minutely-p2we3r.tgz -> test-20250609T095804.tgz"
+        "DEBUG    | Rename: test-20250609T095804-minutely-p2we3r.tgz -> test-20250609T095804.tgz"
         in output
     )
     assert re.search(
@@ -389,7 +389,7 @@ def test_rename_backups_without_labels(debug, clean_stderr, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_prune_max_backups(debug, clean_stderr, tmp_path):
+def test_prune_max_backups(debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -419,7 +419,7 @@ def test_prune_max_backups(debug, clean_stderr, tmp_path):
         max_backups=3,
     )
     backup_manager.prune_backups()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 
@@ -434,7 +434,7 @@ def test_prune_max_backups(debug, clean_stderr, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_prune_policy(debug, clean_stderr, tmp_path):
+def test_prune_policy(debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -469,7 +469,7 @@ def test_prune_policy(debug, clean_stderr, tmp_path):
         retention_minutely=4,
     )
     backup_manager.prune_backups()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 
@@ -484,7 +484,7 @@ def test_prune_policy(debug, clean_stderr, tmp_path):
         assert not Path(tmp_path / filename).exists()
 
 
-def test_prune_no_policy(debug, clean_stderr, tmp_path):
+def test_prune_no_policy(debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Given: Source and destination directories from fixture
 
@@ -515,7 +515,7 @@ def test_prune_no_policy(debug, clean_stderr, tmp_path):
         log_level="debug",
     )
     backup_manager.prune_backups()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 
@@ -526,7 +526,7 @@ def test_prune_no_policy(debug, clean_stderr, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
+def test_restore_with_clean(debug, tmp_path, capsys, filesystem):
     """Verify that a backup directory is cleaned before restoring."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, _ = filesystem
@@ -546,7 +546,7 @@ def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
     test_file = restore_dir / "test_file.txt"
     test_file.touch()
     backup_manager.restore_backup(restore_dir, clean_before_restore=True)
-    clean_stderr()
+    capsys.readouterr()
 
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
@@ -555,7 +555,7 @@ def test_restore_with_clean(debug, tmp_path, clean_stderr, filesystem):
     assert not (restore_dir / test_file.name).exists()
 
 
-def test_delete_src_after_backup(debug, clean_stderr, tmp_path, filesystem):
+def test_delete_src_after_backup(debug, capsys, tmp_path, filesystem):
     """Verify that source paths are deleted after backup."""
     src_dir, dest1, _ = filesystem
     test_file = tmp_path / "test_file.txt"
@@ -570,7 +570,7 @@ def test_delete_src_after_backup(debug, clean_stderr, tmp_path, filesystem):
     )
     assert len(list(src_dir.iterdir())) != 0
     backup_manager.create_backup()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(tmp_path)
 

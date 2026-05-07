@@ -3,7 +3,8 @@
 from collections import defaultdict
 from pathlib import Path
 
-from nclutils import logger, new_uid
+from loguru import logger
+from nclutils.utils import new_uid
 from whenever import Instant, TimeZoneNotFoundError
 
 from ezbak.constants import BACKUP_EXTENSION, DEFAULT_DATE_FORMAT, BackupType, StorageType

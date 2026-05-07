@@ -1,6 +1,6 @@
 """The list command for the EZBak CLI."""
 
-from nclutils import logger
+from loguru import logger
 
 from ezbak.cli import EZBakCLI
 from ezbak.cli_commands import get_app_for_cli

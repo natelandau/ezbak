@@ -20,7 +20,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_cli_create_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_cli_create_backup(filesystem, debug, capsys, tmp_path):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -39,18 +39,18 @@ def test_cli_create_backup(filesystem, debug, clean_stderr, tmp_path):
             str(dest2),
         ],
     )
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
 
     filename = f"test-{frozen_time_str}-yearly.tgz"
     assert Path(dest1 / filename).exists()
     assert Path(dest2 / filename).exists()
-    assert f"INFO     | Created: …/dest1/{filename}" in output
-    assert f"INFO     | Created: …/dest2/{filename}" in output
+    assert f"INFO     | Created: dest1/{filename}" in output
+    assert f"INFO     | Created: dest2/{filename}" in output
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_cli_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
+def test_cli_create_backup_no_labels(filesystem, debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -71,17 +71,17 @@ def test_cli_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
         ],
     )
 
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
 
     filename = f"test-{frozen_time_str}.tgz"
     assert Path(dest1 / filename).exists()
     assert Path(dest2 / filename).exists()
-    assert f"INFO     | Created: …/dest1/{filename}" in output
-    assert f"INFO     | Created: …/dest2/{filename}" in output
+    assert f"INFO     | Created: dest1/{filename}" in output
+    assert f"INFO     | Created: dest2/{filename}" in output
 
 
-def test_cli_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
+def test_cli_prune_backups_max_backups(mocker, debug, capsys, tmp_path):
     """Verify pruning backups with max backup set."""
     mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
     # Given: A backup manager configured with test parameters
@@ -115,7 +115,7 @@ def test_cli_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
             "3",
         ],
     )
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
 
     assert "Pruned 10 backups" in output
@@ -129,7 +129,7 @@ def test_cli_prune_backups_max_backups(mocker, debug, clean_stderr, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
+def test_cli_prune_backups_with_policy(mocker, debug, capsys, tmp_path):
     """Verify pruning backups with a policy."""
     mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
     # Given: A backup manager configured with test parameters
@@ -173,7 +173,7 @@ def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
             "4",
         ],
     )
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
 
     assert "Pruned 3 backups" in output
@@ -187,7 +187,7 @@ def test_cli_prune_backups_with_policy(mocker, debug, clean_stderr, tmp_path):
         assert not Path(tmp_path / filename).exists()
 
 
-def test_cli_list_backups(debug, clean_stderr, tmp_path):
+def test_cli_list_backups(debug, capsys, tmp_path):
     """Verify listing backups."""
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -202,7 +202,7 @@ def test_cli_list_backups(debug, clean_stderr, tmp_path):
         obj=EZBakCLI,
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
     )
-    output = clean_stderr()
+    output = capsys.readouterr().err
     debug(output)
 
     assert "test-20250609T101857-hourly.tgz" in output
@@ -210,7 +210,7 @@ def test_cli_list_backups(debug, clean_stderr, tmp_path):
     assert "test-20250609T095804-minutely.tgz" in output
 
 
-def test_cli_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
     """Verify that a backup is restored correctly."""
     # Given: Source and destination directories from fixture
     _, dest1, _ = filesystem
@@ -233,9 +233,9 @@ def test_cli_restore_backup(filesystem, debug, clean_stderr, tmp_path):
             str(restore_path),
         ],
     )
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     # debug(restore_path)
 
-    assert "INFO     | Backup restored to '…/restore'" in output
+    assert "INFO     | Backup restored to 'restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()

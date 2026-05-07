@@ -5,7 +5,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Self
 
-from nclutils import logger
 from pydantic import BeforeValidator, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -153,7 +152,7 @@ class Settings(BaseSettings):
 
     cron: str | None = None
     tz: str | None = None
-    log_level: Annotated[LogLevel | None, BeforeValidator(coerce_log_level)] = None
+    log_level: Annotated[LogLevel | None, BeforeValidator(coerce_log_level)] = LogLevel.INFO
     log_file: str | Path | None = None
     log_prefix: str | None = None
 
@@ -245,7 +244,6 @@ class Settings(BaseSettings):
             if self.storage_paths:
                 for destination in self.storage_paths:
                     if not destination.exists():
-                        logger.info(f"Create backup storage dir: {destination}")
                         destination.mkdir(parents=True, exist_ok=True)
 
         if not self.storage_paths and self.storage_type != StorageType.AWS:

@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 
-from nclutils import logger
+from loguru import logger
 
 from ezbak.constants import ALWAYS_EXCLUDE_FILENAMES
 

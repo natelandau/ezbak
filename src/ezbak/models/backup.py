@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from nclutils import logger
+from loguru import logger
 from whenever import PlainDateTime, TimeZoneNotFoundError
 
 from ezbak.constants import DEFAULT_DATE_PATTERN, TIMESTAMP_REGEX, StorageType

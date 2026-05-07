@@ -1,11 +1,11 @@
 """Configuration for pytest."""
 
 import os
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from nclutils import logger
-from nclutils.pytest_fixtures import clean_stderr, clean_stdout, debug  # noqa: F401
+from loguru import logger
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def filesystem(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 @pytest.fixture(autouse=True)
-def mock_env(monkeypatch):
+def mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock environment variables for testing."""
     for k in os.environ:
         if k.startswith("EZBAK_"):
@@ -47,10 +47,10 @@ def mock_env(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def reset_logger():
+def reset_logger() -> Generator[None, None, None]:
     """Reset logger handlers between tests to prevent closed file handle issues.
 
-    The logger from nclutils persists across test runs as a singleton. When tests
+    The logger from loguru persists across test runs as a singleton. When tests
     configure logging with file handlers, these handlers can point to closed files
     in subsequent test runs, causing ValueError: I/O operation on closed file.
     This fixture removes all handlers after each test to ensure clean state.
