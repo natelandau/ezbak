@@ -14,11 +14,11 @@ wheels/
 
 # Project specific
 .cache/
-.development/
-.cursor/
 tmp/
-.dev/
-.env
-GEMINI.md
-.github/copilot-instructions.md
-.github/instructions/
+.claude/
+.worktrees/
+_site/
+docs/plans/
+docs/specs/
+docs/superpowers/
+.superpowers/

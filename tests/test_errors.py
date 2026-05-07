@@ -41,7 +41,7 @@ def test_source_paths_not_found(filesystem):
         backup_manager.create_backup()
 
 
-def test_source_paths_symlink(tmp_path, clean_stderr, debug):
+def test_source_paths_symlink(tmp_path, capsys, debug):
     """Test EZBak errors."""
     dest_dir = tmp_path / "dest"
     dest_dir.mkdir()
@@ -88,7 +88,7 @@ def test_create_storage_path_dir(filesystem):
     assert new_dest.is_dir()
 
 
-def test_restore_no_dest(filesystem, tmp_path, debug, clean_stderr):
+def test_restore_no_dest(filesystem, tmp_path, debug, capsys):
     """Test EZBak errors."""
     src_dir, dest1, _ = filesystem
 
@@ -101,7 +101,7 @@ def test_restore_no_dest(filesystem, tmp_path, debug, clean_stderr):
         backup_manager.restore_backup(tmp_path / "new_dest")
 
 
-def test_restore_dest_not_dir(filesystem, tmp_path, debug, clean_stderr):
+def test_restore_dest_not_dir(filesystem, tmp_path, debug, capsys):
     """Test EZBak errors."""
     src_dir, dest1, _ = filesystem
 
@@ -118,7 +118,7 @@ def test_restore_dest_not_dir(filesystem, tmp_path, debug, clean_stderr):
         backup_manager.restore_backup(new_dest)
 
 
-def test_restore_no_backup(filesystem, tmp_path, debug, clean_stderr):
+def test_restore_no_backup(filesystem, tmp_path, debug, capsys):
     """Test EZBak errors."""
     src_dir, dest1, _ = filesystem
 
@@ -130,12 +130,12 @@ def test_restore_no_backup(filesystem, tmp_path, debug, clean_stderr):
     )
     # backup_manager.create_backup()
     assert not backup_manager.restore_backup(tmp_path)
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "ERROR    | No backup found to restore" in output
 
 
-def test_no_restore_destination(filesystem, tmp_path, debug, clean_stderr):
+def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
     """Test EZBak errors."""
     src_dir, dest1, _ = filesystem
 

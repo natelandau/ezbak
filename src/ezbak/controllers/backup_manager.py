@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
-from nclutils import clean_directory, copy_file, find_files, logger, new_uid
+from loguru import logger
+from nclutils.fs import clean_directory, copy_file, find_files
+from nclutils.utils import new_uid
 
 from ezbak.constants import (
     BACKUP_EXTENSION,

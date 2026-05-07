@@ -1,17 +1,18 @@
 """Test AWS backups."""
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 import time_machine
-from nclutils import logger
 
 from ezbak import ezbak
-from ezbak.constants import DEFAULT_DATE_FORMAT, StorageType
+from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
 from ezbak.controllers.aws import AWSService
 from ezbak.models import Backup
+from ezbak.utils.log_config import instantiate_logger
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -20,7 +21,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @pytest.fixture(autouse=True)
-def mock_aws_client(mocker):
+def mock_aws_client(mocker) -> None:
     """Mock AWS credentials."""
     mock_paginator = mocker.MagicMock()
     mock_paginator.paginate.return_value = [
@@ -41,7 +42,11 @@ def mock_aws_client(mocker):
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_aws_create_backup(filesystem, debug, clean_stderr):
+def test_aws_create_backup(
+    filesystem: tuple[Path, Path, Path],
+    debug: Callable[[str], None],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Test AWS create backup."""
     # Given: Source and destination directories from fixture
     src_dir, _, _ = filesystem
@@ -59,13 +64,13 @@ def test_aws_create_backup(filesystem, debug, clean_stderr):
 
     # When: Creating a backup
     backup_manager.create_backup()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "test-20250609T000000-yearly.tgz" in output
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_aws_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
+def test_aws_create_backup_no_labels(filesystem, debug, capsys, tmp_path):
     """Test AWS create backup."""
     # Given: Source and destination directories from fixture
     src_dir, _, _ = filesystem
@@ -84,12 +89,12 @@ def test_aws_create_backup_no_labels(filesystem, debug, clean_stderr, tmp_path):
 
     # When: Creating a backup
     backup_manager.create_backup()
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "test-20250609T000000.tgz" in output
 
 
-def test_get_latest_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_get_latest_backup(filesystem, debug, capsys, tmp_path):
     """Test AWS get latest backup."""
     # Given: Source and destination directories from fixture
     src_dir, _, _ = filesystem
@@ -112,13 +117,13 @@ def test_get_latest_backup(filesystem, debug, clean_stderr, tmp_path):
     # When: Restoring the latest backup
     # Assert the aws service returns a file. However, the restore fails because the file does not actually exist.
     assert not backup_manager.restore_backup(restore_dir)
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "Restoring backup: test-20240609T000000-yearly.tgz" in output
     assert "S3 file exists: 'test-20240609T000000-yearly.tgz'" in output
 
 
-def test_delete_object(mocker, debug, clean_stderr, tmp_path):
+def test_delete_object(mocker, debug, capsys, tmp_path):
     """Verify the aws service deletes an object."""
     backup_manager = ezbak(
         name="test",
@@ -133,15 +138,15 @@ def test_delete_object(mocker, debug, clean_stderr, tmp_path):
 
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     backup_manager.backup_manager._delete_backup(backup)
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
 
 
-def test_rename_object(mocker, debug, clean_stderr, tmp_path):
+def test_rename_object(mocker, debug, capsys, tmp_path):
     """Verify the aws service renames a file."""
     # Given: A backup manager configured with test parameters
-    logger.configure(log_level="TRACE", show_source_reference=False)
+    instantiate_logger(LogLevel.TRACE)
 
     aws_service = AWSService(
         bucket_name="test-bucket",
@@ -151,7 +156,7 @@ def test_rename_object(mocker, debug, clean_stderr, tmp_path):
     aws_service.rename_object(
         current_name="test-20240609T000000-yearly.tgz", new_name="test-20240609T000000-yearly.tgz"
     )
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert (
         "S3: Attempting to rename 'test-20240609T000000-yearly.tgz' to 'test-20240609T000000-yearly.tgz'"
@@ -163,10 +168,10 @@ def test_rename_object(mocker, debug, clean_stderr, tmp_path):
     )
 
 
-def test_delete_objects(mocker, debug, clean_stderr, tmp_path):
+def test_delete_objects(mocker, debug, capsys, tmp_path):
     """Verify the aws service deletes multiple objects."""
     # Given: A backup manager configured with test parameters
-    logger.configure(log_level="TRACE", show_source_reference=False)
+    instantiate_logger(LogLevel.TRACE)
 
     aws_service = AWSService(
         bucket_name="test-bucket",
@@ -178,7 +183,7 @@ def test_delete_objects(mocker, debug, clean_stderr, tmp_path):
     assert aws_service.delete_objects(
         ["test-20240609T000000-yearly.tgz", "test-20240609T000000-yearly.tgz"]
     ) == ["test-20240609T000000-yearly.tgz"]
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "S3: Attempting to delete 2 objects" in output
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output

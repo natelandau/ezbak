@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from duty import duty, tools
-from nclutils import console
+from nclutils import pp
 
 if TYPE_CHECKING:
     from duty.context import Context
@@ -126,9 +126,7 @@ def update_dockerfile(ctx: Context) -> None:
     if not re.search(rf"uv:{version}", dockerfile_content):
         dockerfile_content = re.sub(r"uv:\d+\.\d+\.\d+", f"uv:{version}", dockerfile_content)
         dockerfile.write_text(dockerfile_content, encoding="utf-8")
-        console.print(
-            f"[green]✓[/green] [bold]Dockerfile updated with uv version: {version}[/bold]"
-        )
+        pp.success(f"Dockerfile updated with uv version: {version}")
 
 
 @duty(capture=CI, post=[update_dockerfile])
@@ -165,12 +163,12 @@ def dev_clean(ctx: Context) -> None:  # noqa: ARG001
     """Clean the development environment."""
     if DEV_DIR.exists():
         shutil.rmtree(DEV_DIR)
-        console.print(f"✓ Cleaned dev env in '{DEV_DIR.name}/'")
+        pp.success(f"Cleaned dev env in '{DEV_DIR.name}/'")
 
     env = PROJECT_ROOT / ".env"
     if env.exists():
         env.unlink()
-        console.print("✓ Cleaned .env file in project root")
+        pp.success("Cleaned .env file in project root")
 
 
 @duty(pre=[dev_clean])
@@ -195,20 +193,20 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
             file = directory / filename
             if not file.exists():
                 file.touch()
-    console.print(f"✓ Development env set up in '{DEV_DIR.name}/'")
+    pp.success(f"Development env set up in '{DEV_DIR.name}/'")
 
     # copy eztest.py to .dev/eztest.py
     eztest_template = TEMPLATES_DIR / "eztest.py"
     eztest = DEV_DIR / "eztest.py"
     shutil.copy2(eztest_template, eztest)
-    console.print(f"✓ eztest.py file created in '{DEV_DIR.name}/{eztest.name}'")
+    pp.success(f"eztest.py file created in '{DEV_DIR.name}/{eztest.name}'")
 
     # copy .env.template to .env
     env_template = TEMPLATES_DIR / ".env.template"
     env = PROJECT_ROOT / ".env"
     shutil.copy2(env_template, env)
-    console.print(f"✓ .env file created in '{PROJECT_ROOT.name}/{env.name}'")
+    pp.success(f".env file created in '{PROJECT_ROOT.name}/{env.name}'")
 
-    console.print(
+    pp.success(
         "✓ Development environment setup complete.\n  Start the development environment with one of the following commands:\n    [green]docker compose up --build[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
     )

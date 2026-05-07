@@ -6,7 +6,7 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from nclutils import logger
+from loguru import logger
 
 
 class AWSService:

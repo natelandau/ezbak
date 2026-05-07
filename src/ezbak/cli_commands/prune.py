@@ -1,6 +1,6 @@
 """The prune command for the EZBak CLI."""
 
-from nclutils import logger
+from loguru import logger
 from rich.prompt import Confirm
 
 from ezbak.cli import EZBakCLI
