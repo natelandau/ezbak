@@ -1,3 +1,10 @@
+## v0.12.2 (2026-05-07)
+
+### Fix
+
+- **app**: ensure all errors propagate to logs(#46)
+- replace nclutils logger with loguru (#45)
+
 ## v0.12.1 (2026-05-05)
 
 ### Refactor
