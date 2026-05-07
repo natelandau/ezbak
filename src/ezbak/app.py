@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nclutils import console, logger
+from nclutils import pp
 from pydantic import ValidationError
 
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL
 from ezbak.controllers import BackupManager
 from ezbak.models.settings import Settings
+from ezbak.utils.log_config import instantiate_logger
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -93,7 +94,7 @@ def ezbak(  # noqa: PLR0913
         config = Settings(**settings_kwargs, _env_file="")  # type: ignore [call-arg]
     except ValidationError as e:
         for error in e.errors():
-            console.print(f"ERROR: {error['msg']}", style="red")
+            pp.error(f"ERROR: {error['msg']}")
         raise
 
     return EZBakApp(config)
@@ -109,19 +110,13 @@ class EZBakApp:
             config (Settings | None): Application settings. Prefer using `ezbak()` to construct a validated configuration. Defaults to None.
         """
         self.settings = config
-        if self.settings.log_level:
-            self._configure_logging()
+        if self.settings is not None:
+            instantiate_logger(
+                log_level=self.settings.log_level,
+                log_file=self.settings.log_file,
+                prefix=self.settings.log_prefix,
+            )
         self.backup_manager = BackupManager(config=self.settings)
-
-    def _configure_logging(self) -> None:
-        """Configure structured logging according to `Settings`."""
-        logger.configure(
-            log_level=self.settings.log_level.value,
-            show_source_reference=False,
-            log_file=str(self.settings.log_file) if self.settings.log_file else None,
-            prefix=self.settings.log_prefix,
-        )
-        logger.info(f"Run ezbak for '{self.settings.name}'")
 
     def create_backup(self) -> None:
         """Create a new backup using the current settings."""

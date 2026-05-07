@@ -4,7 +4,7 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from nclutils import logger
+from loguru import logger
 
 from ezbak.app import EZBakApp
 from ezbak.constants import Action, __version__

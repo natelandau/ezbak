@@ -49,7 +49,7 @@ def mock_os_environ(mocker):
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_entrypoint_create_backup(filesystem, debug, clean_stderr):
+def test_entrypoint_create_backup(filesystem, debug, capsys):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -62,18 +62,18 @@ def test_entrypoint_create_backup(filesystem, debug, clean_stderr):
 
     entrypoint()
 
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
 
     filename = f"test-{frozen_time_str}-yearly.tgz"
     assert Path(dest1 / filename).exists()
     assert Path(dest2 / filename).exists()
-    assert f"INFO     | Created: …/dest1/{filename}" in output
-    assert f"INFO     | Created: …/dest2/{filename}" in output
+    assert f"INFO     | Created: dest1/{filename}" in output
+    assert f"INFO     | Created: dest2/{filename}" in output
 
 
 @time_machine.travel(frozen_time, tick=True)
-def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, debug, clean_stderr):
+def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, debug, capsys):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
@@ -87,13 +87,13 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
 
     entrypoint()
 
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     assert "Scheduler started" in output
     assert "Next scheduled run" in output
 
 
-def test_entrypoint_restore_backup(filesystem, debug, clean_stderr, tmp_path):
+def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
     """Verify that a backup is restored correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, _ = filesystem
@@ -113,9 +113,9 @@ def test_entrypoint_restore_backup(filesystem, debug, clean_stderr, tmp_path):
 
     entrypoint()
 
-    output = clean_stderr()
+    output = capsys.readouterr().err
     # debug(output)
     debug(restore_path)
 
-    assert "INFO     | Backup restored to '…/restore'" in output
+    assert "INFO     | Backup restored to 'restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()
