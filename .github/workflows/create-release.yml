@@ -61,7 +61,7 @@ jobs:
                   changelog: CHANGELOG.md
 
             - name: Create Github Release
-              uses: softprops/action-gh-release@v2
+              uses: softprops/action-gh-release@v3
               with:
                   body: ${{join(fromJson(steps.generate_notes.outputs.notes).notes, '')}}
                   draft: false
@@ -129,7 +129,7 @@ jobs:
 
             - name: Log in to the Container registry
               if: github.event_name != 'pull_request'
-              uses: docker/login-action@v3
+              uses: docker/login-action@v4
               with:
                   registry: ${{ env.REGISTRY }}
                   username: ${{ github.actor }}
