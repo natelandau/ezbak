@@ -1,3 +1,9 @@
+## v0.12.3 (2026-06-22)
+
+### Fix
+
+- **prune**: skip and log backups already deleted
+
 ## v0.12.2 (2026-05-07)
 
 ### Fix
