@@ -171,7 +171,7 @@ class Settings(BaseSettings):
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
-        """Get the retention policy manager for this backup configuration."""
+        """Retention policy manager for this backup configuration."""
         if self._cached_retention_policy:
             return self._cached_retention_policy
 
@@ -211,7 +211,7 @@ class Settings(BaseSettings):
 
     @property
     def tmp_dir(self) -> TemporaryDirectory:
-        """Get the temporary directory."""
+        """Temporary directory used for staging backups."""
         if self._cached_tmp_dir is None:
             self._cached_tmp_dir = TemporaryDirectory()
             atexit.register(self.cleanup_tmp_dir)

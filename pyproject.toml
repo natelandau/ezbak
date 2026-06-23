@@ -9,11 +9,11 @@
     ]
     dependencies = [
         "apscheduler>=3.11.2,<4.0.0",
-        "boto3>=1.43.5",
-        "cappa>=0.31.0",
+        "boto3>=1.43.35,<2.0.0",
+        "cappa>=0.32.1,<1.0.0",
         "loguru>=0.7.3",
-        "nclutils>=3.0.1,<4.0.0",
-        "pydantic-settings>=2.14.0,<3.0.0",
+        "nclutils>=3.4.1,<4.0.0",
+        "pydantic-settings>=2.14.2,<3.0.0",
         "pydantic>=2.13.4,<3.0.0",
         "rich>=15.0.0",
         "whenever>=0.10.0",
@@ -35,21 +35,21 @@
 
 [dependency-groups]
     dev = [
-        "commitizen>=4.15.1",
-        "coverage>=7.13.5",
+        "commitizen>=4.16.4",
+        "coverage>=7.14.3",
         "duty>=1.9.0",
-        "mypy>=2.0.0",
-        "prek>=0.3.13",
+        "mypy>=2.1.0",
+        "prek>=0.4.5",
         "pytest-clarity>=1.0.1",
         "pytest-cov>=7.1.0",
         "pytest-devtools>=1.2.0",
         "pytest-mock>=3.15.1",
         "pytest-sugar>=1.1.1",
-        "pytest>=9.0.3",
+        "pytest>=9.1.1",
         "rich>=15.0.0",
-        "ruff>=0.15.12",
+        "ruff>=0.15.18",
         "time-machine>=3.2.0",
-        "typos>=1.46.0",
+        "typos>=1.47.2",
         "yamllint>=1.38.0",
     ]
 

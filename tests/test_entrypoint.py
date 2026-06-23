@@ -20,7 +20,7 @@ frozen_time_str = frozen_time.strftime(DEFAULT_DATE_FORMAT)
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  # noqa: RUF076
 def mock_run(mocker):
     """Mock the Run class to prevent infinite loop in scheduler."""
     # Mock the Run class to prevent infinite loop in scheduler
@@ -30,7 +30,7 @@ def mock_run(mocker):
     mocker.patch("time.sleep", return_value=None)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  # noqa: RUF076
 def mock_os_environ(mocker):
     """Override items from .env file."""
     os.environ["EZBAK_AWS_ACCESS_KEY"] = ""

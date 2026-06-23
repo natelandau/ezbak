@@ -159,25 +159,24 @@ class AWSService:
                     "Quiet": False,  # Return info about deleted objects
                 },
             )
-
-            # Log successful deletions
-            response_deleted_objects = response.get("Deleted", [])
-            for obj in response_deleted_objects:
-                logger.trace(f"S3: Deleted {obj['Key']}")
-
-            # Handle any errors that occurred during deletion
-            errors = response.get("Errors", [])
-            if errors:
-                for error in errors:
-                    logger.error(
-                        f"S3: Failed to delete '{error['Key']}': {error['Code']} - {error['Message']}"
-                    )
-
-            logger.trace(f"S3: Successfully deleted {len(response_deleted_objects)} objects")
-
         except ClientError as e:
             logger.error(f"S3: Failed to delete objects: {e}")
             raise
+
+        # Log successful deletions
+        response_deleted_objects = response.get("Deleted", [])
+        for obj in response_deleted_objects:
+            logger.trace(f"S3: Deleted {obj['Key']}")
+
+        # Handle any errors that occurred during deletion
+        errors = response.get("Errors", [])
+        if errors:
+            for error in errors:
+                logger.error(
+                    f"S3: Failed to delete '{error['Key']}': {error['Code']} - {error['Message']}"
+                )
+
+        logger.trace(f"S3: Successfully deleted {len(response_deleted_objects)} objects")
 
         return [str(obj["Key"]) for obj in response.get("Deleted", [])]
 
