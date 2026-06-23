@@ -526,6 +526,47 @@ def test_prune_no_policy(debug, capsys, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
+def test_prune_missing_file(debug, capsys, tmp_path, mocker):
+    """Verify pruning tolerates a backup that vanished before deletion."""
+    # Given: real backup files on disk
+    real_files = [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095804-minutely.tgz",
+    ]
+    for filename in real_files:
+        Path(tmp_path / filename).touch()
+
+    # Given: the index also reports a file that no longer exists on disk, simulating a
+    # concurrent host having already pruned it from a shared storage location
+    phantom = tmp_path / "test-20200101T000000-yearly.tgz"
+    mocker.patch(
+        "ezbak.controllers.backup_manager.find_files",
+        autospec=True,
+        return_value=[tmp_path / f for f in real_files] + [phantom],
+    )
+
+    # Given: A backup manager configured with test parameters
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
+        log_level="debug",
+        max_backups=2,
+    )
+
+    # When: pruning runs with the phantom (oldest) targeted for deletion
+    backup_manager.prune_backups()
+
+    # Then: the missing file is logged as such, the job completes, and real files remain
+    output = capsys.readouterr().err
+    assert "Missing, not deleted:" in output
+    assert phantom.name in output
+    assert "Deleted:" not in output
+    assert "Pruned 1 backups" in output
+    for filename in real_files:
+        assert Path(tmp_path / filename).exists()
+
+
 def test_restore_with_clean(debug, tmp_path, capsys, filesystem):
     """Verify that a backup directory is cleaned before restoring."""
     # Given: Source and destination directories from fixture

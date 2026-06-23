@@ -179,8 +179,13 @@ class BackupManager:
         """
         match backup.storage_type:
             case StorageType.LOCAL:
-                backup.path.unlink()
-                logger.info(f"Deleted: {backup.path}")
+                # Catch instead of missing_ok so the whole job does not abort when another
+                # process already pruned this file from a shared storage location
+                try:
+                    backup.path.unlink()
+                    logger.info(f"Deleted: {backup.path}")
+                except FileNotFoundError:
+                    logger.warning(f"Missing, not deleted: {backup.path}")
             case StorageType.AWS:
                 self.aws_service.delete_object(key=backup.name)
                 logger.info(f"Deleted from S3: {backup.name}")
