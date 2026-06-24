@@ -180,12 +180,28 @@ class BackupManager:
         match backup.storage_type:
             case StorageType.LOCAL:
                 # Catch instead of missing_ok so the whole job does not abort when another
-                # process already pruned this file from a shared storage location
+                # process already pruned this file from a shared storage location. Catch the
+                # broader OSError (not just FileNotFoundError) so an NFS stale handle (ESTALE,
+                # errno 116) degrades to a warning instead of aborting the job.
                 try:
                     backup.path.unlink()
                     logger.info(f"Deleted: {backup.path}")
-                except FileNotFoundError:
-                    logger.warning(f"Missing, not deleted: {backup.path}")
+                except OSError as e:
+                    logger.warning(
+                        f"Missing, not deleted: {backup.path} (errno={e.errno}: {e.strerror})"
+                    )
+                    # Forensics for shared-storage cache skew: if the directory listing still
+                    # shows this file after the unlink proved it gone, the client mount cache
+                    # is serving a stale 'present' view rather than racing a live delete.
+                    try:
+                        parent = backup.path.parent
+                        still_listed = backup.path.name in {p.name for p in parent.iterdir()}
+                        logger.debug(
+                            f"Post-failure check: exists()={backup.path.exists()}, "
+                            f"present_in_parent_listing={still_listed}, parent={parent}"
+                        )
+                    except OSError as check_error:
+                        logger.debug(f"Post-failure check failed: {check_error}")
             case StorageType.AWS:
                 self.aws_service.delete_object(key=backup.name)
                 logger.info(f"Deleted from S3: {backup.name}")
@@ -278,7 +294,18 @@ class BackupManager:
                 key=lambda x: x.zoned_datetime,
             )
 
-            logger.debug(f"Found existing backups: {len(found_backups)} in '{storage_path}'")
+            logger.debug(f"Indexed {len(found_backups)} existing backups in '{storage_path}'")
+            # Capture per-file stat metadata at scan time so a later delete failure can be
+            # compared against what the client believed existed (inode reuse, stale mtime).
+            for backup in found_backups:
+                try:
+                    st = backup.path.stat()
+                    logger.trace(
+                        f"Indexed: {backup} ino={st.st_ino} mtime={st.st_mtime:.0f} size={st.st_size}"
+                    )
+                except OSError as e:
+                    logger.trace(f"Indexed: {backup} (stat failed: {e})")
+
             backups_by_storage_path.append(
                 StorageLocation(
                     name=self.settings.name,
@@ -324,7 +351,10 @@ class BackupManager:
             ],
             key=lambda x: x.zoned_datetime,
         )
-        logger.debug(f"Found existing backups: {len(backups)} in S3 bucket")
+        logger.debug(f"Indexed {len(backups)} existing backups in S3 bucket")
+        for backup in backups:
+            logger.trace(f"Indexed: {backup}")
+
         return [
             StorageLocation(
                 name=self.settings.name,
@@ -473,7 +503,6 @@ class BackupManager:
                 backup_path = Path(storage_location.storage_path) / backup_name
                 logger.debug(f"Copy tmp backup to local: {backup_path}")
                 copy_file(src=tmp_backup, dst=backup_path)
-                logger.info(f"Created: {backup_path}")
                 created_backups.append(
                     Backup(
                         storage_type=StorageType.LOCAL,
@@ -483,6 +512,7 @@ class BackupManager:
                         tz=self.settings.tz,
                     )
                 )
+                logger.info(f"Created: {backup_path}")
 
             elif storage_location.storage_type == StorageType.AWS:
                 logger.debug(f"Upload tmp backup to S3: {backup_name}")
@@ -497,8 +527,12 @@ class BackupManager:
                 )
                 logger.info(f"S3 created: {backup_name}")
 
-        logger.debug(f"Deleting tmp backup: {tmp_backup}")
-        tmp_backup.unlink()
+        try:
+            tmp_backup.unlink()
+        except FileNotFoundError:
+            logger.warning(f"FileNotFoundError attempting to unlink: {tmp_backup}")
+        else:
+            logger.debug(f"Deleted tmp backup: {tmp_backup}")
 
         if self.settings.delete_src_after_backup:
             logger.debug("Clean source paths after backup")
@@ -555,6 +589,9 @@ class BackupManager:
         """
         logger.trace("Pruning backups")
         backups_to_delete = self._identify_backups_to_delete()
+        logger.debug(
+            f"Prune targets ({len(backups_to_delete)}): {[x.name for x in backups_to_delete]}"
+        )
 
         local_backups_to_delete = [
             x for x in backups_to_delete if x.storage_type == StorageType.LOCAL

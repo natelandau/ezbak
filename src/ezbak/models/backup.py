@@ -42,7 +42,6 @@ class Backup:
             self.zoned_datetime = (
                 plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
             )
-            logger.trace(f"Zoned datetime: {self.zoned_datetime}")
         except TimeZoneNotFoundError as e:
             logger.error(e)
             raise
@@ -56,4 +55,8 @@ class Backup:
 
     def __repr__(self) -> str:
         """Return a string representation of the backup."""
-        return f"<Backup: {self.name} ({self.storage_type.name}) {self.storage_path}>"
+        return f"<Backup: {str(self.storage_path) + '/' if self.storage_path else ''}{self.name} ({self.storage_type.name})>"
+
+    def __str__(self) -> str:
+        """Return a string representation of the backup."""
+        return f"{str(self.storage_path) + '/' if self.storage_path else ''}{self.name} ({self.storage_type.name})"
