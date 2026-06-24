@@ -1,3 +1,9 @@
+## v0.12.4 (2026-06-24)
+
+### Fix
+
+- **logs**: improve trace logging
+
 ## v0.12.3 (2026-06-22)
 
 ### Fix
