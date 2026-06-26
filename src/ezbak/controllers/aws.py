@@ -133,7 +133,7 @@ class AWSService:
             keys (list[str]): List of S3 object keys to delete.
 
         Returns:
-            bool: True if all deletions succeed, False if any error occurs during deletion.
+            list[str]: The full S3 keys that were confirmed deleted (empty if no keys were provided).
 
         Raises:
             ClientError: If the files cannot be deleted.
@@ -307,7 +307,7 @@ class AWSService:
         full_name = self._build_full_key(name)
 
         try:
-            self.s3.upload_file(file, self.bucket, full_name)
+            self.s3.upload_file(Filename=file, Bucket=self.bucket, Key=full_name)
         except ClientError as e:
             logger.error(e)
             raise

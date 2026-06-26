@@ -65,7 +65,9 @@ class StorageLocation:
                 if date_value not in existing_dates[period_type]:
                     existing_dates[period_type].append(date_value)
                     backups_by_type[period_type].append(backup)
-                    break  # Move to the next backup once it's categorized
+                    # First-match-wins: assign each backup to the coarsest period whose slot
+                    # for its timestamp is not yet taken, then stop.
+                    break
 
                 if period_type == BackupType.MINUTELY:
                     backups_by_type[period_type].append(backup)
@@ -107,7 +109,8 @@ class StorageLocation:
                 ("minutely", BackupType.MINUTELY, str(now.minute)),
             ]
 
-            period = "minutely"  # Default to minutely
+            # Fall-through bucket when every coarser period for this timestamp is already taken
+            period = "minutely"
 
             for period_name, backup_type, current_value in period_checks:
                 if current_value in self.dates_in_use[backup_type]:
@@ -119,9 +122,7 @@ class StorageLocation:
             filename = f"{self.name}-{timestamp}-{period}.{BACKUP_EXTENSION}"
 
         if filename in [x.name for x in self.backups]:
-            filename = (
-                f"{filename.rstrip(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
-            )
+            filename = f"{filename.removesuffix(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
 
         logger.trace(f"Backup name: {filename}")
         return filename

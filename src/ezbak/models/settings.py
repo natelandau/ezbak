@@ -1,9 +1,11 @@
 """Settings model for EZBak backup configuration and management."""
 
 import atexit
+from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Self
+from typing import Annotated, Self, TypeVar
 
 from pydantic import BeforeValidator, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,79 +19,53 @@ from ezbak.constants import (
     RetentionPolicyType,
     StorageType,
 )
-from ezbak.controllers.retention_policy_manager import RetentionPolicyManager
+from ezbak.models.retention_policy import RetentionPolicyManager
+
+E = TypeVar("E", bound=Enum)
 
 
-def coerce_log_level(value: str | None) -> LogLevel | None:
-    """Coerce the log level into a LogLevel enum.
+def _make_enum_coercer(
+    enum_cls: type[E],
+    *,
+    error_label: str,
+    transform: Callable[[str], str] = str.lower,
+    default: E | None = None,
+) -> Callable[[str | E | None], E | None]:
+    """Build a pydantic BeforeValidator that coerces a string into an enum member.
 
-    Args:
-        value (str | None): The log level to validate.
-
-    Returns:
-        LogLevel: The validated log level.
-
-    Raises:
-        ValueError: If the log level is invalid.
-    """
-    if value is None:
-        return None
-    if isinstance(value, LogLevel):
-        return value
-    try:
-        return LogLevel(value.upper())
-    except ValueError as e:
-        msg = f"Invalid log level: must be one of {[x.value for x in LogLevel]}"
-        raise ValueError(msg) from e
-
-
-def coerce_storage_type(value: str | None) -> StorageType | None:
-    """Coerce the storage type into a StorageType enum.
+    Centralize the shared coercion shape (pass through None and existing members, normalize case, raise a uniform error) so each enum-typed setting declares only what differs: the enum, the case transform, and the value used when nothing is provided.
 
     Args:
-        value (str | None): The storage type to validate.
+        enum_cls (type[E]): The enum the value must resolve to.
+        error_label (str): Human-readable name used in the error message.
+        transform (Callable[[str], str]): Case normalizer applied before lookup. Defaults to str.lower.
+        default (E | None): Value returned when the input is None. Defaults to None.
 
     Returns:
-        StorageType: The validated storage type.
-
-    Raises:
-        ValueError: If the storage location is invalid.
+        Callable[[str | None], E | None]: A validator for use with pydantic BeforeValidator.
     """
-    if value is None:
-        return StorageType.LOCAL
 
-    if isinstance(value, StorageType):
-        return value
-    try:
-        return StorageType(value.lower())
-    except ValueError as e:
-        msg = f"Invalid storage location: must be one of {[x.value for x in StorageType]}"
-        raise ValueError(msg) from e
+    def coerce(value: str | E | None) -> E | None:
+        if value is None:
+            return default
+        if isinstance(value, enum_cls):
+            return value
+        # value is a str here; str() is a no-op that lets the type checker see past the
+        # TypeVar isinstance narrowing it cannot resolve on its own.
+        try:
+            return enum_cls(transform(str(value)))
+        except ValueError as e:
+            msg = f"Invalid {error_label}: must be one of {[x.value for x in enum_cls]}"
+            raise ValueError(msg) from e
+
+    return coerce
 
 
-def coerce_action(value: str | None) -> Action | None:
-    """Coerce the action into an Action enum.
-
-    Args:
-        value (str | None): The action to validate.
-
-    Returns:
-        Action: The validated action.
-
-    Raises:
-        ValueError: If the action is invalid.
-    """
-    if value is None:
-        return None
-
-    if isinstance(value, Action):
-        return value
-
-    try:
-        return Action(value.lower())
-    except ValueError as e:
-        msg = f"Invalid action: must be one of {[x.value for x in Action]}"
-        raise ValueError(msg) from e
+coerce_log_level = _make_enum_coercer(LogLevel, error_label="log level", transform=str.upper)
+coerce_storage_type = _make_enum_coercer(
+    StorageType, error_label="storage location", default=StorageType.LOCAL
+)
+coerce_action = _make_enum_coercer(Action, error_label="action")
 
 
 def coerce_path_list(value: list[str] | str | None) -> list[Path]:
@@ -99,7 +75,7 @@ def coerce_path_list(value: list[str] | str | None) -> list[Path]:
         value (list[str] | str | None): The path list to validate.
 
     Returns:
-        list[Path] | None: The validated path list.
+        list[Path]: The validated path list.
     """
     if value is None:
         return []

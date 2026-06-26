@@ -135,7 +135,7 @@ class EZBakApp:
             bool: True when a backup is successfully restored; otherwise False.
         """
         return self.backup_manager.restore_backup(
-            restore_path, clean_before_restore=clean_before_restore
+            destination=restore_path, clean_before_restore=clean_before_restore
         )
 
     def prune_backups(self) -> list[Backup]:
@@ -158,10 +158,10 @@ class EZBakApp:
         """Rename backups to match the current labeling configuration."""
         self.backup_manager.rename_backups()
 
-    def get_latest_backup(self) -> Backup:
+    def get_latest_backup(self) -> Backup | None:
         """Return the most recent backup across all storage locations.
 
         Returns:
-            Backup: Latest backup object.
+            Backup | None: Latest backup object, or None if no backups exist.
         """
         return self.backup_manager.get_latest_backup()

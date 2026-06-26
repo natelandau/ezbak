@@ -5,13 +5,17 @@ from __future__ import annotations
 import shutil
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import cappa
 import time_machine
 
 from ezbak.cli import EZBakCLI
-from ezbak.constants import DEFAULT_DATE_FORMAT
+from ezbak.cli_commands import list as list_cmd
+from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
+from ezbak.models import Backup
+from ezbak.utils.log_config import instantiate_logger
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -208,6 +212,36 @@ def test_cli_list_backups(debug, capsys, tmp_path):
     assert "test-20250609T101857-hourly.tgz" in output
     assert "test-20250609T095745-minutely.tgz" in output
     assert "test-20250609T095804-minutely.tgz" in output
+
+
+def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
+    """Verify listing shows both local and S3 backups when storage_type is ALL."""
+    # Given a logger writing to stderr and an app reporting one local and one AWS backup
+    instantiate_logger(LogLevel.INFO)
+
+    local_backup = Backup(
+        name="test-20250609T101857-hourly.tgz",
+        storage_type=StorageType.LOCAL,
+        path=tmp_path / "test-20250609T101857-hourly.tgz",
+        storage_path=tmp_path,
+    )
+    aws_backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
+    fake_app = SimpleNamespace(
+        settings=SimpleNamespace(storage_type=StorageType.ALL),
+        list_backups=lambda: [local_backup, aws_backup],
+    )
+    mocker.patch.object(list_cmd, "get_app_for_cli", return_value=fake_app)
+
+    # When listing backups
+    list_cmd.main(mocker.MagicMock())
+    output = capsys.readouterr().err
+    # debug(output)
+
+    # Then both the AWS backup and the local backup appear
+    assert "Found 1 AWS backups" in output
+    assert aws_backup.name in output
+    assert "Found 1 local backups" in output
+    assert local_backup.name in output
 
 
 def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):

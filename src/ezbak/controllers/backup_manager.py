@@ -31,7 +31,10 @@ from .aws import AWSService
 
 @dataclass
 class FileForRename:
-    """Temporary class used for renaming backups."""
+    """Pair a backup with its proposed new filename for the rename pass.
+
+    Carry the target backup, the computed new_name, and do_rename, which the rename loop checks to skip files whose name is already correct.
+    """
 
     backup: Backup
     new_name: str
@@ -94,13 +97,13 @@ class BackupManager:
         self.rebuild_storage_locations = False
         return self._storage_locations
 
-    def _create_tmp_backup_file(self) -> Path:
+    def _create_tmp_backup_file(self) -> Path | None:
         """Create a temporary backup file in the temporary directory.
 
         Compress all configured source files and directories into a single tar.gz archive in the temporary directory. Use this to prepare backup data before distributing it to storage locations.
 
         Returns:
-            Path: The path to the temporary backup file.
+            Path | None: The path to the temporary backup file, or None if archive creation failed.
 
         Raises:
             ValueError: If a source path is neither a file nor a directory.
@@ -108,7 +111,10 @@ class BackupManager:
 
         @dataclass
         class FileToAdd:
-            """Class to store file information for the backup."""
+            """Pair a source path with the archive name it will be written under.
+
+            full_path is the file on disk; relative_path is the arcname inside the tar, which controls the directory layout of the resulting archive.
+            """
 
             full_path: Path
             relative_path: Path | str
@@ -146,7 +152,7 @@ class BackupManager:
                     include_regex=self.settings.include_regex,
                     exclude_regex=self.settings.exclude_regex,
                 ):
-                    files_to_add.extend([FileToAdd(full_path=source, relative_path=source.name)])
+                    files_to_add.append(FileToAdd(full_path=source, relative_path=source.name))
             else:
                 msg = f"Not a file or directory: {source}"
                 logger.error(msg)
@@ -165,7 +171,6 @@ class BackupManager:
             logger.error(f"Failed to create backup: {e}")
             return None
 
-        del files_to_add
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile
 
@@ -270,17 +275,16 @@ class BackupManager:
         Returns:
             list[StorageLocation]: A list of StorageLocation objects containing local backup files.
         """
-        validate_source_paths(settings=self.settings)
-        validate_storage_paths(settings=self.settings, create_if_missing=True)
+        validate_source_paths(source_paths=self.settings.source_paths)
+        validate_storage_paths(storage_paths=self.settings.storage_paths, create_if_missing=True)
 
         backups_by_storage_path: list[StorageLocation] = []
         for storage_path in self.settings.storage_paths:
             logger.trace(f"Indexing: {storage_path}")
-            found_backups: list[Backup] = []
             found_files = find_files(
                 path=storage_path, globs=[f"*{self.settings.name}*.{BACKUP_EXTENSION}"]
             )
-            found_backups = sorted(
+            found_backups: list[Backup] = sorted(
                 [
                     Backup(
                         storage_type=StorageType.LOCAL,
@@ -295,14 +299,9 @@ class BackupManager:
             )
 
             logger.debug(f"Indexed {len(found_backups)} existing backups in '{storage_path}'")
-            # Capture per-file stat metadata at scan time so a later delete failure can be
-            # compared against what the client believed existed (inode reuse, stale mtime).
             for backup in found_backups:
                 try:
-                    st = backup.path.stat()
-                    logger.trace(
-                        f"Indexed: {backup} ino={st.st_ino} mtime={st.st_mtime:.0f} size={st.st_size}"
-                    )
+                    logger.trace(f"Indexed: {backup}")
                 except OSError as e:
                     logger.trace(f"Indexed: {backup} (stat failed: {e})")
 
@@ -425,8 +424,8 @@ class BackupManager:
                 name_parts = BACKUP_NAME_REGEX.finditer(backup.name)
                 for match in name_parts:
                     matches = match.groupdict()
-                    found_period = matches.get("period", None)
-                    found_uuid = matches.get("uuid", None)
+                    found_period = matches.get("period")
+                    found_uuid = matches.get("uuid")
                 if found_period:
                     new_backup_name = re.sub(rf"-{found_period}", "", new_backup_name)
                 if found_uuid:
@@ -457,7 +456,7 @@ class BackupManager:
                     name_parts = BACKUP_NAME_REGEX.finditer(backup.name)
                     for match in name_parts:
                         matches = match.groupdict()
-                        found_period = matches.get("period", None)
+                        found_period = matches.get("period")
                     if found_period and found_period == backup_type.value:
                         files_for_rename.append(
                             FileForRename(
@@ -490,7 +489,7 @@ class BackupManager:
         Returns:
             list[Backup]: A list of Backup objects which were created.
         """
-        validate_source_paths(settings=self.settings)
+        validate_source_paths(source_paths=self.settings.source_paths)
 
         logger.trace("Creating new backup")
         tmp_backup = self._create_tmp_backup_file()
@@ -550,7 +549,7 @@ class BackupManager:
         self.rebuild_storage_locations = True
         return created_backups
 
-    def get_latest_backup(self) -> Backup:
+    def get_latest_backup(self) -> Backup | None:
         """Get the latest backup from the storage locations.
 
         Find the most recent backup across all configured storage locations based on timestamp. Use this to identify the newest backup for restoration operations or to determine if new backups are needed.
@@ -602,6 +601,7 @@ class BackupManager:
         for backup in local_backups_to_delete:
             self._delete_backup(backup)
 
+        deleted_s3_backups: list[str] = []
         if s3_backups_to_delete:
             logger.debug(f"Deleting {len(s3_backups_to_delete)} S3 backups")
             deleted_s3_backups = self.aws_service.delete_objects(
@@ -610,13 +610,9 @@ class BackupManager:
             for key in deleted_s3_backups:
                 logger.info(f"Deleted from S3: {key}")
 
-        total_deleted = (
-            local_backups_to_delete + deleted_s3_backups
-            if s3_backups_to_delete
-            else local_backups_to_delete
-        )
+        total_deleted = len(local_backups_to_delete) + len(deleted_s3_backups)
         logger.info(
-            f"Pruned {len(total_deleted)} backups across {len(self.storage_locations)} storage locations"
+            f"Pruned {total_deleted} backups across {len(self.storage_locations)} storage locations"
         )
 
         logger.trace("Require storage location re-index on next call")
@@ -652,7 +648,7 @@ class BackupManager:
                     logger.trace(
                         f"Attempting to rename backup: {file.backup.name} -> {file.new_name}"
                     )
-                    file.new_name = f"{file.new_name.rstrip(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+                    file.new_name = f"{file.new_name.removesuffix(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
 
                 if file.backup.storage_type == StorageType.LOCAL:
                     file.backup.path.rename(file.backup.path.parent / file.new_name)
@@ -663,9 +659,10 @@ class BackupManager:
                     )
                     logger.debug(f"S3: Rename {file.backup.name} -> {file.new_name}")
 
-        if len([x for x in files_for_rename if x.do_rename]) > 0:
+        renamed = [x for x in files_for_rename if x.do_rename]
+        if len(renamed) > 0:
             self.did_create_backup = True
-            logger.info(f"Renamed {len([x for x in files_for_rename if x.do_rename])} backups")
+            logger.info(f"Renamed {len(renamed)} backups")
 
             logger.trace("Require storage location re-index on next call")
             self.rebuild_storage_locations = True

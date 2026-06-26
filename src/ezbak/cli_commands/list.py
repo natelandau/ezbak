@@ -13,20 +13,18 @@ def main(cmd: EZBakCLI) -> None:
 
     backups = app.list_backups()
 
-    if len(backups) == 0:
+    if not backups:
         logger.info("No backups found")
         return
 
     aws_backups = [x for x in backups if x.storage_type == StorageType.AWS]
     local_backups = [x for x in backups if x.storage_type == StorageType.LOCAL]
 
-    if (
-        aws_backups and app.settings.storage_type == StorageType.AWS
-    ) or app.settings.storage_type == StorageType.ALL:
+    if aws_backups and app.settings.storage_type in {StorageType.AWS, StorageType.ALL}:
         print_backups = "\n  - ".join([x.name for x in aws_backups])
         logger.info(f"Found {len(aws_backups)} AWS backups\n  - {print_backups}")
 
-    if local_backups and app.settings.storage_type == StorageType.LOCAL:
+    if local_backups and app.settings.storage_type in {StorageType.LOCAL, StorageType.ALL}:
         print_backups = "\n  - ".join(
             [str(x.path) for x in sorted(local_backups, key=lambda x: x.path)]
         )

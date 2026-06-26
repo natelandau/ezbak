@@ -63,11 +63,11 @@ def should_include_file(
         logger.trace(f"Excluded file: {path.name}")
         return False
 
-    if include_regex and re.search(rf"{include_regex}", str(path)) is None:
+    if include_regex and re.search(include_regex, str(path)) is None:
         logger.trace(f"Exclude by include regex: {path.name}")
         return False
 
-    if exclude_regex and re.search(rf"{exclude_regex}", str(path)):
+    if exclude_regex and re.search(exclude_regex, str(path)):
         logger.trace(f"Exclude by regex: {path.name}")
         return False
 

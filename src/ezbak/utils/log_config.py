@@ -10,16 +10,16 @@ from ezbak.constants import LogLevel
 
 
 def _stderr_log_formatter(record: dict, prefix: str | None = None) -> str:
-    """Format log records for stderr output with color and metadata.
+    """Build the colorized loguru format template for the stderr sink.
 
-    Format log records with timestamp, level, message, extra fields, and source location. Prints the raw record for debugging and returns a formatted string with color tags for the level and metadata.
+    Assemble the format string loguru applies to terminal output: timestamp, color-tagged level, optional prefix, message, any extra fields, and the exception traceback when present. Use as the `format` callable when adding a stderr sink.
 
     Args:
-        record (Record): The loguru Record object containing log event data.
-        prefix (str | None): The prefix to add to the log message.
+        record (dict): The loguru record whose `extra`/`exception` keys decide which optional segments appear.
+        prefix (str | None): Optional label inserted after the level. Defaults to None.
 
     Returns:
-        str: A formatted log string with color tags and metadata.
+        str: The loguru format template string with color tags.
     """
     timestamp = "{time:YYYY-MM-DD HH:mm:ss} | "
     level = "<level>{level: <8}</level> | "
@@ -32,16 +32,16 @@ def _stderr_log_formatter(record: dict, prefix: str | None = None) -> str:
 
 
 def _log_file_formatter(record: dict, prefix: str | None = None) -> str:
-    """Format log records for log file output with color and metadata.
+    """Build the plain-text loguru format template for the log-file sink.
 
-    Format log records with timestamp, level, message, extra fields, and source location. Prints the raw record for debugging and returns a formatted string with color tags for the level and metadata.
+    Assemble the format string loguru applies to file output: timestamp, level, optional prefix, message, any extra fields, and the exception traceback when present. Unlike the stderr formatter this omits color tags so log files stay readable. Use as the `format` callable when adding a file sink.
 
     Args:
-        record (Record): The loguru Record object containing log event data.
-        prefix (str | None): The prefix to add to the log message.
+        record (dict): The loguru record whose `extra`/`exception` keys decide which optional segments appear.
+        prefix (str | None): Optional label inserted after the level. Defaults to None.
 
     Returns:
-        str: A formatted log string with color tags and metadata.
+        str: The loguru format template string without color tags.
     """
     timestamp = "{time:YYYY-MM-DD HH:mm:ss} | "
     level = "{level: <8} | "
