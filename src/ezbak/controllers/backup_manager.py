@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import assert_never
 
 from loguru import logger
-from nclutils.fs import clean_directory, copy_file, find_files
+from nclutils.fs import clean_directory
 from nclutils.utils import new_uid
 
 from ezbak.constants import (
@@ -19,14 +19,10 @@ from ezbak.constants import (
 from ezbak.models import Backup, StorageLocation
 from ezbak.models.backup_name import add_uid_suffix, build_backup_name, parse_backup_name
 from ezbak.models.settings import Settings
-from ezbak.utils import (
-    chown_files,
-    should_include_file,
-    validate_source_paths,
-    validate_storage_paths,
-)
+from ezbak.utils import chown_files, should_include_file, validate_source_paths
 
 from .aws import AWSService
+from .backends import LocalBackend, S3Backend, StorageBackend
 
 
 @dataclass
@@ -50,10 +46,14 @@ class BackupManager:
         Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
         """
         self.settings = config
-        self.aws_service = None
+        self.aws_service: AWSService | None = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
         self.tmp_dir = Path(self.settings.tmp_dir.name)
+
+        self.backends: list[StorageBackend] = []
+        if self.settings.storage_type in {StorageType.LOCAL, StorageType.ALL}:
+            self.backends.append(LocalBackend(self.settings))
 
         if self.settings.storage_type in {StorageType.AWS, StorageType.ALL}:
             try:
@@ -65,6 +65,15 @@ class BackupManager:
                 )
             except ValueError as e:
                 logger.error(e)
+
+            if self.aws_service:
+                self.backends.append(
+                    S3Backend(self.settings, aws_service=self.aws_service, tmp_dir=self.tmp_dir)
+                )
+
+        self._backend_by_type: dict[StorageType, StorageBackend] = {
+            backend.storage_type: backend for backend in self.backends
+        }
 
     @property
     def storage_locations(self) -> list[StorageLocation]:
@@ -79,20 +88,9 @@ class BackupManager:
             return self._storage_locations
 
         logger.trace(f"Indexing storage locations for: {self.settings.name}")
-        match self.settings.storage_type:
-            case StorageType.LOCAL:
-                self._storage_locations = self._find_existing_backups_local()
-
-            case StorageType.AWS:
-                self._storage_locations = self._find_existing_backups_s3()
-
-            case StorageType.ALL:
-                self._storage_locations = (
-                    self._find_existing_backups_local() + self._find_existing_backups_s3()
-                )
-            case _:
-                assert_never(self.settings.storage_type)
-
+        self._storage_locations = [
+            location for backend in self.backends for location in backend.index()
+        ]
         logger.trace(f"Indexed {len(self._storage_locations)} storage locations")
         self.rebuild_storage_locations = False
         return self._storage_locations
@@ -182,38 +180,7 @@ class BackupManager:
         Args:
             backup (Backup): The backup object containing information about the file to delete.
         """
-        match backup.storage_type:
-            case StorageType.LOCAL:
-                # Catch instead of missing_ok so the whole job does not abort when another
-                # process already pruned this file from a shared storage location. Catch the
-                # broader OSError (not just FileNotFoundError) so an NFS stale handle (ESTALE,
-                # errno 116) degrades to a warning instead of aborting the job.
-                try:
-                    backup.path.unlink()
-                    logger.info(f"Deleted: {backup.path}")
-                except OSError as e:
-                    logger.warning(
-                        f"Missing, not deleted: {backup.path} (errno={e.errno}: {e.strerror})"
-                    )
-                    # Forensics for shared-storage cache skew: if the directory listing still
-                    # shows this file after the unlink proved it gone, the client mount cache
-                    # is serving a stale 'present' view rather than racing a live delete.
-                    try:
-                        parent = backup.path.parent
-                        still_listed = backup.path.name in {p.name for p in parent.iterdir()}
-                        logger.debug(
-                            f"Post-failure check: exists()={backup.path.exists()}, "
-                            f"present_in_parent_listing={still_listed}, parent={parent}"
-                        )
-                    except OSError as check_error:
-                        logger.debug(f"Post-failure check failed: {check_error}")
-            case StorageType.AWS:
-                self.aws_service.delete_object(key=backup.name)
-                logger.info(f"Deleted from S3: {backup.name}")
-            case StorageType.ALL:  # pragma: no cover
-                pass
-            case _:  # pragma: no cover
-                assert_never(backup.storage_type)
+        self._backend_by_type[backup.storage_type].delete(backup)
 
     def _do_restore(self, backup: Backup, destination: Path) -> bool:
         """Restore a backup file to the storage locations.
@@ -228,28 +195,9 @@ class BackupManager:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
-        tarfile_path = None
-        match backup.storage_type:
-            case StorageType.LOCAL:
-                logger.info(f"Restoring backup from local: {backup.name}")
-                tarfile_path = backup.path
-
-            case StorageType.AWS:
-                logger.info(f"Restoring backup from S3: {backup.name}")
-                if not self.aws_service.object_exists(backup.name):
-                    logger.error(f"Backup file does not exist in S3: {backup.name}")
-                    return False
-
-                logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
-                tmp_file = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
-                self.aws_service.get_object(key=backup.name, destination=tmp_file)
-
-                tarfile_path = tmp_file
-
-            case StorageType.ALL:
-                return False
-            case _:
-                assert_never(backup.storage_type)
+        tarfile_path = self._backend_by_type[backup.storage_type].prepare_for_restore(backup)
+        if tarfile_path is None:
+            return False
 
         logger.trace(f"Attempting to extract backup to '{destination}'")
         try:
@@ -266,114 +214,6 @@ class BackupManager:
 
         logger.info(f"Backup restored to '{destination}'")
         return True
-
-    def _make_storage_location(
-        self,
-        *,
-        storage_type: StorageType,
-        storage_path: str | Path | None,
-        backups: list[Backup],
-    ) -> StorageLocation:
-        """Build a StorageLocation with its backups sorted oldest to newest.
-
-        Shared assembly for the local and S3 indexers so the sort key and the
-        StorageLocation fields are defined once.
-
-        Args:
-            storage_type (StorageType): The backend the backups live on.
-            storage_path (str | Path | None): The path or bucket prefix the backups live under.
-            backups (list[Backup]): The discovered backups to organize.
-
-        Returns:
-            StorageLocation: The populated, sorted storage location.
-        """
-        return StorageLocation(
-            name=self.settings.name,
-            label_time_units=self.settings.label_time_units,
-            tz=self.settings.tz,
-            storage_path=storage_path,
-            storage_type=storage_type,
-            backups=sorted(backups, key=lambda x: x.zoned_datetime),
-        )
-
-    def _find_existing_backups_local(self) -> list[StorageLocation]:
-        """Find all existing backups in local storage locations.
-
-        Scan local filesystem directories for backup files matching the configured naming pattern. Use this to discover existing local backups for inventory management and cleanup operations.
-
-        Returns:
-            list[StorageLocation]: A list of StorageLocation objects containing local backup files.
-        """
-        validate_source_paths(source_paths=self.settings.source_paths)
-        validate_storage_paths(storage_paths=self.settings.storage_paths, create_if_missing=True)
-
-        backups_by_storage_path: list[StorageLocation] = []
-        for storage_path in self.settings.storage_paths:
-            logger.trace(f"Indexing: {storage_path}")
-            found_files = find_files(
-                path=storage_path, globs=[f"*{self.settings.name}*.{BACKUP_EXTENSION}"]
-            )
-            location = self._make_storage_location(
-                storage_type=StorageType.LOCAL,
-                storage_path=storage_path,
-                backups=[
-                    Backup(
-                        storage_type=StorageType.LOCAL,
-                        name=x.name,
-                        path=x,
-                        storage_path=storage_path,
-                        tz=self.settings.tz,
-                    )
-                    for x in found_files
-                ],
-            )
-
-            logger.debug(f"Indexed {len(location.backups)} existing backups in '{storage_path}'")
-            for backup in location.backups:
-                logger.trace(f"Indexed: {backup}")
-
-            backups_by_storage_path.append(location)
-
-        return backups_by_storage_path
-
-    def _find_existing_backups_s3(self) -> list[StorageLocation]:
-        """Find all existing backups in an S3 bucket.
-
-        Query AWS S3 bucket for backup objects matching the configured naming pattern. Use this to discover existing cloud backups for inventory management and cleanup operations.
-
-        Returns:
-            list[StorageLocation]: A list of StorageLocation objects containing S3 backup objects.
-        """
-        if not self.aws_service:
-            return []
-
-        logger.trace("Indexing S3 storage location")
-        found_backups = self.aws_service.list_objects(prefix=self.settings.name)
-
-        if self.settings.aws_s3_bucket_path:
-            found_backups = [
-                x.replace(f"{self.settings.aws_s3_bucket_path.rstrip('/')}/", "")
-                for x in found_backups
-            ]
-
-        location = self._make_storage_location(
-            storage_type=StorageType.AWS,
-            storage_path=self.settings.aws_s3_bucket_path,
-            backups=[
-                Backup(
-                    storage_type=StorageType.AWS,
-                    name=x,
-                    tz=self.settings.tz,
-                    storage_path=self.settings.aws_s3_bucket_path,
-                )
-                for x in found_backups
-            ],
-        )
-        logger.debug(f"Indexed {len(location.backups)} existing backups in S3 bucket")
-        for backup in location.backups:
-            logger.trace(f"Indexed: {backup}")
-
-        return [location]
 
     def _identify_backups_to_delete(self) -> list[Backup]:
         """Identify backups to delete based on retention policy configuration.
@@ -509,35 +349,10 @@ class BackupManager:
         created_backups: list[Backup] = []
 
         for storage_location in self.storage_locations:
-            backup_name = storage_location.generate_new_backup_name()
-
-            if storage_location.storage_type == StorageType.LOCAL:
-                backup_path = Path(storage_location.storage_path) / backup_name
-                logger.debug(f"Copy tmp backup to local: {backup_path}")
-                copy_file(src=tmp_backup, dst=backup_path)
-                created_backups.append(
-                    Backup(
-                        storage_type=StorageType.LOCAL,
-                        name=backup_path.name,
-                        path=backup_path,
-                        storage_path=storage_location.storage_path,
-                        tz=self.settings.tz,
-                    )
-                )
-                logger.info(f"Created: {backup_path}")
-
-            elif storage_location.storage_type == StorageType.AWS:
-                logger.debug(f"Upload tmp backup to S3: {backup_name}")
-                self.aws_service.upload_object(file=tmp_backup, name=backup_name)
-                created_backups.append(
-                    Backup(
-                        storage_type=StorageType.AWS,
-                        name=backup_name,
-                        tz=self.settings.tz,
-                        storage_path=self.settings.aws_s3_bucket_path,
-                    )
-                )
-                logger.info(f"S3 created: {backup_name}")
+            backend = self._backend_by_type[storage_location.storage_type]
+            created_backups.append(
+                backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
+            )
 
         try:
             tmp_backup.unlink()
@@ -605,25 +420,11 @@ class BackupManager:
             f"Prune targets ({len(backups_to_delete)}): {[x.name for x in backups_to_delete]}"
         )
 
-        local_backups_to_delete = [
-            x for x in backups_to_delete if x.storage_type == StorageType.LOCAL
-        ]
-        s3_backups_to_delete = [x for x in backups_to_delete if x.storage_type == StorageType.AWS]
+        total_deleted = 0
+        for backend in self.backends:
+            targets = [x for x in backups_to_delete if x.storage_type == backend.storage_type]
+            total_deleted += backend.delete_many(targets)
 
-        logger.debug(f"Deleting {len(local_backups_to_delete)} local backups")
-        for backup in local_backups_to_delete:
-            self._delete_backup(backup)
-
-        deleted_s3_backups: list[str] = []
-        if s3_backups_to_delete:
-            logger.debug(f"Deleting {len(s3_backups_to_delete)} S3 backups")
-            deleted_s3_backups = self.aws_service.delete_objects(
-                keys=[x.name for x in s3_backups_to_delete]
-            )
-            for key in deleted_s3_backups:
-                logger.info(f"Deleted from S3: {key}")
-
-        total_deleted = len(local_backups_to_delete) + len(deleted_s3_backups)
         logger.info(
             f"Pruned {total_deleted} backups across {len(self.storage_locations)} storage locations"
         )
@@ -663,14 +464,7 @@ class BackupManager:
                     )
                     file.new_name = add_uid_suffix(file.new_name)
 
-                if file.backup.storage_type == StorageType.LOCAL:
-                    file.backup.path.rename(file.backup.path.parent / file.new_name)
-                    logger.debug(f"Rename: {file.backup.path} -> {file.new_name}")
-                elif file.backup.storage_type == StorageType.AWS:
-                    self.aws_service.rename_object(
-                        current_name=file.backup.name, new_name=file.new_name
-                    )
-                    logger.debug(f"S3: Rename {file.backup.name} -> {file.new_name}")
+                self._backend_by_type[file.backup.storage_type].rename(file.backup, file.new_name)
 
         renamed = [x for x in files_for_rename if x.do_rename]
         if len(renamed) > 0:
