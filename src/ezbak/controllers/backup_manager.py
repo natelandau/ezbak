@@ -9,15 +9,18 @@ from typing import assert_never
 
 from loguru import logger
 from nclutils.fs import clean_directory
-from nclutils.utils import new_uid
 
 from ezbak.constants import (
-    BACKUP_EXTENSION,
     RetentionPolicyType,
     StorageType,
 )
 from ezbak.models import Backup, StorageLocation
-from ezbak.models.backup_name import add_uid_suffix, build_backup_name, parse_backup_name
+from ezbak.models.backup_name import (
+    add_uid_suffix,
+    build_backup_name,
+    new_staging_filename,
+    parse_backup_name,
+)
 from ezbak.models.settings import Settings
 from ezbak.utils import chown_files, should_include_file, validate_source_paths
 
@@ -156,7 +159,7 @@ class BackupManager:
                 logger.error(msg)
                 raise ValueError(msg)
 
-        temp_tarfile = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+        temp_tarfile = self.tmp_dir / new_staging_filename()
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
         try:
             with tarfile.open(
@@ -346,6 +349,9 @@ class BackupManager:
 
         logger.trace("Creating new backup")
         tmp_backup = self._create_tmp_backup_file()
+        if tmp_backup is None:
+            logger.error("Backup creation aborted: temporary archive was not created")
+            return []
         created_backups: list[Backup] = []
 
         for storage_location in self.storage_locations:
@@ -464,7 +470,9 @@ class BackupManager:
                     )
                     file.new_name = add_uid_suffix(file.new_name)
 
-                self._backend_by_type[file.backup.storage_type].rename(file.backup, file.new_name)
+                self._backend_by_type[file.backup.storage_type].rename(
+                    backup=file.backup, new_name=file.new_name
+                )
 
         renamed = [x for x in files_for_rename if x.do_rename]
         if len(renamed) > 0:

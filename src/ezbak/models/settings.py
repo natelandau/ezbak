@@ -5,7 +5,7 @@ from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Self, TypeVar
+from typing import Annotated, Self, TypeVar, cast
 
 from pydantic import BeforeValidator, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,7 +42,7 @@ def _make_enum_coercer(
         default (E | None): Value returned when the input is None. Defaults to None.
 
     Returns:
-        Callable[[str | None], E | None]: A validator for use with pydantic BeforeValidator.
+        Callable[[str | E | None], E | None]: A validator for use with pydantic BeforeValidator.
     """
 
     def coerce(value: str | E | None) -> E | None:
@@ -50,10 +50,10 @@ def _make_enum_coercer(
             return default
         if isinstance(value, enum_cls):
             return value
-        # value is a str here; str() is a no-op that lets the type checker see past the
-        # TypeVar isinstance narrowing it cannot resolve on its own.
+        # value is a str here; cast tells the type checker so, since it cannot narrow the
+        # TypeVar isinstance above on its own. No runtime effect.
         try:
-            return enum_cls(transform(str(value)))
+            return enum_cls(transform(cast("str", value)))
         except ValueError as e:
             msg = f"Invalid {error_label}: must be one of {[x.value for x in enum_cls]}"
             raise ValueError(msg) from e

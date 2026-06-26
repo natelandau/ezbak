@@ -25,6 +25,17 @@ def parse_backup_name(name: str) -> dict[str, str | None] | None:
     return match.groupdict()
 
 
+def new_staging_filename() -> str:
+    """Generate a unique temporary archive filename for staging a backup.
+
+    Use to name a tmp-dir file while building or downloading an archive, before it is given its final backup name.
+
+    Returns:
+        str: A "{uid}.{ext}" name carrying no set name or timestamp.
+    """
+    return f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+
+
 def build_backup_name(*, name: str, timestamp: str, period: str | None = None) -> str:
     """Compose a backup filename from its parts.
 

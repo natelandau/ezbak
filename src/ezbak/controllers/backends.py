@@ -9,10 +9,10 @@ from typing import ClassVar
 
 from loguru import logger
 from nclutils.fs import copy_file, find_files
-from nclutils.utils import new_uid
 
 from ezbak.constants import BACKUP_EXTENSION, StorageType
 from ezbak.models import Backup, StorageLocation
+from ezbak.models.backup_name import new_staging_filename
 from ezbak.models.settings import Settings
 from ezbak.utils import validate_source_paths, validate_storage_paths
 
@@ -319,7 +319,7 @@ class S3Backend(StorageBackend):
             return None
 
         logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
-        tmp_file = self.tmp_dir / f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+        tmp_file = self.tmp_dir / new_staging_filename()
         self.aws_service.get_object(key=backup.name, destination=tmp_file)
         return tmp_file
 
