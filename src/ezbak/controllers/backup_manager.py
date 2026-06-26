@@ -13,12 +13,11 @@ from nclutils.utils import new_uid
 
 from ezbak.constants import (
     BACKUP_EXTENSION,
-    BACKUP_NAME_REGEX,
     RetentionPolicyType,
     StorageType,
 )
 from ezbak.models import Backup, StorageLocation
-from ezbak.models.backup_name import add_uid_suffix
+from ezbak.models.backup_name import add_uid_suffix, build_backup_name, parse_backup_name
 from ezbak.models.settings import Settings
 from ezbak.utils import (
     chown_files,
@@ -268,6 +267,35 @@ class BackupManager:
         logger.info(f"Backup restored to '{destination}'")
         return True
 
+    def _make_storage_location(
+        self,
+        *,
+        storage_type: StorageType,
+        storage_path: str | Path | None,
+        backups: list[Backup],
+    ) -> StorageLocation:
+        """Build a StorageLocation with its backups sorted oldest to newest.
+
+        Shared assembly for the local and S3 indexers so the sort key and the
+        StorageLocation fields are defined once.
+
+        Args:
+            storage_type (StorageType): The backend the backups live on.
+            storage_path (str | Path | None): The path or bucket prefix the backups live under.
+            backups (list[Backup]): The discovered backups to organize.
+
+        Returns:
+            StorageLocation: The populated, sorted storage location.
+        """
+        return StorageLocation(
+            name=self.settings.name,
+            label_time_units=self.settings.label_time_units,
+            tz=self.settings.tz,
+            storage_path=storage_path,
+            storage_type=storage_type,
+            backups=sorted(backups, key=lambda x: x.zoned_datetime),
+        )
+
     def _find_existing_backups_local(self) -> list[StorageLocation]:
         """Find all existing backups in local storage locations.
 
@@ -285,8 +313,10 @@ class BackupManager:
             found_files = find_files(
                 path=storage_path, globs=[f"*{self.settings.name}*.{BACKUP_EXTENSION}"]
             )
-            found_backups: list[Backup] = sorted(
-                [
+            location = self._make_storage_location(
+                storage_type=StorageType.LOCAL,
+                storage_path=storage_path,
+                backups=[
                     Backup(
                         storage_type=StorageType.LOCAL,
                         name=x.name,
@@ -296,26 +326,13 @@ class BackupManager:
                     )
                     for x in found_files
                 ],
-                key=lambda x: x.zoned_datetime,
             )
 
-            logger.debug(f"Indexed {len(found_backups)} existing backups in '{storage_path}'")
-            for backup in found_backups:
-                try:
-                    logger.trace(f"Indexed: {backup}")
-                except OSError as e:
-                    logger.trace(f"Indexed: {backup} (stat failed: {e})")
+            logger.debug(f"Indexed {len(location.backups)} existing backups in '{storage_path}'")
+            for backup in location.backups:
+                logger.trace(f"Indexed: {backup}")
 
-            backups_by_storage_path.append(
-                StorageLocation(
-                    name=self.settings.name,
-                    label_time_units=self.settings.label_time_units,
-                    tz=self.settings.tz,
-                    storage_path=storage_path,
-                    storage_type=StorageType.LOCAL,
-                    backups=found_backups,
-                )
-            )
+            backups_by_storage_path.append(location)
 
         return backups_by_storage_path
 
@@ -339,8 +356,10 @@ class BackupManager:
                 for x in found_backups
             ]
 
-        backups = sorted(
-            [
+        location = self._make_storage_location(
+            storage_type=StorageType.AWS,
+            storage_path=self.settings.aws_s3_bucket_path,
+            backups=[
                 Backup(
                     storage_type=StorageType.AWS,
                     name=x,
@@ -349,22 +368,12 @@ class BackupManager:
                 )
                 for x in found_backups
             ],
-            key=lambda x: x.zoned_datetime,
         )
-        logger.debug(f"Indexed {len(backups)} existing backups in S3 bucket")
-        for backup in backups:
+        logger.debug(f"Indexed {len(location.backups)} existing backups in S3 bucket")
+        for backup in location.backups:
             logger.trace(f"Indexed: {backup}")
 
-        return [
-            StorageLocation(
-                name=self.settings.name,
-                label_time_units=self.settings.label_time_units,
-                tz=self.settings.tz,
-                storage_path=self.settings.aws_s3_bucket_path,
-                storage_type=StorageType.AWS,
-                backups=backups,
-            )
-        ]
+        return [location]
 
     def _identify_backups_to_delete(self) -> list[Backup]:
         """Identify backups to delete based on retention policy configuration.
@@ -421,12 +430,13 @@ class BackupManager:
         files_for_rename: list[FileForRename] = []
         for storage_location in self.storage_locations:
             for backup in storage_location.backups:
+                matches = parse_backup_name(backup.name)
+                if matches is None:
+                    continue
+
                 new_backup_name = backup.name
-                name_parts = BACKUP_NAME_REGEX.finditer(backup.name)
-                for match in name_parts:
-                    matches = match.groupdict()
-                    found_period = matches.get("period")
-                    found_uuid = matches.get("uuid")
+                found_period = matches.get("period")
+                found_uuid = matches.get("uuid")
                 if found_period:
                     new_backup_name = re.sub(rf"-{found_period}", "", new_backup_name)
                 if found_uuid:
@@ -454,10 +464,11 @@ class BackupManager:
         for storage_location in self.storage_locations:
             for backup_type, backups in storage_location.backups_by_time_unit.items():
                 for backup in backups:
-                    name_parts = BACKUP_NAME_REGEX.finditer(backup.name)
-                    for match in name_parts:
-                        matches = match.groupdict()
-                        found_period = matches.get("period")
+                    matches = parse_backup_name(backup.name)
+                    if matches is None:
+                        continue
+
+                    found_period = matches.get("period")
                     if found_period and found_period == backup_type.value:
                         files_for_rename.append(
                             FileForRename(
@@ -468,9 +479,10 @@ class BackupManager:
                         )
                         continue
 
-                    new_name = BACKUP_NAME_REGEX.sub(
-                        repl=f"{matches.get('name')}-{matches.get('timestamp')}-{backup_type.value}.{BACKUP_EXTENSION}",
-                        string=backup.name,
+                    new_name = build_backup_name(
+                        name=str(matches.get("name")),
+                        timestamp=str(matches.get("timestamp")),
+                        period=backup_type.value,
                     )
                     files_for_rename.append(
                         FileForRename(

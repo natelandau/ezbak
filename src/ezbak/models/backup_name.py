@@ -5,7 +5,24 @@ Single source of truth for how backup filenames are composed and disambiguated, 
 
 from nclutils.utils import new_uid
 
-from ezbak.constants import BACKUP_EXTENSION
+from ezbak.constants import BACKUP_EXTENSION, BACKUP_NAME_REGEX
+
+
+def parse_backup_name(name: str) -> dict[str, str | None] | None:
+    """Split a backup filename into its named parts.
+
+    Use to read a name's components (name, timestamp, period, uuid, extension) when relabeling or stripping labels.
+
+    Args:
+        name (str): The backup filename to parse.
+
+    Returns:
+        dict[str, str | None] | None: The named groups, or None if the name does not match the grammar.
+    """
+    match = BACKUP_NAME_REGEX.search(name)
+    if match is None:
+        return None
+    return match.groupdict()
 
 
 def build_backup_name(*, name: str, timestamp: str, period: str | None = None) -> str:
