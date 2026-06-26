@@ -3,7 +3,7 @@
 from loguru import logger
 
 from ezbak.cli import EZBakCLI
-from ezbak.cli_commands import get_app_for_cli
+from ezbak.cli_commands.factory import get_app_for_cli
 from ezbak.constants import StorageType
 
 

@@ -4,7 +4,7 @@ from loguru import logger
 from rich.prompt import Confirm
 
 from ezbak.cli import EZBakCLI
-from ezbak.cli_commands import get_app_for_cli
+from ezbak.cli_commands.factory import get_app_for_cli
 
 
 def main(cmd: EZBakCLI) -> None:
