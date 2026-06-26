@@ -4,12 +4,12 @@ from collections import defaultdict
 from pathlib import Path
 
 from loguru import logger
-from nclutils.utils import new_uid
 from whenever import Instant, TimeZoneNotFoundError
 
-from ezbak.constants import BACKUP_EXTENSION, DEFAULT_DATE_FORMAT, BackupType, StorageType
+from ezbak.constants import DEFAULT_DATE_FORMAT, BackupType, StorageType
 
 from .backup import Backup
+from .backup_name import add_uid_suffix, build_backup_name
 
 
 class StorageLocation:
@@ -98,7 +98,7 @@ class StorageLocation:
         timestamp = now.to_stdlib().strftime(DEFAULT_DATE_FORMAT)
 
         if not self.label_time_units:
-            filename = f"{self.name}-{timestamp}.{BACKUP_EXTENSION}"
+            filename = build_backup_name(name=self.name, timestamp=timestamp)
         else:
             period_checks = [
                 ("yearly", BackupType.YEARLY, str(now.year)),
@@ -119,10 +119,10 @@ class StorageLocation:
                 period = period_name
                 break
 
-            filename = f"{self.name}-{timestamp}-{period}.{BACKUP_EXTENSION}"
+            filename = build_backup_name(name=self.name, timestamp=timestamp, period=period)
 
         if filename in [x.name for x in self.backups]:
-            filename = f"{filename.removesuffix(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+            filename = add_uid_suffix(filename)
 
         logger.trace(f"Backup name: {filename}")
         return filename

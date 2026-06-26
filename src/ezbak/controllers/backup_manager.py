@@ -18,6 +18,7 @@ from ezbak.constants import (
     StorageType,
 )
 from ezbak.models import Backup, StorageLocation
+from ezbak.models.backup_name import add_uid_suffix
 from ezbak.models.settings import Settings
 from ezbak.utils import (
     chown_files,
@@ -648,7 +649,7 @@ class BackupManager:
                     logger.trace(
                         f"Attempting to rename backup: {file.backup.name} -> {file.new_name}"
                     )
-                    file.new_name = f"{file.new_name.removesuffix(f'.{BACKUP_EXTENSION}')}-{new_uid(bits=24)}.{BACKUP_EXTENSION}"
+                    file.new_name = add_uid_suffix(file.new_name)
 
                 if file.backup.storage_type == StorageType.LOCAL:
                     file.backup.path.rename(file.backup.path.parent / file.new_name)
