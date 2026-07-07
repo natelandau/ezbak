@@ -112,7 +112,9 @@ class BackupConfig(BaseModel):
         default_factory=list
     )
 
-    storage_type: Annotated[StorageType | None, BeforeValidator(coerce_storage_type)] = None
+    storage_type: Annotated[StorageType | None, BeforeValidator(coerce_storage_type)] = (
+        StorageType.LOCAL
+    )
 
     strip_source_paths: bool = False
     delete_src_after_backup: bool = False
