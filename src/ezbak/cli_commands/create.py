@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from ezbak.cli import EZBakCLI  # noqa: TC001
-from ezbak.cli_commands.factory import get_app_for_cli
+from ezbak.cli import EZBakCLI, build_config
+from ezbak.core import EZBak
 
 
 def main(cmd: EZBakCLI) -> None:
     """The main function for the create command."""
-    app = get_app_for_cli(cmd)
+    app = EZBak(build_config(cmd))
     app.create_backup()

@@ -2,14 +2,14 @@
 
 from loguru import logger
 
-from ezbak.cli import EZBakCLI
-from ezbak.cli_commands.factory import get_app_for_cli
+from ezbak.cli import EZBakCLI, build_config
 from ezbak.constants import StorageType
+from ezbak.core import EZBak
 
 
 def main(cmd: EZBakCLI) -> None:
     """The main function for the list command."""
-    app = get_app_for_cli(cmd)
+    app = EZBak(build_config(cmd))
 
     backups = app.list_backups()
 

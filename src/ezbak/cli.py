@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003
-from typing import Annotated
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any
 
 import cappa
 from nclutils import pp
 
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, CLILogLevel
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, CLILogLevel, LogLevel
+from ezbak.env import EnvConfig
+
+if TYPE_CHECKING:
+    from ezbak.config import BackupConfig
 
 
 @cappa.command(name="ezbak")
@@ -67,6 +71,26 @@ class EZBakCLI:
         cappa.Arg(
             long="log-prefix",
             help="Prefix for log messages.",
+            propagate=True,
+            group=(3, "Optional"),
+        ),
+    ] = None
+
+    s3_bucket: Annotated[
+        str,
+        cappa.Arg(
+            long="s3-bucket",
+            help="S3 bucket name. Credentials come from EZBAK_AWS_ACCESS_KEY / EZBAK_AWS_SECRET_KEY.",
+            propagate=True,
+            group=(3, "Optional"),
+        ),
+    ] = None
+
+    s3_bucket_path: Annotated[
+        str,
+        cappa.Arg(
+            long="s3-bucket-path",
+            help="Prefix within the S3 bucket.",
             propagate=True,
             group=(3, "Optional"),
         ),
@@ -263,6 +287,74 @@ class PruneCommand:
 @cappa.command(name="list", invoke="ezbak.cli_commands.list.main")
 class ListCommand:
     """List backups."""
+
+
+def build_config(cli: EZBakCLI) -> BackupConfig:
+    """Assemble a ``BackupConfig`` from parsed CLI arguments.
+
+    Map the shared arguments plus the active subcommand's fields onto the single config schema. Read credentials from the environment so secrets never pass through argv.
+
+    Args:
+        cli (EZBakCLI): The parsed top-level CLI object.
+
+    Returns:
+        BackupConfig: The configuration to hand to ``EZBak``.
+    """
+    cmd = cli.command
+
+    # Values the CLI has no flags for (AWS credentials, tz) must still come from the
+    # environment. Build the config as EnvConfig with the CLI-derived values passed as
+    # explicit overrides (init kwargs are highest priority in pydantic-settings); EnvConfig
+    # fills ONLY the omitted fields (tz, aws_access_key, aws_secret_key) from EZBAK_-prefixed
+    # env vars. Do NOT construct a bare EnvConfig() to read those first: bare construction
+    # runs validate_settings, which requires name + a destination (both flag-supplied, not in
+    # env) and would raise. _env_file=None keeps the CLI from silently absorbing a project
+    # .env file (matches the prior factory behavior). EnvConfig is a BackupConfig subclass,
+    # so returning it satisfies the -> BackupConfig contract.
+    # dict[str, Any]: values fan out to differently-typed EnvConfig kwargs below via **splat,
+    # which mypy can only accept if the dict's value type is Any.
+    common: dict[str, Any] = {
+        "name": cli.name,
+        "storage_paths": cli.storage_paths,
+        "log_level": LogLevel(cli.verbosity.name),
+        "log_file": str(cli.log_file) if cli.log_file else None,
+        "log_prefix": cli.log_prefix,
+        "aws_s3_bucket_name": cli.s3_bucket,
+        "aws_s3_bucket_path": cli.s3_bucket_path,
+    }
+
+    if isinstance(cmd, CreateCommand):
+        extra: dict[str, Any] = {
+            "source_paths": cmd.sources,
+            "strip_source_paths": cmd.strip_source_paths,
+            "include_regex": cmd.include_regex,
+            "exclude_regex": cmd.exclude_regex,
+            "compression_level": cmd.compression_level,
+            "label_time_units": not cmd.no_label,
+        }
+    elif isinstance(cmd, RestoreCommand):
+        extra = {
+            "source_paths": [Path.cwd()],
+            "restore_path": cmd.destination,
+            "clean_before_restore": cmd.clean,
+            "chown_uid": cmd.uid,
+            "chown_gid": cmd.gid,
+        }
+    elif isinstance(cmd, PruneCommand):
+        extra = {
+            "source_paths": [Path.cwd()],
+            "max_backups": cmd.max_backups,
+            "retention_yearly": cmd.yearly,
+            "retention_monthly": cmd.monthly,
+            "retention_weekly": cmd.weekly,
+            "retention_daily": cmd.daily,
+            "retention_hourly": cmd.hourly,
+            "retention_minutely": cmd.minutely,
+        }
+    else:  # ListCommand and any other read-only command
+        extra = {"source_paths": [Path.cwd()]}
+
+    return EnvConfig(**common, **extra, _env_file=None)  # type: ignore[call-arg]
 
 
 def main() -> None:  # pragma: no cover

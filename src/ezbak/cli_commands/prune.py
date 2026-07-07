@@ -3,13 +3,13 @@
 from loguru import logger
 from rich.prompt import Confirm
 
-from ezbak.cli import EZBakCLI
-from ezbak.cli_commands.factory import get_app_for_cli
+from ezbak.cli import EZBakCLI, build_config
+from ezbak.core import EZBak
 
 
 def main(cmd: EZBakCLI) -> None:
     """The main function for the prune command."""
-    app = get_app_for_cli(cmd)
+    app = EZBak(build_config(cmd))
     policy = app.settings.retention_policy.get_full_policy()
 
     if not policy:

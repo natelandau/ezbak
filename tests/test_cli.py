@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import cappa
 import time_machine
 
-from ezbak.cli import EZBakCLI
+from ezbak.cli import CreateCommand, EZBakCLI, build_config
 from ezbak.cli_commands import list as list_cmd
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
 from ezbak.models import Backup
@@ -229,7 +229,8 @@ def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
     fake_app = SimpleNamespace(
         list_backups=lambda: [local_backup, aws_backup],
     )
-    mocker.patch.object(list_cmd, "get_app_for_cli", return_value=fake_app)
+    mocker.patch.object(list_cmd, "build_config", return_value=mocker.MagicMock())
+    mocker.patch.object(list_cmd, "EZBak", return_value=fake_app)
 
     # When listing backups
     list_cmd.main(mocker.MagicMock())
@@ -272,3 +273,24 @@ def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
 
     assert "INFO     | Backup restored to 'restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()
+
+
+def test_build_config_reads_s3_bucket(monkeypatch, filesystem):
+    """Verify the CLI builder wires an S3 bucket into the config."""
+    # Given credentials in the environment and a bucket flag
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "AKIA_TEST")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
+    src, dest1, _ = filesystem
+
+    # When building a config for a create command targeting S3
+    cli = EZBakCLI(
+        command=CreateCommand(sources=[src]),
+        name="t",
+        storage_paths=[dest1],
+        s3_bucket="my-bucket",
+    )
+    config = build_config(cli)
+
+    # Then the bucket and env-sourced credentials are present
+    assert config.aws_s3_bucket_name == "my-bucket"
+    assert config.aws_access_key == "AKIA_TEST"
