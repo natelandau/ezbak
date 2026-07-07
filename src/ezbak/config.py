@@ -19,13 +19,10 @@ from ezbak.constants import (
     RetentionPolicyType,
 )
 
-# Deferred to a function-local import in the `retention_policy` property below: importing
-# ezbak.models eagerly here would re-enter ezbak.config before this module finishes defining
-# BackupConfig, since ezbak.models (via the settings shim) imports BackupConfig back.
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ezbak.models.retention_policy import RetentionPolicyManager
+    from ezbak.retention import RetentionPolicyManager
 
 E = TypeVar("E", bound=Enum)
 
@@ -146,8 +143,8 @@ class BackupConfig(BaseModel):
         if self._cached_retention_policy:
             return self._cached_retention_policy
 
-        # Local import: avoids a circular import with ezbak.models (see the module docstring note).
-        from ezbak.models.retention_policy import RetentionPolicyManager  # noqa: PLC0415
+        # Local import: avoids a circular import with ezbak.retention (see the module docstring note).
+        from ezbak.retention import RetentionPolicyManager  # noqa: PLC0415
 
         if self.max_backups is not None:
             policy_type = RetentionPolicyType.COUNT_BASED

@@ -540,7 +540,7 @@ def test_prune_missing_file(debug, capsys, tmp_path, mocker):
     # concurrent host having already pruned it from a shared storage location
     phantom = tmp_path / "test-20200101T000000-yearly.tgz"
     mocker.patch(
-        "ezbak.controllers.backends.find_files",
+        "ezbak.storage.local.find_files",
         autospec=True,
         return_value=[tmp_path / f for f in real_files] + [phantom],
     )

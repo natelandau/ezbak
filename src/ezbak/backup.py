@@ -1,15 +1,73 @@
-"""Storage location backups."""
+"""Backup and storage location models for managing backup archives and restoration operations."""
 
 from collections import defaultdict
 from pathlib import Path
 
 from loguru import logger
-from whenever import Instant, TimeZoneNotFoundError
+from whenever import Instant, PlainDateTime, TimeZoneNotFoundError
 
-from ezbak.constants import DEFAULT_DATE_FORMAT, BackupType, StorageType
+from ezbak.constants import (
+    DEFAULT_DATE_FORMAT,
+    DEFAULT_DATE_PATTERN,
+    TIMESTAMP_REGEX,
+    BackupType,
+    StorageType,
+)
+from ezbak.naming import add_uid_suffix, build_backup_name
 
-from .backup import Backup
-from .backup_name import add_uid_suffix, build_backup_name
+
+class Backup:
+    """Represent a single backup archive with metadata and restoration capabilities.
+
+    Encapsulates a backup archive file with its timestamp information, ownership settings, and methods for restoration and deletion. Provides time-based categorization for retention policy management and safe restoration with ownership preservation.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        storage_type: StorageType,
+        path: Path | None = None,
+        storage_path: Path | str | None = None,
+        tz: str | None = None,
+    ) -> None:
+        self.name = name
+        self.tz = tz
+
+        self.storage_type = storage_type
+        self.storage_path = storage_path
+
+        # Full path to the backup file, used for local backups
+        self.path = path
+
+        try:
+            self.timestamp = TIMESTAMP_REGEX.search(name).group(0)
+        except AttributeError:
+            logger.warning(f"Could not parse timestamp: {name}")
+            raise
+
+        plain_dt = PlainDateTime.parse(self.timestamp, format=DEFAULT_DATE_PATTERN)
+        try:
+            self.zoned_datetime = (
+                plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
+            )
+        except TimeZoneNotFoundError as e:
+            logger.error(e)
+            raise
+
+        self.year = str(self.zoned_datetime.year)
+        self.month = str(self.zoned_datetime.month)
+        self.week = str(self.zoned_datetime.to_stdlib().strftime("%W"))
+        self.day = str(self.zoned_datetime.day)
+        self.hour = str(self.zoned_datetime.hour)
+        self.minute = str(self.zoned_datetime.minute)
+
+    def __repr__(self) -> str:
+        """Return a string representation of the backup."""
+        return f"<Backup: {str(self.storage_path) + '/' if self.storage_path else ''}{self.name} ({self.storage_type.name})>"
+
+    def __str__(self) -> str:
+        """Return a string representation of the backup."""
+        return f"{str(self.storage_path) + '/' if self.storage_path else ''}{self.name} ({self.storage_type.name})"
 
 
 class StorageLocation:

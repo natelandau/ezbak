@@ -17,19 +17,19 @@ from pydantic import ValidationError
 
 from ezbak.config import BackupConfig
 from ezbak.constants import RetentionPolicyType, StorageType
-from ezbak.controllers.aws import AWSService
-from ezbak.controllers.backends import LocalBackend, S3Backend, StorageBackend
-from ezbak.models.backup_name import (
+from ezbak.filters import chown_files, should_include_file, validate_source_paths
+from ezbak.logging import instantiate_logger
+from ezbak.naming import (
     add_uid_suffix,
     build_backup_name,
     new_staging_filename,
     parse_backup_name,
 )
-from ezbak.utils import chown_files, should_include_file, validate_source_paths
-from ezbak.utils.log_config import instantiate_logger
+from ezbak.storage import LocalBackend, S3Backend, StorageBackend
+from ezbak.storage.aws import AWSService
 
 if TYPE_CHECKING:
-    from ezbak.models import Backup, StorageLocation
+    from ezbak.backup import Backup, StorageLocation
 
 
 def ezbak(**kwargs: object) -> EZBak:

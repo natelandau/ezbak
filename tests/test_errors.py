@@ -4,8 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from ezbak import ezbak
+from ezbak.backup import Backup
 from ezbak.constants import StorageType
-from ezbak.models import Backup
 
 
 def test_no_name(filesystem):

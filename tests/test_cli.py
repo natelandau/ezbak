@@ -11,11 +11,11 @@ from zoneinfo import ZoneInfo
 import cappa
 import time_machine
 
+from ezbak.backup import Backup
 from ezbak.cli import CreateCommand, EZBakCLI, build_config
 from ezbak.cli_commands import list as list_cmd
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
-from ezbak.models import Backup
-from ezbak.utils.log_config import instantiate_logger
+from ezbak.logging import instantiate_logger
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)

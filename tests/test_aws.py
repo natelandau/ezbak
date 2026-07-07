@@ -9,10 +9,10 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
+from ezbak.backup import Backup
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
-from ezbak.controllers.aws import AWSService
-from ezbak.models import Backup
-from ezbak.utils.log_config import instantiate_logger
+from ezbak.logging import instantiate_logger
+from ezbak.storage.aws import AWSService
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -38,7 +38,7 @@ def mock_aws_client(mocker) -> None:
         ],
     }
 
-    mocker.patch("ezbak.controllers.aws.boto3.client", return_value=mock_s3_client)
+    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_s3_client)
 
 
 @time_machine.travel(frozen_time, tick=False)
