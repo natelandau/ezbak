@@ -215,7 +215,7 @@ def test_cli_list_backups(debug, capsys, tmp_path):
 
 
 def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
-    """Verify listing shows both local and S3 backups when storage_type is ALL."""
+    """Verify listing shows both local and S3 backups when both destinations have backups."""
     # Given a logger writing to stderr and an app reporting one local and one AWS backup
     instantiate_logger(LogLevel.INFO)
 
@@ -227,7 +227,6 @@ def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
     )
     aws_backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     fake_app = SimpleNamespace(
-        settings=SimpleNamespace(storage_type=StorageType.ALL),
         list_backups=lambda: [local_backup, aws_backup],
     )
     mocker.patch.object(list_cmd, "get_app_for_cli", return_value=fake_app)

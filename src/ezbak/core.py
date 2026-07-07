@@ -90,10 +90,10 @@ class EZBak:
         atexit.register(self._cleanup_tmp_dir)
 
         self.backends: list[StorageBackend] = []
-        if self.settings.storage_type in {StorageType.LOCAL, StorageType.ALL}:
+        if self.settings.storage_paths:
             self.backends.append(LocalBackend(self.settings))
 
-        if self.settings.storage_type in {StorageType.AWS, StorageType.ALL}:
+        if self.settings.aws_s3_bucket_name:
             try:
                 self.aws_service = AWSService(
                     aws_access_key=self.settings.aws_access_key,
@@ -428,7 +428,7 @@ class EZBak:
         Find the most recent backup across all configured storage locations based on timestamp. Use this to identify the newest backup for restoration operations or to determine if new backups are needed.
 
         Returns:
-            Backup: The latest backup, or None if no backups exist.
+            Backup | None: The latest backup, or None if no backups exist.
         """
         all_backups = [x for y in self.storage_locations for x in y.backups]
         if not all_backups:

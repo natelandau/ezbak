@@ -64,7 +64,6 @@ class StorageType(Enum):
 
     LOCAL = "local"
     AWS = "aws"
-    ALL = "all"
 
 
 class LogLevel(Enum):

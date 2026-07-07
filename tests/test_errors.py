@@ -66,7 +66,7 @@ def test_source_paths_symlink(tmp_path, capsys, debug):
 def test_storage_paths(filesystem):
     """Test EZBak errors."""
     src_dir, _, _ = filesystem
-    with pytest.raises(ValueError, match="No local storage paths provided "):
+    with pytest.raises(ValueError, match="No destination configured"):
         ezbak(
             name="test",
             source_paths=[src_dir],

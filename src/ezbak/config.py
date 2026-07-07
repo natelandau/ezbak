@@ -17,7 +17,6 @@ from ezbak.constants import (
     BackupType,
     LogLevel,
     RetentionPolicyType,
-    StorageType,
 )
 
 # Deferred to a function-local import in the `retention_policy` property below: importing
@@ -69,9 +68,6 @@ def _make_enum_coercer(
 
 
 coerce_log_level = _make_enum_coercer(LogLevel, error_label="log level", transform=str.upper)
-coerce_storage_type = _make_enum_coercer(
-    StorageType, error_label="storage location", default=StorageType.LOCAL
-)
 coerce_action = _make_enum_coercer(Action, error_label="action")
 
 
@@ -108,10 +104,6 @@ class BackupConfig(BaseModel):
     )
     storage_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
         default_factory=list
-    )
-
-    storage_type: Annotated[StorageType | None, BeforeValidator(coerce_storage_type)] = (
-        StorageType.LOCAL
     )
 
     strip_source_paths: bool = False
@@ -220,8 +212,8 @@ class BackupConfig(BaseModel):
                     if not destination.exists():
                         destination.mkdir(parents=True, exist_ok=True)
 
-        if not self.storage_paths and self.storage_type != StorageType.AWS:
-            msg = "No local storage paths provided"
+        if not self.storage_paths and not self.aws_s3_bucket_name:
+            msg = "No destination configured: set storage_paths and/or aws_s3_bucket_name"
             raise ValueError(msg)
 
         if self.storage_paths and self.entrypoint_action == Action.RESTORE:
