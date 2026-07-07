@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import atexit
 import re
 import sys
 import tarfile
@@ -85,9 +84,12 @@ class EZBak:
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
 
+        # TemporaryDirectory registers its own finalizer, so the staging dir is removed
+        # when this EZBak is garbage-collected or the process exits. Registering an extra
+        # atexit callback bound to self would instead pin the whole EZBak (and its boto3
+        # client and cached indexes) in memory until exit.
         self._tmp_dir_handle = TemporaryDirectory()
         self.tmp_dir = Path(self._tmp_dir_handle.name)
-        atexit.register(self._cleanup_tmp_dir)
 
         self.backends: list[StorageBackend] = []
         if self.settings.storage_paths:
@@ -112,10 +114,6 @@ class EZBak:
         self._backend_by_type: dict[StorageType, StorageBackend] = {
             backend.storage_type: backend for backend in self.backends
         }
-
-    def _cleanup_tmp_dir(self) -> None:
-        """Remove the staging directory created for this run."""
-        self._tmp_dir_handle.cleanup()
 
     @property
     def storage_locations(self) -> list[StorageLocation]:
@@ -278,7 +276,9 @@ class EZBak:
             logger.error(f"Failed to restore backup: {tarfile_path}\n{e}")
             return False
 
-        if self.settings.chown_uid and self.settings.chown_gid:
+        # Compare against None, not truthiness: uid/gid 0 (root) is a valid target
+        # and must not be treated as "unset".
+        if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
             chown_files(
                 directory=destination, uid=self.settings.chown_uid, gid=self.settings.chown_gid
             )

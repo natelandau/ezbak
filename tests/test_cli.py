@@ -294,3 +294,21 @@ def test_build_config_reads_s3_bucket(monkeypatch, filesystem):
     # Then the bucket and env-sourced credentials are present
     assert config.aws_s3_bucket_name == "my-bucket"
     assert config.aws_access_key == "AKIA_TEST"
+
+
+def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
+    """Verify an S3-only backup parses without the --storage flag."""
+    # Given S3 credentials in the environment
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "AKIA_TEST")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
+
+    # When parsing a create command with only --s3-bucket (no --storage)
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=["--name", "t", "--s3-bucket", "my-bucket", "create", "--source", str(tmp_path)],
+    )
+    config = build_config(cli)
+
+    # Then parsing succeeds and the config has no local paths but the S3 bucket
+    assert config.storage_paths == []
+    assert config.aws_s3_bucket_name == "my-bucket"

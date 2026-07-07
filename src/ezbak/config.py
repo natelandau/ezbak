@@ -31,17 +31,15 @@ def _make_enum_coercer(
     *,
     error_label: str,
     transform: Callable[[str], str] = str.lower,
-    default: E | None = None,
 ) -> Callable[[str | E | None], E | None]:
     """Build a pydantic BeforeValidator that coerces a string into an enum member.
 
-    Centralize the shared coercion shape (pass through None and existing members, normalize case, raise a uniform error) so each enum-typed setting declares only what differs: the enum, the case transform, and the value used when nothing is provided.
+    Centralize the shared coercion shape (pass through None and existing members, normalize case, raise a uniform error) so each enum-typed setting declares only what differs: the enum and the case transform.
 
     Args:
         enum_cls (type[E]): The enum the value must resolve to.
         error_label (str): Human-readable name used in the error message.
         transform (Callable[[str], str]): Case normalizer applied before lookup. Defaults to str.lower.
-        default (E | None): Value returned when the input is None. Defaults to None.
 
     Returns:
         Callable[[str | E | None], E | None]: A validator for use with pydantic BeforeValidator.
@@ -49,7 +47,7 @@ def _make_enum_coercer(
 
     def coerce(value: str | E | None) -> E | None:
         if value is None:
-            return default
+            return None
         if isinstance(value, enum_cls):
             return value
         # value is a str here; cast tells the type checker so, since it cannot narrow the

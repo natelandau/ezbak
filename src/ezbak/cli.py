@@ -38,11 +38,11 @@ class EZBakCLI:
         list[Path],
         cappa.Arg(
             long="storage",
-            help="The storage path(s) where backups are stored. Add multiple storage paths with multiple --storage flags.",
+            help="Local storage path(s) for backups. Optional when --s3-bucket is set. Repeat --storage for multiple paths.",
             propagate=True,
-            group=(1, "Required"),
+            group=(3, "Optional"),
         ),
-    ]
+    ] = None
 
     verbosity: Annotated[
         CLILogLevel,

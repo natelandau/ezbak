@@ -100,14 +100,16 @@ class StorageLocation:
 
     def _categorize_backups_by_time_unit(
         self,
-    ) -> tuple[dict[BackupType, list[Backup]], dict[BackupType, list[str]]]:
+    ) -> tuple[dict[BackupType, list[Backup]], dict[BackupType, set[str]]]:
         """Categorize backups by time unit and return a dictionary of backups grouped by time unit and a dictionary of dates in use.
 
         Returns:
-            tuple[dict[BackupType, list[Backup]], dict[BackupType, list[str]]]: A tuple containing a dictionary of backups grouped by time unit and a dictionary of dates in use.
+            tuple[dict[BackupType, list[Backup]], dict[BackupType, set[str]]]: A tuple containing a dictionary of backups grouped by time unit and a dictionary of dates in use.
         """
         backups_by_type: dict[BackupType, list[Backup]] = defaultdict(list)
-        existing_dates: dict[BackupType, list[str]] = defaultdict(list)
+        # A set for O(1) membership: dates_in_use is only ever tested with `in`, never
+        # iterated in order (see generate_new_backup_name).
+        existing_dates: dict[BackupType, set[str]] = defaultdict(set)
 
         period_definitions = [
             (BackupType.YEARLY, "year"),
@@ -121,7 +123,7 @@ class StorageLocation:
             for period_type, date_attr in period_definitions:
                 date_value = getattr(backup, date_attr)
                 if date_value not in existing_dates[period_type]:
-                    existing_dates[period_type].append(date_value)
+                    existing_dates[period_type].add(date_value)
                     backups_by_type[period_type].append(backup)
                     # First-match-wins: assign each backup to the coarsest period whose slot
                     # for its timestamp is not yet taken, then stop.

@@ -26,7 +26,9 @@ def main(cmd: EZBakCLI) -> None:
 
     deleted_files = app.prune_backups()
     if deleted_files:
-        print_backups = "\n  - ".join([str(x.path) for x in deleted_files])
+        # S3 backups have no local path; fall back to the object name so the output
+        # names the key instead of printing "None".
+        print_backups = "\n  - ".join([str(x.path) if x.path else x.name for x in deleted_files])
         logger.info(f"Deleted {len(deleted_files)} backups:\n   - {print_backups}")
     else:
         logger.info("No backups deleted")
