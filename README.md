@@ -2,129 +2,129 @@
 
 # ezbak
 
-A simple backup management tool automating backup creation, management, and restores with support for multiple destinations and intelligent retention policies.
+A simple backup tool that creates, prunes, and restores compressed archives of your files. Use it as a Python package, a command-line tool, or a Docker container.
 
-Use ezbak as a Python package in your code, run it from the command line, or deploy it as a Docker container.
+## Features
 
-**Features**
-
--   Create tar-gzipped (`.tgz`) compressed backups of files and directories
--   Support for local filesystems and AWS S3 storage locations
--   File filtering with regex patterns
--   Intelligent retention policies (time-based and count-based)
--   Automatic cleanup of old backups
--   Time-based backup labeling (`yearly`, `monthly`, `weekly`, `daily`, `hourly`, `minutely`)
--   Restore backups to any location
--   Python package for integration into your projects
--   Command-line interface for scripts and automation
--   Docker container for containerized environments
+- Create tar-gzipped (`.tgz`) backups of files and directories
+- Store backups on the local filesystem, in AWS S3, or both at once
+- Filter files with include and exclude regex patterns
+- Prune old backups with count-based or time-based retention policies
+- Label backups by time period (`yearly`, `monthly`, `weekly`, `daily`, `hourly`, `minutely`)
+- Restore the latest backup to any location
+- Run scheduled backups in a container with a cron expression
 
 ## Table of Contents
 
-* [ezbak](#ezbak)
-  * [Table of Contents](#table-of-contents)
-  * [Installation](#installation)
-  * [Usage](#usage)
-  * [Core Concepts](#core-concepts)
-  * [Common Use Cases](#common-use-cases)
-  * [Configuration the ezbak instance](#configuration-the-ezbak-instance)
-  * [Use environment variables for Docker](#use-environment-variables-for-docker)
-  * [CLI Configurations](#cli-configurations)
-  * [Contributing](#contributing)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Python package](#python-package)
+  - [Command line](#command-line)
+  - [Docker container](#docker-container)
+- [Core concepts](#core-concepts)
+  - [Backup names](#backup-names)
+  - [Storage destinations](#storage-destinations)
+  - [Retention policies](#retention-policies)
+  - [Including and excluding files](#including-and-excluding-files)
+- [Configuration reference](#configuration-reference)
+- [Environment variables](#environment-variables)
+- [Contributing](#contributing)
 
 ## Installation
 
-**Note:** ezbak requires Python 3.11 or higher.
+ezbak requires Python 3.11 or higher.
 
-### Python Package
+Install the package for use in your own code:
 
 ```bash
-# with uv
-uv add ezbak
-
-# with pip
-pip install ezbak
+uv add ezbak      # with uv
+pip install ezbak # with pip
 ```
 
-### CLI Script
+Install the command-line tool on its own:
 
 ```bash
-# With uv
-uv tool install ezbak
-
-# With pip
-python -m pip install --user ezbak
+uv tool install ezbak                  # with uv
+python -m pip install --user ezbak     # with pip
 ```
 
 ## Usage
 
-ezbak can be used as a python package, cli script, or docker container.
+### Python package
 
-### Python Package
-
-ezbak is primarily designed to be used as a Python package in your projects:
+Build a `BackupConfig` to describe what to back up and where, then pass it to `EZBak`:
 
 ```python
 from pathlib import Path
-from ezbak import ezbak
+from ezbak import EZBak, BackupConfig
 
-# Initialize backup manager with retention policy
-backup_manager = ezbak(
-    name="my-backup",
-    source_paths=[Path("/path/to/source")],
-    storage_paths=[Path("/path/to/destination")],
-    # Keep: 1 yearly, 12 monthly, 4 weekly, 7 daily, 24 hourly, 60 minutely
-    retention_yearly=1,
-    retention_monthly=12,
-    retention_weekly=4,
-    retention_daily=7,
-    retention_hourly=24,
-    retention_minutely=60,
+backups = EZBak(
+    BackupConfig(
+        name="my-backup",
+        source_paths=[Path("/path/to/source")],
+        storage_paths=[Path("/path/to/destination")],
+        # Keep 1 yearly, 12 monthly, 4 weekly, 7 daily, 24 hourly, 60 minutely
+        retention_yearly=1,
+        retention_monthly=12,
+        retention_weekly=4,
+        retention_daily=7,
+        retention_hourly=24,
+        retention_minutely=60,
+    )
 )
 
-# Create a backup
-backup_files = backup_manager.create_backup()
-backups = backup_manager.list_backups()
-print([x.name for x in backups])
-backup_manager.prune_backups()
-
-# Restore latest backup (with optional cleanup)
-backup_manager.restore_backup(
-    destination=Path("/path/to/restore_location"),
-)
-```
-
-### CLI Script
-
-```bash
-# Get help for any command
-ezbak --help
-ezbak create --help
-
-# Create a backup
-ezbak create --name my-documents \
-    --source ~/Documents \
-    --storage ~/path/to/backup/storage \
-
-# List all backups for a specific backup name
-ezbak list --name my-documents --storage ~/Backups
-
-# Clean up old backups (keep only 10 most recent)
-ezbak prune --name my-documents \
-    --storage ~/path/to/backup/storage \
-    --max-backups 10
+backups.create_backup()
+print([backup.name for backup in backups.list_backups()])
+backups.prune_backups()
 
 # Restore the latest backup
-ezbak restore --name my-documents \
-    --storage ~/path/to/backup/storage \
-    --destination ~/path/to/restore_location \
-
+backups.restore_backup(restore_path=Path("/path/to/restore_location"))
 ```
 
-### Docker Container
+For quick scripts, `ezbak(**kwargs)` is a shortcut that builds the `BackupConfig` for you. These two calls are equivalent:
+
+```python
+from ezbak import EZBak, BackupConfig, ezbak
+
+backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backups"])
+backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_paths=["/backups"]))
+```
+
+An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, `rename_backups()`, and `get_latest_backup()`.
+
+### Command line
+
+The `name` and `storage` options are global and come before the subcommand. Run `ezbak --help` or `ezbak create --help` to see every option.
 
 ```bash
-# Create a backup using Docker and keep the most recent 7 backups
+# Create a backup
+ezbak --name my-documents --storage ~/Backups create --source ~/Documents
+
+# List backups
+ezbak --name my-documents --storage ~/Backups list
+
+# Prune old backups, keeping the 10 most recent
+ezbak --name my-documents --storage ~/Backups prune --max-backups 10
+
+# Restore the latest backup
+ezbak --name my-documents --storage ~/Backups restore --destination ~/restore
+```
+
+To back up to S3 from the command line, pass `--s3-bucket` and provide credentials through the `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` environment variables:
+
+```bash
+export EZBAK_AWS_ACCESS_KEY="your-access-key"
+export EZBAK_AWS_SECRET_KEY="your-secret-key"
+
+ezbak --name my-documents --storage ~/Backups --s3-bucket my-bucket create --source ~/Documents
+```
+
+### Docker container
+
+The container reads its configuration from `EZBAK_`-prefixed environment variables.
+
+```bash
+# Create a backup and keep the 7 most recent
 docker run -it \
     -v /path/to/source:/source:ro \
     -v /path/to/backups:/backups \
@@ -150,252 +150,178 @@ docker run -d \
     -e TZ=America/New_York \
     ghcr.io/natelandau/ezbak:latest
 
-# Restore a backup
+# Restore the latest backup
 docker run -it \
     -v /path/to/backups:/backups:ro \
     -v /path/to/restore:/restore \
     -e EZBAK_ACTION=restore \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_DESTINATION=/restore \
+    -e EZBAK_RESTORE_PATH=/restore \
     ghcr.io/natelandau/ezbak:latest
 ```
 
-## Core Concepts
+## Core concepts
 
-Key concepts and configuration options for ezbak.
+### Backup names
 
-### Backup Names
+Every backup needs a name that identifies it in logs and groups its files. ezbak adds a timestamp and a period label automatically.
 
-Each backup needs a unique name to identify it in logs and organize backup files. ezbak automatically adds timestamps and labels.
+The filename format is `{name}-{timestamp}-{period_label}.tgz`, for example:
 
-**Filename Format:** `{name}-{timestamp}-{period_label}.tgz`
+- `my-documents-20241215T143022-daily.tgz`
+- `database-backup-20241215T020000-weekly.tgz`
 
-**Examples:**
+A few details worth knowing:
 
--   `my-documents-20241215T143022-daily.tgz`
--   `database-backup-20241215T020000-weekly.tgz`
+- Multiple backup sets can share one storage location, because each set matches only its own name.
+- Timestamps use the format `YYYYMMDDTHHMMSS`.
+- Period labels are optional. Set `label_time_units=False` to omit them.
+- A duplicate name gets a short unique suffix so files never overwrite each other.
 
-**Key Points:**
+To rename existing files after changing the labeling option, call `rename_backups()` or set `rename_files=True` for the container.
 
--   Multiple backup sets can share the same storage location
--   Timestamps use ISO 8601 format: `YYYYMMDDTHHMMSS`
--   Period labels (daily, weekly, etc.) can be disabled with `label_time_units=False`
--   Duplicate names get a UUID suffix to prevent conflicts
+### Storage destinations
 
-If desired, you can rename the backup files using the `rename_files` option. This will ensure the naming is consistent across backups.
+ezbak sends each backup to whatever destinations you configure. There is no separate storage-type setting: the destinations you provide decide where backups go.
 
-### Retention Policies
+- Set `storage_paths` to back up to one or more local directories.
+- Set `aws_s3_bucket_name` (with `aws_access_key` and `aws_secret_key`) to back up to S3.
+- Set both to write every backup to local storage and S3 at the same time.
 
-Control how many backups to keep with two approaches. **Note**: You can't use both methods together. If you set max_backups, time-based retention is ignored.
+At least one destination is required.
 
-#### Simple Count-Based Retention
+### Retention policies
+
+ezbak keeps backups with one of two policies. You cannot combine them: if you set `max_backups`, the time-based options are ignored.
+
+Count-based retention keeps a fixed number of the most recent backups:
 
 ```python
-# Keep only the 10 most recent backups
-backup_manager = ezbak(
-    name="my-backup",
-    source_paths=[Path("/path/to/source")],
-    storage_paths=[Path("/path/to/destination")],
-    max_backups=10
+EZBak(
+    BackupConfig(
+        name="my-backup",
+        source_paths=[Path("/path/to/source")],
+        storage_paths=[Path("/path/to/destination")],
+        max_backups=10,
+    )
 )
 ```
 
-#### Time-Based Retention (Recommended)
+Time-based retention keeps different amounts for different periods. Any period you leave unset keeps 1 backup:
 
 ```python
-# Keep different numbers of backups for different time periods
-# Unspecified time periods (hourly, minutely) default to keeping 1 backup each
-backup_manager = ezbak(
-    name="my-backup",
-    source_paths=[Path("/path/to/source")],
-    storage_paths=[Path("/path/to/destination")],
-    retention_daily=7,    # Keep 7 daily backups
-    retention_weekly=4,   # Keep 4 weekly backups
-    retention_monthly=12, # Keep 12 monthly backups
-    retention_yearly=3    # Keep 3 yearly backups
+EZBak(
+    BackupConfig(
+        name="my-backup",
+        source_paths=[Path("/path/to/source")],
+        storage_paths=[Path("/path/to/destination")],
+        retention_daily=7,
+        retention_weekly=4,
+        retention_monthly=12,
+        retention_yearly=3,
+    )
 )
 ```
 
-### Including and Excluding Files
+### Including and excluding files
 
-By default, all files in your source paths are backed up, except for these automatically excluded files:
+By default ezbak backs up every file in your source paths, apart from these always-excluded names: `.DS_Store`, `@eaDir`, `.Trashes`, `__pycache__`, `Thumbs.db`, and `IconCache.db`.
 
--   `.DS_Store`
--   `@eaDir`
--   `.Trashes`
--   `__pycache__`
--   `Thumbs.db`
--   `IconCache.db`
+Narrow the selection with regex patterns:
 
-#### Include by Regex
-
-When set, only files matching the regex pattern will be included in the backup.
-
-#### Exclude by Regex
-
-When set, files matching the regex pattern will be excluded from the backup.
-
-## Common Use Cases
-
-### Daily Document Backup
+- `include_regex` backs up only files whose path matches the pattern.
+- `exclude_regex` skips files whose path matches the pattern.
 
 ```python
-from pathlib import Path
-from ezbak import ezbak
-
-backup_manager = ezbak(
-    name="documents",
-    source_paths=[Path("~/Documents"), Path("~/Pictures")],
-    storage_paths=[Path("~/Backups")],
-    retention_daily=30,  # Keep 30 days of daily backups
-    retention_monthly=12  # Keep 12 monthly backups
-)
-backup_manager.create_backup()
-```
-
-### Selective File Backup
-
-```python
-backup_manager = ezbak(
-    name="logs",
-    source_paths=[Path("/var/log")],
-    storage_paths=[Path("/backups")],
-    include_regex=r"\.log$",  # Only .log files
-    exclude_regex=r"debug",   # Exclude debug logs
-    max_backups=10
+EZBak(
+    BackupConfig(
+        name="logs",
+        source_paths=[Path("/var/log")],
+        storage_paths=[Path("/backups")],
+        include_regex=r"\.log$",   # only .log files
+        exclude_regex=r"debug",    # skip anything matching "debug"
+        max_backups=10,
+    )
 )
 ```
 
-### Database Backup with Pre/Post Scripts
+## Configuration reference
+
+`BackupConfig` accepts the following options. The same names work as `EZBAK_`-prefixed environment variables for the container.
+
+Storage and sources:
 
 ```python
-import subprocess
-from pathlib import Path
-from ezbak import ezbak
-
-# Dump database before backup
-subprocess.run(["pg_dump", "-f", "/tmp/db_backup.sql", "mydb"])
-
-backup_manager = ezbak(
-    name="database",
-    source_paths=[Path("/tmp/db_backup.sql")],
-    storage_paths=[Path("/backups/database")],
-    retention_hourly=24,  # Keep 24 hourly backups
-    retention_daily=7,
-    retention_weekly=4
-)
-
-backup_manager.create_backup()
-
-# Cleanup temp file
-Path("/tmp/db_backup.sql").unlink()
+name="my-backup"                     # Identifier for this backup set (required)
+source_paths=[Path("/path/to/src")]  # Files or directories to back up
+storage_paths=[Path("/backups")]     # Local destination directories
+aws_s3_bucket_name="my-bucket"       # S3 bucket to back up to
+aws_s3_bucket_path="prefix/path"     # Optional prefix within the bucket
+aws_access_key="your-access-key"     # S3 credentials
+aws_secret_key="your-secret-key"
 ```
 
-## Configuration the ezbak instance
-
-The ezbak instance is the main class that manages the backup process. It is initialized with a set of settings that control the backup process.
-
-### Core Settings
+Retention (choose count-based or time-based):
 
 ```python
-backup_manager = ezbak(
-    name="my-backup",                    # Backup identifier
-    source_paths=[Path("/path/to/src")], # What to backup
-    storage_paths=[Path("/backups")],    # Where to store backups
-    storage_type="local",                # Optional: Where to store backups.
-                                         # One of "local", "aws", or "all" (default: "local")
-)
+max_backups=10          # Count-based: keep the 10 most recent
+
+retention_yearly=3      # Time-based: keep this many of each period
+retention_monthly=12
+retention_weekly=4
+retention_daily=7
+retention_hourly=24
+retention_minutely=60
 ```
 
-### Retention Settings
+Backup behavior:
 
 ```python
-# Option 1: Keep a maximum number of backups
-max_backups=10
-
-# Option 2: Time-based retention (recommended)
-retention_daily=7,      # Keep 7 daily backups
-retention_weekly=4,     # Keep 4 weekly backups
-retention_monthly=12,   # Keep 12 monthly backups
-retention_yearly=3,     # Keep 3 yearly backups
-retention_hourly=24,    # Keep 24 hourly backups
-retention_minutely=60,  # Keep 60 minutely backups
+compression_level=9           # gzip level, 1 to 9 (default: 9)
+label_time_units=True         # Add period labels to filenames (default: True)
+rename_files=False            # Rename existing files to match the labeling (default: False)
+strip_source_paths=False      # Flatten directory sources in the archive
+delete_src_after_backup=False # Delete sources after a successful backup
+include_regex=r"\.txt$"       # Only back up files matching this pattern
+exclude_regex=r"temp|cache"   # Skip files matching this pattern
 ```
 
-### File Filtering
+Restore:
 
 ```python
-include_regex=r"\.txt$",     # Optional: Only include .txt files
-exclude_regex=r"temp|cache", # Optional: Exclude temp and cache files
+restore_path=Path("/restore")  # Where to restore (or pass it to restore_backup())
+clean_before_restore=True      # Empty the restore path first
+chown_uid=1000                 # Set owner on restored files
+chown_gid=1000                 # Set group on restored files
 ```
 
-### Backup Options
+Logging:
 
 ```python
-compression_level=9,             # Compression level (1-9, default: 9)
-label_time_units=True,           # Include time labels in filenames (default: True)
-rename_files=False,              # Rename existing files (default: False)
-strip_source_paths=False,        # Optional: Strip source paths from directory sources to flatten
-                                 #            the tarfile (e.g. /source/foo.txt -> foo.txt)
-delete_src_after_backup=False,   # Optional: Delete source paths after backup.
+log_level="INFO"                     # TRACE, DEBUG, INFO, WARNING, or ERROR (default: INFO)
+log_file=Path("/var/log/ezbak.log")  # Also write logs to this file
+log_prefix="BACKUP"                  # Prefix added to every log line
 ```
 
-### Restore Options
+## Environment variables
 
-```python
-restore_path=Path("/restore"),           # Optional: Where to restore files.
-                                         #           Can be an arg to ezbak.restore_backup()
-clean_before_restore=True,               # Optional: Clear destination first
-chown_uid=1000,                          # Optional: Set file owner of all restored files
-chown_gid=1000,                          # Optional: Set file group of all restored files
-```
-
-### Logging
-
-```python
-log_level="INFO",                       # One of: TRACE, DEBUG, INFO, WARNING, ERROR. (default: INFO)
-log_file=Path("/var/log/ezbak.log"),    # Optional: Log file path.
-                                        #           If not set, logs are only printed to stderr
-log_prefix="BACKUP",                    # Optional: Log message prefix added to all log messages
-```
-
-### AWS S3 Configuration
-
-```python
-aws_access_key="your-access-key",
-aws_secret_key="your-secret-key",
-aws_s3_bucket_name="your-bucket-name",
-aws_s3_bucket_path="your-bucket-path", # Optional: Path within the bucket
-```
-
-## Use environment variables for Docker
-
-All options specified above can be set via environment variables for use in Docker by adding the `EZBAK_` prefix. For example:
+The container, and the credential fallback for the CLI, read every option from environment variables with the `EZBAK_` prefix. For example, `source_paths` becomes `EZBAK_SOURCE_PATHS`.
 
 ```bash
 export EZBAK_NAME="my-backup"
 export EZBAK_SOURCE_PATHS="/path/to/source"
 export EZBAK_STORAGE_PATHS="/path/to/backups"
 export EZBAK_RETENTION_DAILY=7
-# etc.
 ```
 
-### Docker-Only Options
+Some options apply only when running the container:
 
 ```bash
-EZBAK_ACTION=backup           # Action: backup or restore
+EZBAK_ACTION=backup           # backup or restore
 EZBAK_CRON="0 2 * * *"        # Cron schedule (daily at 2 AM)
-EZBAK_TZ="America/New_York"   # Timezone for timestamps
-```
-
-## CLI Configurations
-
-Most options have CLI equivalents. Use --help for details:
-
-```bash
-ezbak create --help     # See all create options
-ezbak restore --help    # See all restore options
+EZBAK_RESTORE_PATH=/restore   # Where a restore writes files
+TZ="America/New_York"         # Timezone for backup timestamps
 ```
 
 ## Contributing

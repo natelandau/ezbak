@@ -1,3 +1,25 @@
+## Unreleased
+
+### BREAKING CHANGES
+
+- The primary library API is now `EZBak(BackupConfig(...))`. Build a typed `BackupConfig` and pass it to `EZBak`. The `ezbak(**kwargs)` factory still works as a shortcut for quick scripts.
+- The `storage_type` option is removed. Destinations now decide where backups go: set `storage_paths` for local storage, `aws_s3_bucket_name` for S3, or both for both.
+- The `EZBakApp` class and the `ezbak.entrypoint` module are gone. Import `EZBak` from `ezbak`, and run the container with `python -m ezbak.container`.
+
+### Feat
+
+- **cli**: back up to S3 with the `--s3-bucket` flag (credentials come from `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY`)
+
+### Refactor
+
+- restructure the package around one config schema, one core class, and thin CLI and container adapters
+- flatten the package layout and move the container entrypoint to `ezbak.container`
+
+### Fix
+
+- **config**: apply the default storage backend when no storage type is set
+- **storage**: count only confirmed deletions when pruning, and raise a clear error for an unconfigured backend
+
 ## v0.12.4 (2026-06-24)
 
 ### Fix
