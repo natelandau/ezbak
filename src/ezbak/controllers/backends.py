@@ -10,10 +10,10 @@ from typing import ClassVar
 from loguru import logger
 from nclutils.fs import copy_file, find_files
 
+from ezbak.config import BackupConfig
 from ezbak.constants import BACKUP_EXTENSION, StorageType
 from ezbak.models import Backup, StorageLocation
 from ezbak.models.backup_name import new_staging_filename
-from ezbak.models.settings import Settings
 from ezbak.utils import validate_source_paths, validate_storage_paths
 
 from .aws import AWSService
@@ -24,11 +24,11 @@ class StorageBackend(ABC):
 
     storage_type: ClassVar[StorageType]
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: BackupConfig) -> None:
         """Store the settings shared by every storage operation.
 
         Args:
-            settings (Settings): The validated backup configuration.
+            settings (BackupConfig): The validated backup configuration.
         """
         self.settings = settings
 
@@ -211,11 +211,11 @@ class S3Backend(StorageBackend):
 
     storage_type = StorageType.AWS
 
-    def __init__(self, settings: Settings, *, aws_service: AWSService, tmp_dir: Path) -> None:
+    def __init__(self, settings: BackupConfig, *, aws_service: AWSService, tmp_dir: Path) -> None:
         """Store the S3 client and staging directory alongside the settings.
 
         Args:
-            settings (Settings): The validated backup configuration.
+            settings (BackupConfig): The validated backup configuration.
             aws_service (AWSService): The connected S3 client wrapper.
             tmp_dir (Path): The directory used to stage downloaded archives.
         """

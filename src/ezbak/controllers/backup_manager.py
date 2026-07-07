@@ -10,6 +10,7 @@ from typing import assert_never
 from loguru import logger
 from nclutils.fs import clean_directory
 
+from ezbak.config import BackupConfig
 from ezbak.constants import (
     RetentionPolicyType,
     StorageType,
@@ -21,7 +22,6 @@ from ezbak.models.backup_name import (
     new_staging_filename,
     parse_backup_name,
 )
-from ezbak.models.settings import Settings
 from ezbak.utils import chown_files, should_include_file, validate_source_paths
 
 from .aws import AWSService
@@ -43,7 +43,7 @@ class FileForRename:
 class BackupManager:
     """Manage and control backup operations for specified sources and storage_paths."""
 
-    def __init__(self, config: Settings) -> None:
+    def __init__(self, config: BackupConfig) -> None:
         """Initialize a backup manager to automate backup creation, management, and cleanup operations.
 
         Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.

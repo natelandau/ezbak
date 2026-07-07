@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from pydantic import ValidationError
 
+from ezbak.config import BackupConfig
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL
 from ezbak.controllers import BackupManager
-from ezbak.models.settings import Settings
 from ezbak.utils.log_config import instantiate_logger
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ def ezbak(  # noqa: PLR0913
 ) -> EZBakApp:
     """Create an `EZBakApp` configured for automated backups with retention and compression.
 
-    Validate inputs via `Settings`, wire logging, and return an application object that exposes high-level backup operations. Use as a convenience factory from scripts and CLIs.
+    Validate inputs via `BackupConfig`, wire logging, and return an application object that exposes high-level backup operations. Use as a convenience factory from scripts and CLIs.
 
     Args:
         name (str): Unique identifier for the backup set used for labeling and logging.
@@ -91,8 +91,7 @@ def ezbak(  # noqa: PLR0913
     settings_kwargs = {key: value for key, value in func_args.items() if value is not None}
 
     try:
-        # _env_file="" suppresses .env loading so explicit caller args aren't silently overridden
-        config = Settings(**settings_kwargs, _env_file="")  # type: ignore [call-arg]
+        config = BackupConfig(**settings_kwargs)
     except ValidationError as e:
         for error in e.errors():
             logger.error(error["msg"])
@@ -104,11 +103,11 @@ def ezbak(  # noqa: PLR0913
 class EZBakApp:
     """Expose high-level operations to create, list, prune, rename, and restore backups backed by `BackupManager`."""
 
-    def __init__(self, config: Settings) -> None:
-        """Initialize the application with validated `Settings` and prepare logging and the backup manager.
+    def __init__(self, config: BackupConfig) -> None:
+        """Initialize the application with a validated `BackupConfig` and prepare logging and the backup manager.
 
         Args:
-            config (Settings): Application settings. Prefer using `ezbak()` to construct a validated configuration.
+            config (BackupConfig): Application configuration. Prefer using `ezbak()` to construct a validated configuration.
         """
         self.settings = config
         instantiate_logger(

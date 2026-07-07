@@ -5,7 +5,7 @@ from pathlib import Path
 from ezbak.app import EZBakApp
 from ezbak.cli import EZBakCLI
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, LogLevel, StorageType
-from ezbak.models import Settings
+from ezbak.env import EnvConfig
 
 
 def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBakApp:
@@ -18,7 +18,7 @@ def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBakApp:
         EZBakApp: The EZBak app.
     """
     return EZBakApp(
-        Settings(  # type: ignore [call-arg]
+        EnvConfig(  # type: ignore [call-arg]
             name=ezbak_cli.name,
             storage_type=StorageType.LOCAL,
             source_paths=getattr(ezbak_cli.command, "sources", [Path.cwd()]),
