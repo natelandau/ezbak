@@ -62,8 +62,8 @@ class StorageBackend(ABC):
         """Store the staged archive under a freshly generated name and return its Backup."""
 
     @abstractmethod
-    def delete(self, backup: Backup) -> None:
-        """Delete a single backup."""
+    def delete(self, backup: Backup) -> bool:
+        """Delete a single backup and report whether it was confirmed removed."""
 
     @abstractmethod
     def delete_many(self, backups: list[Backup]) -> int:
@@ -141,11 +141,14 @@ class LocalBackend(StorageBackend):
             tz=self.settings.tz,
         )
 
-    def delete(self, backup: Backup) -> None:  # noqa: PLR6301
+    def delete(self, backup: Backup) -> bool:  # noqa: PLR6301
         """Unlink a local backup file, tolerating one already removed elsewhere.
 
         Args:
             backup (Backup): The backup whose file should be removed.
+
+        Returns:
+            bool: True if the file was unlinked, False if it was already gone.
         """
         # Catch instead of missing_ok so the whole job does not abort when another
         # process already pruned this file from a shared storage location. Catch the
@@ -168,6 +171,8 @@ class LocalBackend(StorageBackend):
                 )
             except OSError as check_error:
                 logger.debug(f"Post-failure check failed: {check_error}")
+            return False
+        return True
 
     def delete_many(self, backups: list[Backup]) -> int:
         """Delete each local backup individually.
@@ -176,12 +181,10 @@ class LocalBackend(StorageBackend):
             backups (list[Backup]): The backups to remove.
 
         Returns:
-            int: The number of backups attempted (a missing file is logged, not retried).
+            int: The number of backups confirmed removed.
         """
         logger.debug(f"Deleting {len(backups)} local backups")
-        for backup in backups:
-            self.delete(backup)
-        return len(backups)
+        return sum(self.delete(backup) for backup in backups)
 
     def prepare_for_restore(self, backup: Backup) -> Path | None:  # noqa: PLR6301
         """Return the on-disk path of a local backup.
@@ -277,14 +280,18 @@ class S3Backend(StorageBackend):
             storage_path=self.settings.aws_s3_bucket_path,
         )
 
-    def delete(self, backup: Backup) -> None:
+    def delete(self, backup: Backup) -> bool:
         """Delete a single object from the bucket.
 
         Args:
             backup (Backup): The backup whose object should be removed.
+
+        Returns:
+            bool: True once the delete request has been issued.
         """
         self.aws_service.delete_object(key=backup.name)
         logger.info(f"Deleted from S3: {backup.name}")
+        return True
 
     def delete_many(self, backups: list[Backup]) -> int:
         """Batch-delete objects from the bucket.

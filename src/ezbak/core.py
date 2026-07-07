@@ -214,6 +214,35 @@ class EZBak:
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile
 
+    def _backend_for_type(self, storage_type: StorageType) -> StorageBackend:
+        """Return the backend for a storage type, or fail with a clear message.
+
+        Args:
+            storage_type (StorageType): The storage type to route.
+
+        Returns:
+            StorageBackend: The matching backend.
+
+        Raises:
+            ValueError: If no configured backend handles the storage type.
+        """
+        backend = self._backend_by_type.get(storage_type)
+        if backend is None:
+            msg = f"No configured backend for storage type: {storage_type.value}"
+            raise ValueError(msg)
+        return backend
+
+    def _backend_for(self, backup: Backup) -> StorageBackend:
+        """Return the backend that owns a backup, or fail with a clear message.
+
+        Args:
+            backup (Backup): The backup to route.
+
+        Returns:
+            StorageBackend: The matching backend.
+        """
+        return self._backend_for_type(backup.storage_type)
+
     def _delete_backup(self, backup: Backup) -> None:
         """Delete a backup file from the storage locations.
 
@@ -222,7 +251,7 @@ class EZBak:
         Args:
             backup (Backup): The backup object containing information about the file to delete.
         """
-        self._backend_by_type[backup.storage_type].delete(backup)
+        self._backend_for(backup).delete(backup)
 
     def _do_restore(self, backup: Backup, destination: Path) -> bool:
         """Restore a backup file to the storage locations.
@@ -237,7 +266,7 @@ class EZBak:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
-        tarfile_path = self._backend_by_type[backup.storage_type].prepare_for_restore(backup)
+        tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
         if tarfile_path is None:
             return False
 
@@ -394,7 +423,7 @@ class EZBak:
         created_backups: list[Backup] = []
 
         for storage_location in self.storage_locations:
-            backend = self._backend_by_type[storage_location.storage_type]
+            backend = self._backend_for_type(storage_location.storage_type)
             created_backups.append(
                 backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
             )
@@ -509,9 +538,7 @@ class EZBak:
                     )
                     file.new_name = add_uid_suffix(file.new_name)
 
-                self._backend_by_type[file.backup.storage_type].rename(
-                    backup=file.backup, new_name=file.new_name
-                )
+                self._backend_for(file.backup).rename(backup=file.backup, new_name=file.new_name)
 
         renamed = [x for x in files_for_rename if x.do_rename]
         if len(renamed) > 0:

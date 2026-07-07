@@ -4,6 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from ezbak import ezbak
+from ezbak.constants import StorageType
+from ezbak.models import Backup
 
 
 def test_no_name(filesystem):
@@ -150,3 +152,32 @@ def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
     )
     with pytest.raises(ValueError, match="Invalid destination: None"):
         backup_manager.restore_backup(None)
+
+
+def test_delete_unmapped_backend_raises_clear_error(filesystem):
+    """Verify deleting a backup whose backend is not configured fails loudly."""
+    # Given an app with only a local backend
+    src, dest1, _ = filesystem
+    app = ezbak(name="t", source_paths=[src], storage_paths=[dest1])
+
+    # And a backup tagged for a backend that was never built
+    orphan = Backup(name="t-20200101T000000-daily.tgz", storage_type=StorageType.AWS)
+
+    # When attempting to delete it, then a clear error names the missing backend
+    with pytest.raises(ValueError, match="No configured backend for storage type: aws"):
+        app._delete_backup(orphan)
+
+
+def test_restore_backup_missing_local_storage_path(filesystem, tmp_path):
+    """Verify restoring with a missing local storage path fails gracefully and indexes it."""
+    # Given an app whose storage path does not exist on disk yet
+    src, dest1, _ = filesystem
+    missing_storage_path = dest1 / "not_yet_created"
+    app = ezbak(name="t", source_paths=[src], storage_paths=[missing_storage_path])
+
+    # When restoring to an existing directory
+    result = app.restore_backup(restore_path=tmp_path)
+
+    # Then no backup is found, but the storage path now exists (created during indexing)
+    assert result is False
+    assert missing_storage_path.exists()

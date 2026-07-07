@@ -184,3 +184,24 @@ def test_delete_objects(mocker, debug, capsys, tmp_path):
     assert "S3: Attempting to delete 2 objects" in output
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
     assert "S3: Failed to delete 'test-20240609T000000-yearly.tgz': 404 - Not Found" in output
+
+
+def test_both_backends_configured(filesystem):
+    """Verify an app with both local and S3 destinations builds one backend per type."""
+    # Given source and local destination directories plus S3 bucket settings
+    src_dir, dest1, _ = filesystem
+
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="test-access-key-id",
+        aws_secret_key="test-secret-access-key",
+    )
+
+    # When inspecting the derived backends
+    types = {b.storage_type for b in backup_manager.backends}
+
+    # Then both a local and an S3 backend exist
+    assert types == {StorageType.LOCAL, StorageType.AWS}

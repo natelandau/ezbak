@@ -557,12 +557,13 @@ def test_prune_missing_file(debug, capsys, tmp_path, mocker):
     # When: pruning runs with the phantom (oldest) targeted for deletion
     backup_manager.prune_backups()
 
-    # Then: the missing file is logged as such, the job completes, and real files remain
+    # Then: the missing file is logged as such, the job completes, and real files remain.
+    # The phantom was never actually removed, so it does not count toward the confirmed total.
     output = capsys.readouterr().err
     assert "Missing, not deleted:" in output
     assert phantom.name in output
     assert "Deleted:" not in output
-    assert "Pruned 1 backups" in output
+    assert "Pruned 0 backups" in output
     for filename in real_files:
         assert Path(tmp_path / filename).exists()
 
