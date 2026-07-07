@@ -184,7 +184,7 @@ class BackupConfig(BaseModel):
         return self._cached_retention_policy
 
     @model_validator(mode="after")
-    def validate_settings(self) -> Self:  # noqa: C901
+    def validate_settings(self) -> Self:
         """Validate that required settings are provided for backup operations.
 
         Returns:
@@ -197,29 +197,8 @@ class BackupConfig(BaseModel):
             msg = "No backup name provided"
             raise ValueError(msg)
 
-        if self.entrypoint_action == Action.BACKUP:
-            if not self.source_paths:
-                msg = "No source paths provided but are required for backup"
-                raise ValueError(msg)
-
-            for source in self.source_paths:
-                if not source.exists():
-                    msg = f"Source does not exist: {source}"
-                    raise ValueError(msg)
-
-            if self.storage_paths:
-                for destination in self.storage_paths:
-                    if not destination.exists():
-                        destination.mkdir(parents=True, exist_ok=True)
-
         if not self.storage_paths and not self.aws_s3_bucket_name:
             msg = "No destination configured: set storage_paths and/or aws_s3_bucket_name"
             raise ValueError(msg)
-
-        if self.storage_paths and self.entrypoint_action == Action.RESTORE:
-            for destination in self.storage_paths:
-                if not destination.exists():
-                    msg = f"Backup storage path does not exist: {destination}"
-                    raise ValueError(msg)
 
         return self

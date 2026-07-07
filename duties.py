@@ -208,5 +208,5 @@ def dev_setup(ctx: Context) -> None:  # noqa: ARG001
     pp.success(f".env file created in '{PROJECT_ROOT.name}/{env.name}'")
 
     pp.success(
-        "✓ Development environment setup complete.\n  Start the development environment with one of the following commands:\n    [green]docker compose up --build[/green]\n    [green]uv run -m ezbak.entrypoint[/green]"
+        "✓ Development environment setup complete.\n  Start the development environment with one of the following commands:\n    [green]docker compose up --build[/green]\n    [green]uv run -m ezbak.container[/green]"
     )
