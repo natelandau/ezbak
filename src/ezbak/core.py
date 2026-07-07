@@ -1,21 +1,24 @@
-"""Backup management controller."""
+"""Core EZBak class: create, list, prune, rename, and restore backups."""
 
+from __future__ import annotations
+
+import atexit
 import re
 import sys
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import assert_never
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, assert_never
 
 from loguru import logger
 from nclutils.fs import clean_directory
+from pydantic import ValidationError
 
 from ezbak.config import BackupConfig
-from ezbak.constants import (
-    RetentionPolicyType,
-    StorageType,
-)
-from ezbak.models import Backup, StorageLocation
+from ezbak.constants import RetentionPolicyType, StorageType
+from ezbak.controllers.aws import AWSService
+from ezbak.controllers.backends import LocalBackend, S3Backend, StorageBackend
 from ezbak.models.backup_name import (
     add_uid_suffix,
     build_backup_name,
@@ -23,9 +26,31 @@ from ezbak.models.backup_name import (
     parse_backup_name,
 )
 from ezbak.utils import chown_files, should_include_file, validate_source_paths
+from ezbak.utils.log_config import instantiate_logger
 
-from .aws import AWSService
-from .backends import LocalBackend, S3Backend, StorageBackend
+if TYPE_CHECKING:
+    from ezbak.models import Backup, StorageLocation
+
+
+def ezbak(**kwargs: object) -> EZBak:
+    """Build an ``EZBak`` from keyword options without importing ``BackupConfig``.
+
+    Convenience for quick scripts. Validates via ``BackupConfig`` and returns a ready core. Prefer ``EZBak(BackupConfig(...))`` when you want an explicit, reusable config object.
+
+    Returns:
+        EZBak: A configured backup core.
+
+    Raises:
+        ValidationError: If provided settings are invalid.
+    """
+    try:
+        config = BackupConfig(**kwargs)  # type: ignore[arg-type]
+    except ValidationError as e:
+        for error in e.errors():
+            logger.error(error["msg"])
+        raise
+
+    return EZBak(config)
 
 
 @dataclass
@@ -40,19 +65,29 @@ class FileForRename:
     do_rename: bool = False
 
 
-class BackupManager:
+class EZBak:
     """Manage and control backup operations for specified sources and storage_paths."""
 
     def __init__(self, config: BackupConfig) -> None:
-        """Initialize a backup manager to automate backup creation, management, and cleanup operations.
+        """Initialize the backup core with a validated `BackupConfig` and prepare logging, staging, and storage backends.
 
-        Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
+        Args:
+            config (BackupConfig): Application configuration. Prefer using `ezbak()` to construct a validated configuration.
         """
         self.settings = config
+        instantiate_logger(
+            log_level=self.settings.log_level,
+            log_file=self.settings.log_file,
+            prefix=self.settings.log_prefix,
+        )
+
         self.aws_service: AWSService | None = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
-        self.tmp_dir = Path(self.settings.tmp_dir.name)
+
+        self._tmp_dir_handle = TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp_dir_handle.name)
+        atexit.register(self._cleanup_tmp_dir)
 
         self.backends: list[StorageBackend] = []
         if self.settings.storage_type in {StorageType.LOCAL, StorageType.ALL}:
@@ -77,6 +112,10 @@ class BackupManager:
         self._backend_by_type: dict[StorageType, StorageBackend] = {
             backend.storage_type: backend for backend in self.backends
         }
+
+    def _cleanup_tmp_dir(self) -> None:
+        """Remove the staging directory created for this run."""
+        self._tmp_dir_handle.cleanup()
 
     @property
     def storage_locations(self) -> list[StorageLocation]:
@@ -486,24 +525,24 @@ class BackupManager:
             logger.info("No backups to rename")
 
     def restore_backup(
-        self, destination: Path | str | None = None, *, clean_before_restore: bool = False
+        self, restore_path: Path | str | None = None, *, clean_before_restore: bool = False
     ) -> bool:
-        """Extract and restore the most recent backup to a specified destination directory.
+        """Restore the latest or specified backup to `restore_path`.
 
         Decompress and extract the latest backup archive to recover files and directories to their original structure. Use this for disaster recovery, file restoration, or migrating backup contents to a new location.
 
         Args:
-            destination (Path | str | None, optional): The directory path where backup contents should be extracted and restored. If None, uses the configured restore path. Defaults to None.
-            clean_before_restore (bool): Whether to clean the restore path before restoring. Defaults to False.
+            restore_path (Path | str | None): Target directory to restore into. When None, restore the latest backup to its original path or default target. Defaults to None.
+            clean_before_restore (bool): Remove existing contents at the target before restoring. Defaults to False.
 
         Returns:
-            bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
+            bool: True when a backup is successfully restored; otherwise False.
 
         Raises:
             ValueError: If the destination is not provided and no restore directory is configured.
             ValueError: If the destination does not exist or is not a directory.
         """
-        destination = destination or self.settings.restore_path
+        destination = restore_path or self.settings.restore_path
 
         try:
             dest = Path(destination).expanduser().absolute()

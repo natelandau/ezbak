@@ -1,14 +1,18 @@
 """Test EZBak errors."""
 
 import pytest
+from pydantic import ValidationError
 
 from ezbak import ezbak
 
 
 def test_no_name(filesystem):
-    """Test EZBak errors."""
+    """Verify building an EZBak without a name is rejected."""
+    # Given source and destination directories
     src_dir, dest1, _ = filesystem
-    with pytest.raises(TypeError, match="required positional argument"):
+
+    # When building without a name, then a validation error is raised
+    with pytest.raises(ValidationError, match="No backup name provided"):
         ezbak(
             # name="test",
             source_paths=[src_dir],

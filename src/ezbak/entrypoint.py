@@ -6,12 +6,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
-from ezbak.app import EZBakApp
 from ezbak.constants import Action, __version__
+from ezbak.core import EZBak
 from ezbak.models import Settings
 
 
-def do_backup(app: EZBakApp, scheduler: BackgroundScheduler | None = None) -> None:
+def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
     """Create a backup of the service data directory and manage retention.
 
     Performs a complete backup operation including creating the backup, pruning old backups based on retention policy, and optionally renaming backup files for better organization.
@@ -28,7 +28,7 @@ def do_backup(app: EZBakApp, scheduler: BackgroundScheduler | None = None) -> No
             logger.info(f"Next scheduled run: {job.next_run_time}")
 
 
-def do_restore(app: EZBakApp, scheduler: BackgroundScheduler | None = None) -> None:
+def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
     """Restore a backup of the service data directory from the specified path.
 
     Restores data from a previously created backup to recover from data loss or system failures. Requires RESTORE_DIR environment variable to be set.
@@ -41,7 +41,7 @@ def do_restore(app: EZBakApp, scheduler: BackgroundScheduler | None = None) -> N
             logger.info(f"Next scheduled run: {job.next_run_time}")
 
 
-def log_debug_info(app: EZBakApp) -> None:
+def log_debug_info(app: EZBak) -> None:
     """Log debug information about the configuration."""
     logger.debug(f"ezbak v{__version__}")
 
@@ -60,7 +60,7 @@ def main() -> None:
 
     Sets up logging, validates configuration settings, and either runs a one-time backup/restore operation or starts a scheduled backup service based on cron configuration.
     """
-    app = EZBakApp(config=Settings())
+    app = EZBak(config=Settings())
 
     log_debug_info(app)
 

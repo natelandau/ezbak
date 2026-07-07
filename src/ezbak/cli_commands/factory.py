@@ -2,22 +2,22 @@
 
 from pathlib import Path
 
-from ezbak.app import EZBakApp
 from ezbak.cli import EZBakCLI
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, LogLevel, StorageType
+from ezbak.core import EZBak
 from ezbak.env import EnvConfig
 
 
-def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBakApp:
+def get_app_for_cli(ezbak_cli: EZBakCLI) -> EZBak:
     """Get the EZBak app.
 
     Args:
         ezbak_cli (EZBakCLI): The EZBak CLI.
 
     Returns:
-        EZBakApp: The EZBak app.
+        EZBak: The EZBak app.
     """
-    return EZBakApp(
+    return EZBak(
         EnvConfig(  # type: ignore [call-arg]
             name=ezbak_cli.name,
             storage_type=StorageType.LOCAL,

@@ -137,7 +137,7 @@ def test_delete_object(mocker, debug, capsys, tmp_path):
     )
 
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
-    backup_manager.backup_manager._delete_backup(backup)
+    backup_manager._delete_backup(backup)
     output = capsys.readouterr().err
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output

@@ -5,10 +5,8 @@ Single source of truth for every ezbak option. Library callers construct this di
 
 from __future__ import annotations
 
-import atexit
 from enum import Enum
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Annotated, Self, TypeVar, cast
 
 from pydantic import BaseModel, BeforeValidator, Field, PrivateAttr, model_validator
@@ -149,7 +147,6 @@ class BackupConfig(BaseModel):
     aws_secret_key: str | None = None
 
     _cached_retention_policy: RetentionPolicyManager | None = PrivateAttr(default=None)
-    _cached_tmp_dir: TemporaryDirectory | None = PrivateAttr(default=None)
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
@@ -194,14 +191,6 @@ class BackupConfig(BaseModel):
 
         return self._cached_retention_policy
 
-    @property
-    def tmp_dir(self) -> TemporaryDirectory:
-        """Temporary directory used for staging backups."""
-        if self._cached_tmp_dir is None:
-            self._cached_tmp_dir = TemporaryDirectory()
-            atexit.register(self.cleanup_tmp_dir)
-        return self._cached_tmp_dir
-
     @model_validator(mode="after")
     def validate_settings(self) -> Self:  # noqa: C901
         """Validate that required settings are provided for backup operations.
@@ -242,9 +231,3 @@ class BackupConfig(BaseModel):
                     raise ValueError(msg)
 
         return self
-
-    def cleanup_tmp_dir(self) -> None:
-        """Clean up the temporary directory."""
-        if self._cached_tmp_dir:
-            self._cached_tmp_dir.cleanup()
-            self._cached_tmp_dir = None
