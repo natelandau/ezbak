@@ -486,7 +486,7 @@ class EZBak:
         Delete excess backup files while preserving the most important backups based on the retention policy configuration. Use this to automatically clean up old backups and prevent unlimited storage growth while maintaining appropriate historical coverage.
 
         Returns:
-            list[Backup]: A list of backup objects that were successfully deleted during the pruning operation.
+            list[Backup]: A list of backup objects targeted for deletion by the retention policy.
         """
         logger.trace("Pruning backups")
         backups_to_delete = self._identify_backups_to_delete()

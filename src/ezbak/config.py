@@ -18,11 +18,10 @@ from ezbak.constants import (
     LogLevel,
     RetentionPolicyType,
 )
+from ezbak.retention import RetentionPolicyManager
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from ezbak.retention import RetentionPolicyManager
 
 E = TypeVar("E", bound=Enum)
 
@@ -142,9 +141,6 @@ class BackupConfig(BaseModel):
         """Retention policy manager for this backup configuration."""
         if self._cached_retention_policy:
             return self._cached_retention_policy
-
-        # Local import: avoids a circular import with ezbak.retention (see the module docstring note).
-        from ezbak.retention import RetentionPolicyManager  # noqa: PLC0415
 
         if self.max_backups is not None:
             policy_type = RetentionPolicyType.COUNT_BASED

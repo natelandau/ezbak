@@ -3,8 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
-from ezbak import ezbak
+from ezbak import EZBak, ezbak
 from ezbak.backup import Backup
+from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
 
 
@@ -181,3 +182,16 @@ def test_restore_backup_missing_local_storage_path(filesystem, tmp_path):
     # Then no backup is found, but the storage path now exists (created during indexing)
     assert result is False
     assert missing_storage_path.exists()
+
+
+def test_list_and_restore_without_source_paths(filesystem, tmp_path):
+    """Verify listing and restoring do not require source paths."""
+    # Given an app configured with no source paths (e.g. a container restore)
+    _, dest1, _ = filesystem
+    app = EZBak(BackupConfig(name="t", storage_paths=[dest1]))
+
+    # When listing backups, then no error is raised for the missing source paths
+    assert app.list_backups() == []
+
+    # When restoring, then no backup is found and no "No source paths provided" error is raised
+    assert app.restore_backup(restore_path=tmp_path) is False

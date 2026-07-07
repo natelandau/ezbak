@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+# Runtime import (not TYPE_CHECKING-only): cappa resolves annotations via get_type_hints
+# at collection time, which needs Path in the module namespace.
+from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Annotated, Any
 
 import cappa
@@ -334,7 +336,6 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         }
     elif isinstance(cmd, RestoreCommand):
         extra = {
-            "source_paths": [Path.cwd()],
             "restore_path": cmd.destination,
             "clean_before_restore": cmd.clean,
             "chown_uid": cmd.uid,
@@ -342,7 +343,6 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         }
     elif isinstance(cmd, PruneCommand):
         extra = {
-            "source_paths": [Path.cwd()],
             "max_backups": cmd.max_backups,
             "retention_yearly": cmd.yearly,
             "retention_monthly": cmd.monthly,
@@ -352,7 +352,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "retention_minutely": cmd.minutely,
         }
     else:  # ListCommand and any other read-only command
-        extra = {"source_paths": [Path.cwd()]}
+        extra = {}
 
     return EnvConfig(**common, **extra, _env_file=None)  # type: ignore[call-arg]
 

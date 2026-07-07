@@ -7,7 +7,7 @@ from nclutils.fs import copy_file, find_files
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.constants import BACKUP_EXTENSION, StorageType
-from ezbak.filters import validate_source_paths, validate_storage_paths
+from ezbak.filters import validate_storage_paths
 from ezbak.storage.base import StorageBackend
 
 
@@ -22,7 +22,6 @@ class LocalBackend(StorageBackend):
         Returns:
             list[StorageLocation]: One storage location per configured storage path.
         """
-        validate_source_paths(source_paths=self.settings.source_paths)
         validate_storage_paths(storage_paths=self.settings.storage_paths, create_if_missing=True)
 
         locations: list[StorageLocation] = []
