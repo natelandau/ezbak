@@ -1,6 +1,6 @@
 """Typed backup configuration schema for ezbak.
 
-Single source of truth for every ezbak option. Library callers construct this directly; the CLI and container adapters build the same object. Carries no environment-loading behavior, so importing or constructing it never reads ``.env``.
+Single source of truth for every ezbak option. Library callers construct this directly and never trigger environment loading. The CLI and container adapters build ``EnvConfig`` (a subclass in ``ezbak.env``), which populates these same fields from ``EZBAK_``-prefixed environment variables and ``.env`` files.
 """
 
 from __future__ import annotations
@@ -152,11 +152,11 @@ class BackupConfig(BaseModel):
     @property
     def retention_policy(self) -> RetentionPolicyManager:
         """Retention policy manager for this backup configuration."""
-        # Local import: avoids a circular import with ezbak.models (see the module docstring note).
-        from ezbak.models.retention_policy import RetentionPolicyManager  # noqa: PLC0415
-
         if self._cached_retention_policy:
             return self._cached_retention_policy
+
+        # Local import: avoids a circular import with ezbak.models (see the module docstring note).
+        from ezbak.models.retention_policy import RetentionPolicyManager  # noqa: PLC0415
 
         if self.max_backups is not None:
             policy_type = RetentionPolicyType.COUNT_BASED
