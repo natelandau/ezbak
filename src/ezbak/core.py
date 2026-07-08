@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import shutil
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp  # noqa: F401
 from typing import TYPE_CHECKING, Literal, assert_never
 
 from loguru import logger
@@ -64,6 +65,34 @@ def ezbak(**kwargs: object) -> EZBak:
         raise
 
     return EZBak(config)
+
+
+def _merge_move(src: Path, dst: Path) -> None:
+    """Move every entry from `src` into `dst`, overwriting collisions.
+
+    Recurse into directories that exist on both sides so an overlay restore keeps
+    non-colliding files already in `dst`. Both paths must be on the same
+    filesystem, so each move is a metadata-only rename and stays cheap even for
+    multi-gigabyte restores.
+    """
+    for entry in src.iterdir():
+        target = dst / entry.name
+        if (
+            entry.is_dir()
+            and not entry.is_symlink()
+            and target.is_dir()
+            and not target.is_symlink()
+        ):
+            _merge_move(entry, target)
+            entry.rmdir()  # emptied by the recursive move above
+        else:
+            # rename() cannot overwrite a directory or (portably) an existing
+            # file, so clear the target first.
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            elif target.exists() or target.is_symlink():
+                target.unlink()
+            entry.rename(target)
 
 
 class EZBak:

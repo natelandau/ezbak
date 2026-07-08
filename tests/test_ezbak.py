@@ -3,12 +3,14 @@
 import shutil
 from datetime import datetime
 from pathlib import Path
+from tempfile import mkdtemp  # noqa: F401
 from zoneinfo import ZoneInfo
 
 import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_DATE_FORMAT
+from ezbak.core import _merge_move
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -514,3 +516,32 @@ def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
     assert len(list(src_dir.iterdir())) == 0
     assert "Deleted source: " in output
     assert not test_file.exists()
+
+
+def test_merge_move_overlays_and_overwrites(tmp_path):
+    """Verify _merge_move keeps non-colliding files, overwrites collisions, merges nested dirs."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    # Existing destination tree
+    (dst / "keep.txt").write_text("old-keep")
+    (dst / "shared.txt").write_text("old-shared")
+    (dst / "sub").mkdir()
+    (dst / "sub" / "existing.txt").write_text("old-existing")
+
+    # Staged tree to move in
+    (src / "new.txt").write_text("new")
+    (src / "shared.txt").write_text("new-shared")
+    (src / "sub").mkdir()
+    (src / "sub" / "added.txt").write_text("added")
+
+    _merge_move(src, dst)
+
+    assert (dst / "keep.txt").read_text() == "old-keep"  # non-colliding survives
+    assert (dst / "shared.txt").read_text() == "new-shared"  # collision overwritten
+    assert (dst / "new.txt").read_text() == "new"  # new moved in
+    assert (dst / "sub" / "existing.txt").read_text() == "old-existing"  # nested survives
+    assert (dst / "sub" / "added.txt").read_text() == "added"  # nested merged
+    assert not any(src.iterdir())  # staging emptied
