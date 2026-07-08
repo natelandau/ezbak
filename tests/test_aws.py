@@ -20,7 +20,7 @@ frozen_time_str = frozen_time.strftime(DEFAULT_DATE_FORMAT)
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
-@pytest.fixture(autouse=True)  # noqa: RUF076
+@pytest.fixture(autouse=True)
 def mock_aws_client(mocker) -> None:
     """Mock AWS credentials."""
     mock_paginator = mocker.MagicMock()

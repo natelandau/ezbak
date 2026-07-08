@@ -36,7 +36,7 @@ def filesystem(tmp_path: Path) -> tuple[Path, Path, Path]:
     return src_dir, dest1, dest2
 
 
-@pytest.fixture(autouse=True)  # noqa: RUF076
+@pytest.fixture(autouse=True)
 def mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock environment variables for testing."""
     for k in os.environ:
@@ -46,7 +46,7 @@ def mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EZBAK_TZ", "Etc/UTC")
 
 
-@pytest.fixture(autouse=True)  # noqa: RUF076
+@pytest.fixture(autouse=True)
 def reset_logger() -> Generator[None, None, None]:
     """Reset logger handlers between tests to prevent closed file handle issues.
 

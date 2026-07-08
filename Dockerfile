@@ -3,7 +3,7 @@
 # ============================================================
 # Stage 1: Builder - resolve and install Python dependencies
 # ============================================================
-FROM ghcr.io/astral-sh/uv:0.11.23-python3.13-trixie-slim AS builder
+FROM ghcr.io/astral-sh/uv:0.11.27-python3.13-trixie-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
