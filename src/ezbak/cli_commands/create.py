@@ -7,18 +7,18 @@ from loguru import logger
 
 from ezbak.cli import EZBakCLI, build_config
 from ezbak.core import EZBak
-from ezbak.exceptions import BackupFailedError
+from ezbak.exceptions import EZBakError
 
 
 def main(cmd: EZBakCLI) -> None:
     """Create a backup and exit non-zero if any destination failed.
 
     Raises:
-        cappa.Exit: If the backup fails for any configured destination.
+        cappa.Exit: If the backup fails for any configured destination or the config is invalid.
     """
     app = EZBak(build_config(cmd))
     try:
         app.create_backup()
-    except BackupFailedError as e:
+    except EZBakError as e:
         logger.error(e)
         raise cappa.Exit(code=1) from e

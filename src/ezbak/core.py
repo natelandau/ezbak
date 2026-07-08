@@ -14,7 +14,15 @@ from pydantic import ValidationError
 
 from ezbak.config import BackupConfig
 from ezbak.constants import RetentionPolicyType, StorageType
-from ezbak.exceptions import BackupFailedError, StorageInitError, StorageWriteError
+from ezbak.exceptions import (
+    BackendNotFoundError,
+    BackupFailedError,
+    ConfigurationError,
+    RestoreFailedError,
+    StorageDeleteError,
+    StorageInitError,
+    StorageWriteError,
+)
 from ezbak.filters import (
     chown_files,
     should_include_file,
@@ -144,7 +152,7 @@ class EZBak:
             Path | None: The path to the temporary backup file, or None if archive creation failed.
 
         Raises:
-            ValueError: If a source path is neither a file nor a directory.
+            ConfigurationError: If no source paths are configured or a source path is neither a file nor a directory.
         """
 
         @dataclass
@@ -164,7 +172,7 @@ class EZBak:
         if not self.settings.source_paths:
             msg = "No source paths provided"
             logger.error(msg)
-            raise ValueError(msg)
+            raise ConfigurationError(msg)
 
         for source in self.settings.source_paths:
             if source.is_dir():
@@ -195,7 +203,7 @@ class EZBak:
             else:
                 msg = f"Not a file or directory: {source}"
                 logger.error(msg)
-                raise ValueError(msg)
+                raise ConfigurationError(msg)
 
         temp_tarfile = self.tmp_dir / new_staging_filename()
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
@@ -223,12 +231,12 @@ class EZBak:
             StorageBackend: The matching backend.
 
         Raises:
-            ValueError: If no configured backend handles the storage type.
+            BackendNotFoundError: If no configured backend handles the storage type.
         """
         backend = self._backend_by_type.get(storage_type)
         if backend is None:
             msg = f"No configured backend for storage type: {storage_type.value}"
-            raise ValueError(msg)
+            raise BackendNotFoundError(msg)
         return backend
 
     def _backend_for(self, backup: Backup) -> StorageBackend:
@@ -262,20 +270,29 @@ class EZBak:
             destination (Path): The destination path to restore the backup to.
 
         Returns:
-            bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
+            bool: True if the backup was successfully restored.
+
+        Raises:
+            RestoreFailedError: If the archive is missing from storage or cannot be extracted.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
         tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
         if tarfile_path is None:
-            return False
+            msg = f"Backup archive is missing from storage: {backup.name}"
+            logger.error(msg)
+            raise RestoreFailedError(msg)
 
         logger.trace(f"Attempting to extract backup to '{destination}'")
+        # Catch OSError alongside TarError so a missing or unreadable local archive
+        # fails loudly instead of escaping as a raw error, which matters most after a
+        # clean-before-restore has already emptied the destination.
         try:
             with tarfile.open(tarfile_path) as archive:
                 archive.extractall(path=destination, filter="data")
-        except tarfile.TarError as e:
-            logger.error(f"Failed to restore backup: {tarfile_path}\n{e}")
-            return False
+        except (tarfile.TarError, OSError) as e:
+            msg = f"Failed to extract backup archive: {tarfile_path}: {e}"
+            logger.error(msg)
+            raise RestoreFailedError(msg) from e
 
         # Compare against None, not truthiness: uid/gid 0 (root) is a valid target
         # and must not be treated as "unset".
@@ -470,7 +487,12 @@ class EZBak:
         total_deleted = 0
         for backend in self.backends:
             targets = [x for x in backups_to_delete if x.storage_type == backend.storage_type]
-            total_deleted += backend.delete_many(targets)
+            try:
+                total_deleted += backend.delete_many(targets)
+            except StorageDeleteError as e:
+                # Tolerate a failing backend so one unhealthy destination does not
+                # block pruning the others; the backend already logged the details.
+                logger.error(f"Pruning failed for {backend.storage_type.value}: {e}")
 
         logger.info(
             f"Pruned {total_deleted} backups across {len(self.storage_locations)} storage locations"
@@ -492,35 +514,40 @@ class EZBak:
             clean_before_restore (bool): Remove existing contents at the target before restoring. Defaults to False.
 
         Returns:
-            bool: True when a backup is successfully restored; otherwise False.
+            bool: True when a backup is successfully restored; False when there is no
+                backup to restore.
 
         Raises:
-            ValueError: If the destination is not provided and no restore directory is configured.
-            ValueError: If the destination does not exist or is not a directory.
+            ConfigurationError: If the destination is not provided and no restore directory is configured, or the destination does not exist or is not a directory.
         """
         destination = restore_path or self.settings.restore_path
 
         try:
             dest = Path(destination).expanduser().absolute()
-        except Exception as e:
+        except (TypeError, ValueError, OSError, RuntimeError) as e:
+            # Covers a None/bad-type destination (TypeError), an unresolvable ~ home
+            # (RuntimeError from expanduser), and a removed cwd for a relative path
+            # (OSError from absolute()), all of which mean the destination is unusable.
             msg = f"Invalid destination: {destination}"
-            raise ValueError(msg) from e
+            raise ConfigurationError(msg) from e
 
         if not dest:
             msg = "No destination provided and no restore directory configured"
-            raise ValueError(msg)
+            raise ConfigurationError(msg)
 
         if not dest.exists() or not dest.is_dir():
             msg = f"Restore destination does not exist: {dest}"
-            raise ValueError(msg)
+            raise ConfigurationError(msg)
 
-        if clean_before_restore or self.settings.clean_before_restore:
-            clean_directory(dest)
-            logger.info("Cleaned all files in backup destination before restore")
-
+        # Confirm there is a backup to restore before cleaning, so clean_before_restore
+        # never empties the destination when there is nothing to restore into it.
         most_recent_backup = self.get_latest_backup()
         if not most_recent_backup:
             logger.error("No backup found to restore")
             return False
+
+        if clean_before_restore or self.settings.clean_before_restore:
+            clean_directory(dest)
+            logger.info("Cleaned all files in backup destination before restore")
 
         return self._do_restore(backup=most_recent_backup, destination=dest)

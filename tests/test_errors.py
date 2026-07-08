@@ -7,7 +7,13 @@ from ezbak import EZBak, ezbak
 from ezbak.backup import Backup
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
-from ezbak.exceptions import BackupFailedError, StorageWriteError
+from ezbak.exceptions import (
+    BackendNotFoundError,
+    BackupFailedError,
+    ConfigurationError,
+    RestoreFailedError,
+    StorageWriteError,
+)
 
 
 def test_no_name(filesystem):
@@ -32,7 +38,7 @@ def test_source_paths(filesystem):
         source_paths=[],
         storage_paths=[dest1],
     )
-    with pytest.raises(ValueError, match="No source paths provided"):
+    with pytest.raises(ConfigurationError, match="No source paths provided"):
         backup_manager.create_backup()
 
 
@@ -45,7 +51,7 @@ def test_source_paths_not_found(filesystem):
         source_paths=[src_dir / "not_found"],
         storage_paths=[dest1],
     )
-    with pytest.raises(ValueError, match="Source does not exist"):
+    with pytest.raises(ConfigurationError, match="Source does not exist"):
         backup_manager.create_backup()
 
 
@@ -63,7 +69,7 @@ def test_source_paths_symlink(tmp_path, capsys, debug):
         source_paths=[src_dir / "symlink"],
         storage_paths=[dest_dir],
     )
-    with pytest.raises(ValueError, match="Not a file or directory"):
+    with pytest.raises(ConfigurationError, match="Not a file or directory"):
         backup_manager.create_backup()
 
 
@@ -105,7 +111,7 @@ def test_restore_no_dest(filesystem, tmp_path, debug, capsys):
         source_paths=[src_dir],
         storage_paths=[dest1],
     )
-    with pytest.raises(ValueError, match="Restore destination does not exist"):
+    with pytest.raises(ConfigurationError, match="Restore destination does not exist"):
         backup_manager.restore_backup(tmp_path / "new_dest")
 
 
@@ -122,7 +128,7 @@ def test_restore_dest_not_dir(filesystem, tmp_path, debug, capsys):
         storage_paths=[dest1],
     )
     backup_manager.create_backup()
-    with pytest.raises(ValueError, match="Restore destination does not exist"):
+    with pytest.raises(ConfigurationError, match="Restore destination does not exist"):
         backup_manager.restore_backup(new_dest)
 
 
@@ -152,7 +158,7 @@ def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
         source_paths=[src_dir],
         storage_paths=[dest1],
     )
-    with pytest.raises(ValueError, match="Invalid destination: None"):
+    with pytest.raises(ConfigurationError, match="Invalid destination: None"):
         backup_manager.restore_backup(None)
 
 
@@ -166,7 +172,7 @@ def test_delete_unmapped_backend_raises_clear_error(filesystem):
     orphan = Backup(name="t-20200101T000000-daily.tgz", storage_type=StorageType.AWS)
 
     # When attempting to delete it, then a clear error names the missing backend
-    with pytest.raises(ValueError, match="No configured backend for storage type: aws"):
+    with pytest.raises(BackendNotFoundError, match="No configured backend for storage type: aws"):
         app._delete_backup(orphan)
 
 
@@ -284,3 +290,93 @@ def test_create_backup_uncreatable_local_path_fails_loudly(filesystem, mocker):
     # When creating a backup, then it fails loudly instead of raising a raw OSError
     with pytest.raises(BackupFailedError):
         app.create_backup()
+
+
+def test_restore_backup_raises_when_archive_corrupt(filesystem, tmp_path):
+    """Verify a corrupt archive fails the restore loudly instead of a silent False."""
+    # Given a valid backup that has since been corrupted on disk
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    app.create_backup()
+    for archive in dest1.glob("test-*.tgz"):
+        archive.write_bytes(b"not a tarball")
+
+    # When restoring, then it raises rather than returning a silent failure
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    with pytest.raises(RestoreFailedError, match="Failed to extract"):
+        app.restore_backup(restore_dir)
+
+
+def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, tmp_path):
+    """Verify a failed restore after clean-before-restore fails loudly, never a silent success."""
+    # Given a valid backup corrupted on disk and a restore target that was pre-populated
+    src_dir, dest1, _ = filesystem
+    app = ezbak(
+        name="test", source_paths=[src_dir], storage_paths=[dest1], clean_before_restore=True
+    )
+    app.create_backup()
+    for archive in dest1.glob("test-*.tgz"):
+        archive.write_bytes(b"not a tarball")
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    existing_file = restore_dir / "existing.txt"
+    existing_file.write_text("pre-existing")
+
+    # When restoring, then it raises loudly even though the destination was already wiped
+    with pytest.raises(RestoreFailedError):
+        app.restore_backup(restore_dir)
+    assert not existing_file.exists()
+
+
+def test_restore_backup_raises_when_archive_missing_from_storage(filesystem, tmp_path, mocker):
+    """Verify a backup that vanished from storage fails the restore loudly."""
+    # Given an app whose backend reports the archive is gone from storage
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    app.create_backup()
+    mocker.patch(
+        "ezbak.storage.local.LocalBackend.prepare_for_restore",
+        return_value=None,
+    )
+
+    # When restoring, then it raises rather than reporting a silent failure
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    with pytest.raises(RestoreFailedError, match="missing from storage"):
+        app.restore_backup(restore_dir)
+
+
+def test_restore_backup_does_not_clean_when_no_backup(filesystem, tmp_path):
+    """Verify clean_before_restore does not empty the target when there is no backup to restore."""
+    # Given an app with no backups and a pre-populated restore target
+    src_dir, dest1, _ = filesystem
+    app = ezbak(
+        name="test", source_paths=[src_dir], storage_paths=[dest1], clean_before_restore=True
+    )
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    keep = restore_dir / "keep.txt"
+    keep.write_text("important")
+
+    # When restoring with no backup available, then it returns False without wiping the target
+    assert app.restore_backup(restore_dir) is False
+    assert keep.exists()
+
+
+def test_restore_backup_unresolvable_destination_raises_configuration_error(
+    filesystem, tmp_path, mocker
+):
+    """Verify a non-TypeError failure resolving the destination becomes a ConfigurationError."""
+    # Given a destination whose resolution raises RuntimeError (e.g. an unresolvable ~ home)
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    mocker.patch(
+        "ezbak.core.Path.expanduser",
+        side_effect=RuntimeError("Could not determine home directory"),
+    )
+
+    # When restoring, then it surfaces a ConfigurationError, not a raw RuntimeError
+    with pytest.raises(ConfigurationError, match="Invalid destination"):
+        app.restore_backup("~/restore")

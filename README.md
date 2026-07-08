@@ -102,6 +102,19 @@ except BackupFailedError as error:
     print(f"Backup failed for: {error.failed_destinations}")
 ```
 
+`restore_backup()` raises `RestoreFailedError` when the archive can't be downloaded, read, or extracted, so a failed restore never looks like a success. This matters most with `clean_before_restore`, which empties the target before extracting: a silent failure would leave you with an empty directory and no error. The method returns `False` only when there is no backup to restore. Catch the error to handle a failed run:
+
+```python
+from ezbak.exceptions import RestoreFailedError
+
+try:
+    backups.restore_backup()
+except RestoreFailedError as error:
+    print(f"Restore failed: {error}")
+```
+
+Every ezbak error subclasses `EZBakError`, so you can catch that one type to handle any failure.
+
 ### Command line
 
 The `name` and `storage` options are global and come before the subcommand. Run `ezbak --help` or `ezbak create --help` to see every option.
@@ -199,6 +212,8 @@ ezbak sends each backup to whatever destinations you configure. There is no sepa
 At least one destination is required.
 
 If a configured destination can't be used, whether from bad S3 credentials, an unreachable bucket, or a local directory ezbak can't create, the run fails instead of reporting success. The library raises `BackupFailedError`, and the `ezbak create` command and the one-shot container exit with a non-zero status. A scheduled container (`EZBAK_CRON`) logs the error and keeps running, so the next scheduled run retries. Any backups that reached a working destination are kept.
+
+Restores fail the same way. If ezbak can't download, read, or extract the archive, the library raises `RestoreFailedError`, and the `ezbak restore` command and the one-shot container exit non-zero. A scheduled restore logs the error and keeps the container running.
 
 ### Retention policies
 

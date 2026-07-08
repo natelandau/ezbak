@@ -8,10 +8,13 @@ from loguru import logger
 from ezbak.backup import Backup, StorageLocation
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
-from ezbak.exceptions import StorageWriteError
+from ezbak.exceptions import StorageDeleteError, StorageReadError, StorageWriteError
 from ezbak.naming import new_staging_filename
 from ezbak.storage.aws import AWSService
 from ezbak.storage.base import StorageBackend
+
+# The S3 DeleteObjects API accepts at most 1000 keys per request.
+_S3_DELETE_BATCH_LIMIT = 1000
 
 
 class S3Backend(StorageBackend):
@@ -101,8 +104,16 @@ class S3Backend(StorageBackend):
 
         Returns:
             bool: True once the delete request has been issued.
+
+        Raises:
+            StorageDeleteError: If the delete request fails.
         """
-        self.aws_service.delete_object(key=backup.name)
+        try:
+            self.aws_service.delete_object(key=backup.name)
+        except (BotoCoreError, ClientError) as e:
+            msg = f"S3 delete failed for '{backup.name}': {e}"
+            logger.error(msg)
+            raise StorageDeleteError(msg) from e
         logger.info(f"Deleted from S3: {backup.name}")
         return True
 
@@ -114,15 +125,31 @@ class S3Backend(StorageBackend):
 
         Returns:
             int: The number of objects the bucket confirmed deleted.
+
+        Raises:
+            StorageDeleteError: If the batch delete request fails.
         """
         if not backups:
             return 0
 
-        logger.debug(f"Deleting {len(backups)} S3 backups")
-        deleted = self.aws_service.delete_objects(keys=[x.name for x in backups])
-        for key in deleted:
-            logger.info(f"Deleted from S3: {key}")
-        return len(deleted)
+        keys = [x.name for x in backups]
+        logger.debug(f"Deleting {len(keys)} S3 backups")
+        deleted_count = 0
+        try:
+            # Chunk into requests of at most 1000 keys so a large prune does not exceed
+            # the S3 DeleteObjects limit and abort the whole run.
+            for start in range(0, len(keys), _S3_DELETE_BATCH_LIMIT):
+                deleted = self.aws_service.delete_objects(
+                    keys=keys[start : start + _S3_DELETE_BATCH_LIMIT]
+                )
+                for key in deleted:
+                    logger.info(f"Deleted from S3: {key}")
+                deleted_count += len(deleted)
+        except (BotoCoreError, ClientError) as e:
+            msg = f"S3 batch delete failed: {e}"
+            logger.error(msg)
+            raise StorageDeleteError(msg) from e
+        return deleted_count
 
     def prepare_for_restore(self, backup: Backup) -> Path | None:
         """Download the backup object to a temporary file for extraction.
@@ -132,13 +159,21 @@ class S3Backend(StorageBackend):
 
         Returns:
             Path | None: The downloaded archive path, or None if the object is missing.
+
+        Raises:
+            StorageReadError: If checking existence or downloading the object fails.
         """
         logger.info(f"Restoring backup from S3: {backup.name}")
-        if not self.aws_service.object_exists(backup.name):
-            logger.error(f"Backup file does not exist in S3: {backup.name}")
-            return None
+        try:
+            if not self.aws_service.object_exists(backup.name):
+                logger.error(f"Backup file does not exist in S3: {backup.name}")
+                return None
 
-        logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
-        tmp_file = self.tmp_dir / new_staging_filename()
-        self.aws_service.get_object(key=backup.name, destination=tmp_file)
+            logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
+            tmp_file = self.tmp_dir / new_staging_filename()
+            self.aws_service.get_object(key=backup.name, destination=tmp_file)
+        except (BotoCoreError, ClientError) as e:
+            msg = f"S3 download failed for '{backup.name}': {e}"
+            logger.error(msg)
+            raise StorageReadError(msg) from e
         return tmp_file

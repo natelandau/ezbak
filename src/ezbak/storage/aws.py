@@ -109,19 +109,12 @@ class AWSService:
             key (str): The S3 object key to delete.
 
         Returns:
-            bool: True if deletion succeeds, False if any error occurs during deletion.
-
-        Raises:
-            ClientError: If the file cannot be deleted.
+            bool: True if deletion succeeds. Botocore errors from the delete propagate to the caller.
         """
         full_key = self._build_full_key(key)
 
         logger.trace(f"S3: Attempting to delete {full_key}")
-        try:
-            self.s3.delete_object(Bucket=self.bucket, Key=full_key)
-        except ClientError as e:
-            logger.error(e)
-            raise
+        self.s3.delete_object(Bucket=self.bucket, Key=full_key)
 
         logger.trace(f"S3: Deleted {key}")
         return True
@@ -135,11 +128,10 @@ class AWSService:
             keys (list[str]): List of S3 object keys to delete.
 
         Returns:
-            list[str]: The full S3 keys that were confirmed deleted (empty if no keys were provided).
+            list[str]: The full S3 keys that were confirmed deleted (empty if no keys were provided). Botocore errors from the delete propagate to the caller.
 
         Raises:
-            ClientError: If the files cannot be deleted.
-            ValueError: If the keys list is empty or contains more than 1000 items.
+            ValueError: If the keys list contains more than 1000 items.
         """
         if not keys:
             logger.warning("S3: No keys provided for deletion")
@@ -153,17 +145,13 @@ class AWSService:
         objects_to_delete = [{"Key": self._build_full_key(key)} for key in keys]
         logger.trace(f"S3: Attempting to delete {len(objects_to_delete)} objects")
 
-        try:
-            response = self.s3.delete_objects(
-                Bucket=self.bucket,
-                Delete={
-                    "Objects": objects_to_delete,
-                    "Quiet": False,  # Return info about deleted objects
-                },
-            )
-        except ClientError as e:
-            logger.error(f"S3: Failed to delete objects: {e}")
-            raise
+        response = self.s3.delete_objects(
+            Bucket=self.bucket,
+            Delete={
+                "Objects": objects_to_delete,
+                "Quiet": False,  # Return info about deleted objects
+            },
+        )
 
         # Log successful deletions
         response_deleted_objects = response.get("Deleted", [])
@@ -192,22 +180,15 @@ class AWSService:
             destination (Path): The local path to save the object to.
 
         Returns:
-            Path: The destination path where the object was saved.
-
-        Raises:
-            ClientError: If the object cannot be downloaded.
+            Path: The destination path where the object was saved. Botocore errors from the download propagate to the caller.
         """
         full_key = self._build_full_key(key)
         logger.trace(f"S3: Attempting to download '{full_key}' to '{destination}'")
-        try:
-            response = self.s3.get_object(Bucket=self.bucket, Key=full_key)
 
-            with destination.open("wb") as f:
-                for chunk in response["Body"].iter_chunks(chunk_size=8192):
-                    f.write(chunk)
-        except ClientError as e:
-            logger.error(f"S3: Failed to download {key}: {e}")
-            raise
+        response = self.s3.get_object(Bucket=self.bucket, Key=full_key)
+        with destination.open("wb") as f:
+            for chunk in response["Body"].iter_chunks(chunk_size=8192):
+                f.write(chunk)
 
         logger.trace(f"S3: Downloaded '{full_key}' to '{destination}'")
         return destination
