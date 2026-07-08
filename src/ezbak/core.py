@@ -617,7 +617,7 @@ class EZBak:
             dry_run (bool): Report the backups that would be deleted without removing anything. Use this to preview the impact of a prune before running it for real. Defaults to False.
 
         Returns:
-            list[Backup]: A list of backup objects targeted for deletion by the retention policy.
+            list[Backup]: On a dry run, the backups targeted for deletion; otherwise the backups confirmed deleted from storage.
         """
         logger.trace("Pruning backups")
         backups_to_delete = self._identify_backups_to_delete()
@@ -633,23 +633,27 @@ class EZBak:
             )
             return backups_to_delete
 
-        total_deleted = 0
+        # Collect the backups each backend confirms it deleted, so the return value and
+        # the logged count reflect what was actually removed, not merely what was
+        # targeted. A backend that fails contributes nothing rather than being reported
+        # as deleted.
+        deleted_backups: list[Backup] = []
         for backend in self.backends:
             targets = [x for x in backups_to_delete if x.storage_type == backend.storage_type]
             try:
-                total_deleted += backend.delete_many(targets)
+                deleted_backups.extend(backend.delete_many(targets))
             except StorageDeleteError as e:
                 # Tolerate a failing backend so one unhealthy destination does not
                 # block pruning the others; the backend already logged the details.
                 logger.error(f"Pruning failed for {backend.storage_type.value}: {e}")
 
         logger.info(
-            f"Pruned {total_deleted} backups across {len(self.storage_locations)} storage locations"
+            f"Pruned {len(deleted_backups)} backups across {len(self.storage_locations)} storage locations"
         )
 
         logger.trace("Require storage location re-index on next call")
         self.rebuild_storage_locations = True
-        return backups_to_delete
+        return deleted_backups
 
     def restore_backup(
         self,

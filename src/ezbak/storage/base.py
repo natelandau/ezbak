@@ -55,8 +55,8 @@ class StorageBackend(ABC):
         """Delete a single backup and report whether it was confirmed removed."""
 
     @abstractmethod
-    def delete_many(self, backups: list[Backup]) -> int:
-        """Delete several backups and return how many were removed."""
+    def delete_many(self, backups: list[Backup]) -> list[Backup]:
+        """Delete several backups and return the ones confirmed removed from storage."""
 
     @abstractmethod
     def prepare_for_restore(self, backup: Backup) -> Path | None:

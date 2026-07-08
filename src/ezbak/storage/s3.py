@@ -117,39 +117,45 @@ class S3Backend(StorageBackend):
         logger.info(f"Deleted from S3: {backup.name}")
         return True
 
-    def delete_many(self, backups: list[Backup]) -> int:
+    def delete_many(self, backups: list[Backup]) -> list[Backup]:
         """Batch-delete objects from the bucket.
 
         Args:
             backups (list[Backup]): The backups to remove.
 
         Returns:
-            int: The number of objects the bucket confirmed deleted.
+            list[Backup]: The backups the bucket confirmed deleted.
 
         Raises:
             StorageDeleteError: If the batch delete request fails.
         """
         if not backups:
-            return 0
+            return []
 
-        keys = [x.name for x in backups]
+        # Map each object's full S3 key back to its Backup so the confirmed-deleted
+        # keys the API returns (which carry the bucket prefix) can be reported as the
+        # Backup objects that were actually removed, not just the ones targeted.
+        backup_by_key = {self.aws_service.build_full_key(x.name): x for x in backups}
+        keys = list(backup_by_key)
         logger.debug(f"Deleting {len(keys)} S3 backups")
-        deleted_count = 0
+        deleted: list[Backup] = []
         try:
             # Chunk into requests of at most 1000 keys so a large prune does not exceed
             # the S3 DeleteObjects limit and abort the whole run.
             for start in range(0, len(keys), _S3_DELETE_BATCH_LIMIT):
-                deleted = self.aws_service.delete_objects(
+                confirmed_keys = self.aws_service.delete_objects(
                     keys=keys[start : start + _S3_DELETE_BATCH_LIMIT]
                 )
-                for key in deleted:
-                    logger.info(f"Deleted from S3: {key}")
-                deleted_count += len(deleted)
+                for key in confirmed_keys:
+                    backup = backup_by_key.get(key)
+                    if backup is not None:
+                        logger.info(f"Deleted from S3: {backup.name}")
+                        deleted.append(backup)
         except (BotoCoreError, ClientError) as e:
             msg = f"S3 batch delete failed: {e}"
             logger.error(msg)
             raise StorageDeleteError(msg) from e
-        return deleted_count
+        return deleted
 
     def prepare_for_restore(self, backup: Backup) -> Path | None:
         """Download the backup object to a temporary file for extraction.

@@ -115,17 +115,17 @@ class LocalBackend(StorageBackend):
             return False
         return True
 
-    def delete_many(self, backups: list[Backup]) -> int:
+    def delete_many(self, backups: list[Backup]) -> list[Backup]:
         """Delete each local backup individually.
 
         Args:
             backups (list[Backup]): The backups to remove.
 
         Returns:
-            int: The number of backups confirmed removed.
+            list[Backup]: The backups confirmed removed from disk.
         """
         logger.debug(f"Deleting {len(backups)} local backups")
-        return sum(self.delete(backup) for backup in backups)
+        return [backup for backup in backups if self.delete(backup)]
 
     def prepare_for_restore(self, backup: Backup) -> Path | None:  # noqa: PLR6301
         """Return the on-disk path of a local backup.

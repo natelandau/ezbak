@@ -256,6 +256,31 @@ def test_prune_max_backups(debug, capsys, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
+def test_prune_returns_confirmed_deletions(tmp_path):
+    """Verify prune returns the backups actually removed, not just those targeted."""
+    # Given more backups on disk than the retention policy keeps
+    filenames = [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095745-minutely.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T090932-yearly.tgz",
+    ]
+    for filename in filenames:
+        Path(tmp_path / filename).touch()
+    backup_manager = ezbak(
+        name="test", source_paths=[tmp_path], storage_paths=[tmp_path], max_backups=2
+    )
+
+    # When pruning
+    deleted = backup_manager.prune_backups()
+
+    # Then the returned backups are exactly the ones no longer on disk
+    remaining = {p.name for p in tmp_path.iterdir()}
+    assert len(deleted) == 3
+    assert all(backup.name not in remaining for backup in deleted)
+
+
 def test_prune_dry_run(debug, capsys, tmp_path):
     """Verify a dry run reports prune targets without deleting anything."""
     # Backwards-compat guard: seeds legacy period-labeled filenames on purpose; do not modernize.

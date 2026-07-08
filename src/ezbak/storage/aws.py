@@ -53,7 +53,7 @@ class AWSService:
             logger.error(msg)
             raise StorageInitError(msg) from e
 
-    def _build_full_key(self, key: str) -> str:
+    def build_full_key(self, key: str) -> str:
         """Build the full S3 key by prepending bucket_path if needed.
 
         Args:
@@ -86,7 +86,7 @@ class AWSService:
         Raises:
             ClientError: If the file cannot be checked.
         """
-        full_key = self._build_full_key(key)
+        full_key = self.build_full_key(key)
         try:
             self.s3.head_object(Bucket=self.bucket, Key=full_key)
             logger.trace(f"S3 file exists: '{full_key}'")
@@ -111,7 +111,7 @@ class AWSService:
         Returns:
             bool: True if deletion succeeds. Botocore errors from the delete propagate to the caller.
         """
-        full_key = self._build_full_key(key)
+        full_key = self.build_full_key(key)
 
         logger.trace(f"S3: Attempting to delete {full_key}")
         self.s3.delete_object(Bucket=self.bucket, Key=full_key)
@@ -142,7 +142,7 @@ class AWSService:
             logger.error(msg)
             raise ValueError(msg)
 
-        objects_to_delete = [{"Key": self._build_full_key(key)} for key in keys]
+        objects_to_delete = [{"Key": self.build_full_key(key)} for key in keys]
         logger.trace(f"S3: Attempting to delete {len(objects_to_delete)} objects")
 
         response = self.s3.delete_objects(
@@ -182,7 +182,7 @@ class AWSService:
         Returns:
             Path: The destination path where the object was saved. Botocore errors from the download propagate to the caller.
         """
-        full_key = self._build_full_key(key)
+        full_key = self.build_full_key(key)
         logger.trace(f"S3: Attempting to download '{full_key}' to '{destination}'")
 
         response = self.s3.get_object(Bucket=self.bucket, Key=full_key)
@@ -204,7 +204,7 @@ class AWSService:
         Returns:
             list[str]: A list of S3 object keys that match the specified prefix.
         """
-        full_prefix = self._build_full_key(prefix)
+        full_prefix = self.build_full_key(prefix)
         object_keys: list[str] = []
 
         logger.trace(f"S3: Attempting to list objects with prefix '{full_prefix}'")
@@ -235,7 +235,7 @@ class AWSService:
         if not name:
             name = file.name
 
-        full_name = self._build_full_key(name)
+        full_name = self.build_full_key(name)
 
         self.s3.upload_file(Filename=file, Bucket=self.bucket, Key=full_name)
 

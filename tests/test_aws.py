@@ -463,8 +463,9 @@ def test_prune_backups_tolerates_s3_delete_failure(filesystem, mocker):
         ),
     )
 
-    # When pruning, then it does not raise despite the backend failure
-    assert app.prune_backups() == [backup]
+    # When pruning, then it does not raise despite the backend failure, and reports
+    # nothing deleted because the backend confirmed no removals
+    assert app.prune_backups() == []
 
 
 def test_s3_delete_many_chunks_large_batches(filesystem, mocker):
@@ -490,8 +491,10 @@ def test_s3_delete_many_chunks_large_batches(filesystem, mocker):
         backend.aws_service, "delete_objects", side_effect=lambda keys: keys
     )
 
-    # When deleting, then it issues two chunked requests (1000 + 500) and counts all deleted
-    assert backend.delete_many(backups) == 1500
+    # When deleting, then it issues two chunked requests (1000 + 500) and returns all deleted
+    deleted = backend.delete_many(backups)
+    assert len(deleted) == 1500
+    assert deleted == backups
     assert delete_spy.call_count == 2
     assert len(delete_spy.call_args_list[0].kwargs["keys"]) == 1000
     assert len(delete_spy.call_args_list[1].kwargs["keys"]) == 500
