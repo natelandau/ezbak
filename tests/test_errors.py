@@ -239,6 +239,29 @@ def test_create_backup_s3_only_bad_credentials_raises(filesystem):
         app.create_backup()
 
 
+def test_create_backup_partial_failure_attaches_created_backups(filesystem):
+    """Verify a partial-destination failure still exposes the backups that succeeded."""
+    # Given a healthy local destination alongside an S3 bucket with bad credentials
+    src_dir, dest1, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="",
+        aws_secret_key="",
+    )
+
+    # When the backup partially fails
+    with pytest.raises(BackupFailedError) as exc:
+        app.create_backup()
+
+    # Then only S3 is reported failed and the successful local backup is attached
+    assert exc.value.failed_storage_locations == ["S3 bucket 'test-bucket'"]
+    assert len(exc.value.created_backups) == 1
+    assert exc.value.created_backups[0].storage_type == StorageType.LOCAL
+
+
 def test_create_backup_keeps_source_when_destination_fails(filesystem):
     """Verify sources are not deleted when the only destination is unusable."""
     # Given an S3-only config with delete_source_after_backup and no credentials

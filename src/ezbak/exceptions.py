@@ -7,6 +7,11 @@ botocore.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ezbak.backup import Backup
+
 
 class EZBakError(Exception):
     """Base class for every error ezbak raises."""
@@ -63,16 +68,24 @@ class BackupFailedError(EZBakError):
     """One or more configured storage locations could not be backed up.
 
     Storage locations that succeeded are already written; this signals callers to
-    exit non-zero because the run did not fully succeed.
+    exit non-zero because the run did not fully succeed. The backups that did land
+    are attached as ``created_backups`` so a library caller can still observe the
+    copies that succeeded on a partial failure.
     """
 
-    def __init__(self, failed_storage_locations: list[str]) -> None:
+    def __init__(
+        self,
+        failed_storage_locations: list[str],
+        created_backups: list[Backup] | None = None,
+    ) -> None:
         """Build a message naming every storage location that failed.
 
         Args:
             failed_storage_locations (list[str]): Human-readable descriptions of the storage locations that failed.
+            created_backups (list[Backup] | None): The backups that were written successfully before the failure, so a caller can observe the partial result. Defaults to None.
         """
         self.failed_storage_locations = failed_storage_locations
+        self.created_backups: list[Backup] = created_backups or []
         storage_locations = ", ".join(failed_storage_locations)
         super().__init__(f"Backup failed for storage location(s): {storage_locations}")
 

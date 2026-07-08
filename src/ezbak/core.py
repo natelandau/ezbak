@@ -393,7 +393,9 @@ class EZBak:
         # storage locations so their backups are preserved.
         failed_storage_locations = self._failed_storage_locations + write_failures
         if failed_storage_locations:
-            raise BackupFailedError(failed_storage_locations)
+            # Attach the backups that did land so a library caller can observe the
+            # copies that succeeded even though the run as a whole failed.
+            raise BackupFailedError(failed_storage_locations, created_backups=created_backups)
 
         # Clean sources only on a fully successful run: for an S3-only run with bad
         # credentials this guard prevents deleting the only copy of the data.

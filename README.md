@@ -98,7 +98,7 @@ An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups(
 
 `get_backup_as_of(point_in_time)` returns the newest backup at or before the end of the period you name, so you can restore an older backup instead of the latest. Pass its result to `restore_backup(backup=...)`. An explicit `backup` argument takes priority over a configured `restore_date`, which in turn takes priority over the latest backup.
 
-`create_backup()` raises `BackupFailedError` when a configured storage location can't be used, so a failed backup never looks like a success. It still writes to every storage location that works, so a partial failure keeps the copies that succeeded. Catch the error to handle a failed run:
+`create_backup()` raises `BackupFailedError` when a configured storage location can't be used, so a failed backup never looks like a success. It still writes to every storage location that works, so a partial failure keeps the copies that succeeded. The error's `failed_storage_locations` names the destinations that failed, and `created_backups` holds the `Backup` objects that were written before the failure. Catch the error to handle a failed run:
 
 ```python
 from ezbak.exceptions import BackupFailedError
@@ -107,6 +107,7 @@ try:
     backups.create_backup()
 except BackupFailedError as error:
     print(f"Backup failed for: {error.failed_storage_locations}")
+    print(f"Backups that succeeded: {[backup.name for backup in error.created_backups]}")
 ```
 
 `restore_backup()` raises `RestoreFailedError` when the archive can't be downloaded, read, or extracted, so a failed restore never looks like a success. This matters most with `clean_before_restore`, which empties the target before extracting: a silent failure would leave you with an empty directory and no error. The method returns `False` only when there is no backup to restore. Catch the error to handle a failed run:
