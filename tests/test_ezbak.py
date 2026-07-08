@@ -566,6 +566,28 @@ def test_restore_chowns_staging_tree(tmp_path, filesystem, monkeypatch):
     assert called["directory"].parent.resolve() == restore_dir.resolve()
 
 
+def test_restore_overlay_reaps_orphaned_staging(tmp_path, filesystem):
+    """Verify an overlay restore removes staging dirs orphaned by a prior crash."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "keep.txt").write_text("keep")
+    # Simulate a staging dir orphaned by a hard kill of a prior restore.
+    orphan = restore_dir / ".ezbak-restore-deadbeef"
+    orphan.mkdir()
+    (orphan / "leftover.txt").write_text("leftover")
+
+    # Overlay restore (no clean): must still reap the orphan.
+    assert mgr.restore_backup(restore_dir) is True
+
+    assert (restore_dir / "keep.txt").read_text() == "keep"  # overlay preserved existing file
+    assert not orphan.exists()  # orphaned staging reaped
+    assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
+
+
 def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
     """Verify that source paths are deleted after backup."""
     src_dir, dest1, _ = filesystem

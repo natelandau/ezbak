@@ -347,6 +347,14 @@ class EZBak:
             logger.error(msg)
             raise RestoreFailedError(msg)
 
+        # Reap staging dirs orphaned by a hard kill of a prior restore. A clean
+        # restore's commit loop already removes them, but an overlay restore never
+        # iterates the destination, so they would otherwise accumulate. Restores to
+        # a given target are not concurrent, so removing our own scratch dirs is safe.
+        for stale in destination.glob(".ezbak-restore-*"):
+            if stale.is_dir() and not stale.is_symlink():
+                shutil.rmtree(stale, ignore_errors=True)
+
         # Stage inside the destination (a child, not a sibling) so the commit is a
         # same-filesystem rename even when the destination is itself a mount point.
         try:
