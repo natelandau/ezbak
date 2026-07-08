@@ -237,55 +237,6 @@ class AWSService:
         logger.trace(f"S3: Listed {len(object_keys)} objects with prefix '{full_prefix}'")
         return object_keys
 
-    def rename_object(self, current_name: str, new_name: str) -> bool:
-        """Rename a file in the configured S3 bucket by copying and then deleting the old one.
-
-        Change the name of a file in S3 while preserving its content and metadata. Use this method when you need to reorganize files in S3, implement versioning schemes, or correct file naming conventions. The method performs a copy operation followed by deletion to ensure data integrity.
-
-        Args:
-            current_name (str): The current name of the file.
-            new_name (str): The new name of the file.
-
-        Returns:
-            bool: True if renaming succeeds, False if any error occurs during renaming.
-
-        Raises:
-            ClientError: If the file cannot be renamed.
-        """
-        full_current_name = self._build_full_key(current_name)
-        full_new_name = self._build_full_key(new_name)
-
-        logger.trace(f"S3: Attempting to rename '{full_current_name}' to '{full_new_name}'")
-        try:
-            copy_source = {"Bucket": self.bucket, "Key": full_current_name}
-            self.s3.copy_object(Bucket=self.bucket, CopySource=copy_source, Key=full_new_name)
-            logger.trace(f"S3: Copied '{full_current_name}' to '{full_new_name}'.")
-
-        except ClientError as e:
-            logger.error(f"S3: Failed to rename '{current_name}' to '{new_name}': {e}")
-            raise
-
-        if not self.object_exists(full_new_name):
-            raise ClientError(
-                {
-                    "Error": {
-                        "Code": "FailedCopyVerification",
-                        "Message": "Copied object not found after copy operation.",
-                    }
-                },
-                "HeadObject",
-            )
-
-        try:
-            self.s3.delete_object(Bucket=self.bucket, Key=full_current_name)
-
-        except ClientError as e:
-            logger.error(f"S3: Failed to rename '{current_name}' to '{new_name}': {e}")
-            raise
-
-        logger.trace(f"S3: Renamed '{current_name}' to '{new_name}'.")
-        return True
-
     def upload_object(self, file: Path, name: str = "") -> bool:
         """Upload a local file to the configured S3 bucket.
 

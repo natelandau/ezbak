@@ -1,8 +1,7 @@
-"""Core EZBak class: create, list, prune, rename, and restore backups."""
+"""Core EZBak class: create, list, prune, and restore backups."""
 
 from __future__ import annotations
 
-import re
 import sys
 import tarfile
 from dataclasses import dataclass
@@ -18,12 +17,7 @@ from ezbak.config import BackupConfig
 from ezbak.constants import RetentionPolicyType, StorageType
 from ezbak.filters import chown_files, should_include_file, validate_source_paths
 from ezbak.logging import instantiate_logger
-from ezbak.naming import (
-    add_uid_suffix,
-    build_backup_name,
-    new_staging_filename,
-    parse_backup_name,
-)
+from ezbak.naming import new_staging_filename
 from ezbak.storage import LocalBackend, S3Backend, StorageBackend
 from ezbak.storage.aws import AWSService
 
@@ -50,18 +44,6 @@ def ezbak(**kwargs: object) -> EZBak:
         raise
 
     return EZBak(config)
-
-
-@dataclass
-class FileForRename:
-    """Pair a backup with its proposed new filename for the rename pass.
-
-    Carry the target backup, the computed new_name, and do_rename, which the rename loop checks to skip files whose name is already correct.
-    """
-
-    backup: Backup
-    new_name: str
-    do_rename: bool = False
 
 
 class EZBak:
@@ -330,81 +312,6 @@ class EZBak:
         )
         return backups_to_delete
 
-    def _rename_no_labels(self) -> list[FileForRename]:
-        """Rename backup files to remove time unit labels.
-
-        Generate rename operations to strip time unit labels and UUIDs from backup filenames. Use this to simplify backup naming when detailed time unit labeling is not required.
-
-        Returns:
-            list[FileForRename]: A list of FileForRename objects containing rename operations.
-        """
-        files_for_rename: list[FileForRename] = []
-        for storage_location in self.storage_locations:
-            for backup in storage_location.backups:
-                matches = parse_backup_name(backup.name)
-                if matches is None:
-                    continue
-
-                new_backup_name = backup.name
-                found_period = matches.get("period")
-                found_uuid = matches.get("uuid")
-                if found_period:
-                    new_backup_name = re.sub(rf"-{found_period}", "", new_backup_name)
-                if found_uuid:
-                    new_backup_name = re.sub(rf"-{found_uuid}", "", new_backup_name)
-
-                files_for_rename.append(
-                    FileForRename(
-                        backup=backup,
-                        new_name=new_backup_name,
-                        do_rename=backup.name != new_backup_name,
-                    )
-                )
-
-        return files_for_rename
-
-    def _rename_with_labels(self) -> list[FileForRename]:
-        """Rename backup files to include time unit labels.
-
-        Generate rename operations to add or update time unit labels in backup filenames. Use this to organize backups by time periods (hourly, daily, weekly, monthly) for better retention policy management.
-
-        Returns:
-            list[FileForRename]: A list of FileForRename objects containing rename operations.
-        """
-        files_for_rename: list[FileForRename] = []
-        for storage_location in self.storage_locations:
-            for backup_type, backups in storage_location.backups_by_time_unit.items():
-                for backup in backups:
-                    matches = parse_backup_name(backup.name)
-                    if matches is None:
-                        continue
-
-                    found_period = matches.get("period")
-                    if found_period and found_period == backup_type.value:
-                        files_for_rename.append(
-                            FileForRename(
-                                backup=backup,
-                                new_name=backup.name,
-                                do_rename=False,
-                            )
-                        )
-                        continue
-
-                    new_name = build_backup_name(
-                        name=str(matches.get("name")),
-                        timestamp=str(matches.get("timestamp")),
-                        period=backup_type.value,
-                    )
-                    files_for_rename.append(
-                        FileForRename(
-                            backup=backup,
-                            new_name=new_name,
-                            do_rename=True,
-                        )
-                    )
-
-        return files_for_rename
-
     def create_backup(self) -> list[Backup]:
         """Create compressed backup archives of all configured sources and distribute them to all storage_paths.
 
@@ -506,50 +413,6 @@ class EZBak:
         logger.trace("Require storage location re-index on next call")
         self.rebuild_storage_locations = True
         return backups_to_delete
-
-    def rename_backups(self) -> None:
-        """Rename all backups according to the configured naming strategy.
-
-        Apply consistent naming patterns to all existing backups, either adding time unit labels or removing them based on configuration. Use this to standardize backup naming across all storage locations for better organization and retention policy management.
-        """
-        logger.trace("Begin renaming backups")
-        if self.settings.label_time_units:
-            files_for_rename = self._rename_with_labels()
-        else:
-            files_for_rename = self._rename_no_labels()
-
-        for file in files_for_rename:
-            if file.do_rename:
-                target_exists = (
-                    len(
-                        [
-                            x.new_name
-                            for x in files_for_rename
-                            if x.new_name == file.new_name
-                            and x.backup.storage_type == file.backup.storage_type
-                            and x.backup.storage_path == file.backup.storage_path
-                        ]
-                    )
-                    > 1
-                )
-                if target_exists:
-                    logger.trace(
-                        f"Attempting to rename backup: {file.backup.name} -> {file.new_name}"
-                    )
-                    file.new_name = add_uid_suffix(file.new_name)
-
-                self._backend_for(file.backup).rename(backup=file.backup, new_name=file.new_name)
-
-        renamed = [x for x in files_for_rename if x.do_rename]
-        if len(renamed) > 0:
-            self.did_create_backup = True
-            logger.info(f"Renamed {len(renamed)} backups")
-
-            logger.trace("Require storage location re-index on next call")
-            self.rebuild_storage_locations = True
-
-        else:
-            logger.info("No backups to rename")
 
     def restore_backup(
         self, restore_path: Path | str | None = None, *, clean_before_restore: bool = False

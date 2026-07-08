@@ -105,8 +105,6 @@ class BackupConfig(BaseModel):
     exclude_regex: str | None = None
     include_regex: str | None = None
     compression_level: int = DEFAULT_COMPRESSION_LEVEL
-    label_time_units: bool = True
-    rename_files: bool = False
 
     max_backups: int | None = None
     retention_yearly: int | None = None

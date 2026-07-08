@@ -10,7 +10,6 @@ A simple backup tool that creates, prunes, and restores compressed archives of y
 - Store backups on the local filesystem, in AWS S3, or both at once
 - Filter files with include and exclude regex patterns
 - Prune old backups with count-based or time-based retention policies
-- Label backups by time period (`yearly`, `monthly`, `weekly`, `daily`, `hourly`, `minutely`)
 - Restore the latest backup to any location
 - Run scheduled backups in a container with a cron expression
 
@@ -90,7 +89,7 @@ backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backu
 backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_paths=["/backups"]))
 ```
 
-An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, `rename_backups()`, and `get_latest_backup()`.
+An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, and `get_latest_backup()`.
 
 ### Command line
 
@@ -165,21 +164,18 @@ docker run -it \
 
 ### Backup names
 
-Every backup needs a name that identifies it in logs and groups its files. ezbak adds a timestamp and a period label automatically.
+Every backup needs a name that identifies it in logs and groups its files. ezbak adds a timestamp automatically.
 
-The filename format is `{name}-{timestamp}-{period_label}.tgz`, for example:
+The filename format is `{name}-{timestamp}.tgz`, for example:
 
-- `my-documents-20241215T143022-daily.tgz`
-- `database-backup-20241215T020000-weekly.tgz`
+- `my-documents-20241215T143022.tgz`
+- `database-backup-20241215T020000.tgz`
 
 A few details worth knowing:
 
 - Multiple backup sets can share one storage location, because each set matches only its own name.
 - Timestamps use the format `YYYYMMDDTHHMMSS`.
-- Period labels are optional. Set `label_time_units=False` to omit them.
 - A duplicate name gets a short unique suffix so files never overwrite each other.
-
-To rename existing files after changing the labeling option, call `rename_backups()` or set `rename_files=True` for the container.
 
 ### Storage destinations
 
@@ -279,8 +275,6 @@ Backup behavior:
 
 ```python
 compression_level=9           # gzip level, 1 to 9 (default: 9)
-label_time_units=True         # Add period labels to filenames (default: True)
-rename_files=False            # Rename existing files to match the labeling (default: False)
 strip_source_paths=False      # Flatten directory sources in the archive
 delete_src_after_backup=False # Delete sources after a successful backup
 include_regex=r"\.txt$"       # Only back up files matching this pattern

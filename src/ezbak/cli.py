@@ -155,16 +155,6 @@ class CreateCommand:
         ),
     ] = DEFAULT_COMPRESSION_LEVEL
 
-    no_label: Annotated[
-        bool,
-        cappa.Arg(
-            long=["no-label"],
-            help="Do not include time labels in the backup filename. (e.g. daily, weekly, etc.)",
-            group=(3, "Optional"),
-            show_default=False,
-        ),
-    ] = False
-
 
 @cappa.command(name="restore", invoke="ezbak.cli_commands.restore.main")
 class RestoreCommand:
@@ -332,7 +322,6 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "include_regex": cmd.include_regex,
             "exclude_regex": cmd.exclude_regex,
             "compression_level": cmd.compression_level,
-            "label_time_units": not cmd.no_label,
         }
     elif isinstance(cmd, RestoreCommand):
         extra = {
