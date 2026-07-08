@@ -11,7 +11,7 @@ import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_DATE_FORMAT
-from ezbak.core import _commit_restore, _merge_move
+from ezbak.core import _commit_restore, _is_within, _merge_move
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
 
 UTC = ZoneInfo("UTC")
@@ -612,6 +612,31 @@ def test_restore_preserves_staging_on_commit_failure(tmp_path, filesystem, monke
     staging_dirs = [p for p in restore_dir.iterdir() if p.name.startswith(".ezbak-restore-")]
     assert len(staging_dirs) == 1
     assert any(staging_dirs[0].iterdir())  # holds the extracted files
+
+
+def test_is_within_matches_nested_and_equal_paths(tmp_path):
+    """Verify the lexical overlap cases of _is_within."""
+    outer = tmp_path / "outer"
+    (outer / "inner").mkdir(parents=True)
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+
+    assert _is_within(outer, outer)  # equal
+    assert _is_within(outer / "inner", outer)  # nested
+    assert not _is_within(outer, outer / "inner")  # outer is not within inner
+    assert not _is_within(sibling, outer)  # unrelated
+
+
+def test_is_within_detects_aliased_directory(tmp_path):
+    """Verify _is_within catches two paths that alias one directory (as a bind mount does)."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)  # same directory, two different paths (device+inode identical)
+
+    # A pure path comparison would miss the overlap; the device+inode check catches it.
+    assert not link.is_relative_to(real)
+    assert _is_within(link, real)
 
 
 def test_restore_into_storage_path_is_rejected(tmp_path, filesystem):

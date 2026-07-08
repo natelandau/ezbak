@@ -97,13 +97,35 @@ def _fail_restore(msg: str, cause: Exception | None = None) -> NoReturn:
     raise RestoreFailedError(msg) from cause
 
 
+def _is_within(inner: Path, outer: Path) -> bool:
+    """Return True if `inner` is `outer` or is nested inside it.
+
+    `resolve()` collapses symlinks and '..' but not bind mounts, so two distinct
+    mount points can alias the same directory (common in containers). Fall back to
+    comparing device+inode of `inner` and each of its ancestors against `outer`, so
+    the aliasing is caught where a pure path comparison misses it. A path that
+    cannot be stat'd is skipped rather than treated as a match, to avoid a false
+    rejection.
+    """
+    if inner.is_relative_to(outer):
+        return True
+    for candidate in (inner, *inner.parents):
+        try:
+            if candidate.samefile(outer):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _assert_restore_path_clear_of_storage(dest: Path, storage_paths: list[Path] | None) -> None:
     """Reject a clean-restore target that is or contains a local storage location.
 
     A clean restore empties `dest`, so any backup archives living at or below it
     would be silently destroyed. Restoring into a subdirectory of a storage dir is
-    fine: only that subdir is emptied and the sibling archives survive. Compare
-    resolved paths so symlinks and '..' cannot slip an overlap past the check.
+    fine: only that subdir is emptied and the sibling archives survive. The overlap
+    test is device+inode aware, so two container mounts that alias the same host
+    directory are caught even though their paths differ.
 
     Raises:
         ConfigurationError: If `dest` is or contains a storage location.
@@ -111,7 +133,7 @@ def _assert_restore_path_clear_of_storage(dest: Path, storage_paths: list[Path] 
     dest_resolved = dest.resolve()
     for storage_path in storage_paths or []:
         storage_resolved = Path(storage_path).expanduser().resolve()
-        if storage_resolved.is_relative_to(dest_resolved):
+        if _is_within(storage_resolved, dest_resolved):
             msg = (
                 f"Restore path '{dest}' is or contains storage location "
                 f"'{storage_resolved}'; a clean restore there would delete the backups. "
