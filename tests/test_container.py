@@ -11,8 +11,11 @@ from zoneinfo import ZoneInfo
 import pytest
 import time_machine
 
+from ezbak import ezbak
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT
+from ezbak.container import do_backup
 from ezbak.container import main as entrypoint
+from ezbak.exceptions import BackupFailedError
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
@@ -117,3 +120,63 @@ def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
 
     assert "INFO     | Backup restored to 'restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()
+
+
+def test_entrypoint_backup_fails_when_destination_unusable(filesystem, capsys):
+    """Verify the container exits non-zero and does not report success when a destination is unusable."""
+    # Given an S3-only config with missing credentials
+    src_dir, _, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = ""
+    os.environ["EZBAK_AWS_S3_BUCKET_NAME"] = "test-bucket"
+    os.environ["EZBAK_AWS_ACCESS_KEY"] = ""
+    os.environ["EZBAK_AWS_SECRET_KEY"] = ""
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When running the entrypoint, then it exits non-zero
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+    assert exc_info.value.code == 1
+
+    # Then it does not falsely report completion
+    output = capsys.readouterr().err
+    assert "Backup complete" not in output
+
+
+def test_entrypoint_backup_fails_when_archive_creation_fails(filesystem, capsys, mocker):
+    """Verify the container exits non-zero when the archive cannot be built."""
+    # Given a valid local backup config
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # Given archive creation fails
+    mocker.patch("ezbak.core.EZBak._create_tmp_backup_file", return_value=None)
+
+    # When running the entrypoint, then it exits non-zero without a false success
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().err
+    assert "Backup complete" not in output
+
+
+def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
+    """Verify retention still runs when a destination fails so backups don't accumulate."""
+    # Given an app whose backup raises for a failed destination
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    mocker.patch.object(app, "create_backup", side_effect=BackupFailedError(["dest1"]))
+    prune_spy = mocker.patch.object(app, "prune_backups")
+
+    # When running do_backup, then it re-raises the failure
+    with pytest.raises(BackupFailedError):
+        do_backup(app)
+
+    # Then pruning still ran despite the failed backup
+    prune_spy.assert_called_once()
