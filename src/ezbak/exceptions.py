@@ -12,6 +12,22 @@ class EZBakError(Exception):
     """Base class for every error ezbak raises."""
 
 
+class ConfigurationError(EZBakError):
+    """A precondition on the configuration was not met.
+
+    Covers missing source or storage paths and sources that do not exist, so a
+    caller can distinguish a bad request from a runtime storage failure.
+    """
+
+
+class BackendNotFoundError(EZBakError):
+    """No configured storage backend handles the requested storage type.
+
+    An internal invariant failure: the routing tables and the configured
+    backends have drifted out of sync.
+    """
+
+
 class StorageInitError(EZBakError):
     """A configured storage destination could not be initialized.
 
@@ -21,6 +37,22 @@ class StorageInitError(EZBakError):
 
 class StorageWriteError(EZBakError):
     """A storage backend failed to write an archive.
+
+    Backends translate their low-level errors into this so orchestration code
+    catches a single domain type instead of backend-specific exceptions.
+    """
+
+
+class StorageReadError(EZBakError):
+    """A storage backend failed to read an archive back for restore.
+
+    Backends translate their low-level errors into this so orchestration code
+    catches a single domain type instead of backend-specific exceptions.
+    """
+
+
+class StorageDeleteError(EZBakError):
+    """A storage backend failed to delete an archive during pruning.
 
     Backends translate their low-level errors into this so orchestration code
     catches a single domain type instead of backend-specific exceptions.
@@ -43,3 +75,12 @@ class BackupFailedError(EZBakError):
         self.failed_destinations = failed_destinations
         destinations = ", ".join(failed_destinations)
         super().__init__(f"Backup failed for destination(s): {destinations}")
+
+
+class RestoreFailedError(EZBakError):
+    """A backup could not be restored.
+
+    Covers a source archive that could not be downloaded or read and an archive
+    that could not be extracted, so a failed restore never looks like a success.
+    This is especially important after a clean-before-restore wiped the target.
+    """

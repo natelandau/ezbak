@@ -10,7 +10,7 @@ from loguru import logger
 from ezbak.constants import Action, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
-from ezbak.exceptions import BackupFailedError
+from ezbak.exceptions import EZBakError
 
 
 def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
@@ -39,7 +39,7 @@ def _run_scheduled_backup(app: EZBak, scheduler: BackgroundScheduler) -> None:  
     """
     try:
         do_backup(app, scheduler)
-    except BackupFailedError as e:
+    except EZBakError as e:
         logger.error(e)
 
 
@@ -54,6 +54,18 @@ def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None
         job = scheduler.get_job(job_id="restore")
         if job and job.next_run_time:
             logger.info(f"Next scheduled run: {job.next_run_time}")
+
+
+def _run_scheduled_restore(app: EZBak, scheduler: BackgroundScheduler) -> None:  # pragma: no cover
+    """Run a scheduled restore, logging a failure without stopping the scheduler.
+
+    APScheduler routes a job exception through the stdlib logging system, which bypasses
+    the loguru sink this app configures, so catch it here and log it via loguru instead.
+    """
+    try:
+        do_restore(app, scheduler)
+    except EZBakError as e:
+        logger.error(e)
 
 
 def log_debug_info(app: EZBak) -> None:
@@ -85,7 +97,7 @@ def main() -> None:
         job = scheduler.add_job(
             func=_run_scheduled_backup
             if app.settings.entrypoint_action == Action.BACKUP
-            else do_restore,
+            else _run_scheduled_restore,
             args=[app, scheduler],
             trigger=CronTrigger.from_crontab(app.settings.cron),
             jitter=600,
@@ -112,14 +124,18 @@ def main() -> None:
     elif app.settings.entrypoint_action == Action.BACKUP:
         try:
             do_backup(app)
-        except BackupFailedError as e:
+        except EZBakError as e:
             logger.error(e)
             sys.exit(1)
         time.sleep(1)
         logger.info("Backup complete. Exiting.")
 
     elif app.settings.entrypoint_action == Action.RESTORE:
-        do_restore(app)
+        try:
+            do_restore(app)
+        except EZBakError as e:
+            logger.error(e)
+            sys.exit(1)
         time.sleep(1)
         logger.info("Restore complete. Exiting.")
 

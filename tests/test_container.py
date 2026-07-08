@@ -180,3 +180,28 @@ def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
 
     # Then pruning still ran despite the failed backup
     prune_spy.assert_called_once()
+
+
+def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_path):
+    """Verify the container exits non-zero when a restore cannot extract the archive."""
+    # Given a corrupt backup archive at the configured storage path
+    src_dir, dest1, _ = filesystem
+    backup_path = dest1 / f"test-{frozen_time_str}-yearly.tgz"
+    backup_path.write_bytes(b"not a tarball")
+
+    restore_path = tmp_path / "restore"
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When running the entrypoint, then it exits non-zero instead of a silent success
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().err
+    assert "Backup restored" not in output
