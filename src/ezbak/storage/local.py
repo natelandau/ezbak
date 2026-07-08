@@ -129,13 +129,3 @@ class LocalBackend(StorageBackend):
         """
         logger.info(f"Restoring backup from local: {backup.name}")
         return backup.path
-
-    def rename(self, backup: Backup, new_name: str) -> None:  # noqa: PLR6301
-        """Rename a local backup file within its directory.
-
-        Args:
-            backup (Backup): The backup to rename.
-            new_name (str): The new filename.
-        """
-        backup.path.rename(backup.path.parent / new_name)
-        logger.debug(f"Rename: {backup.path} -> {new_name}")

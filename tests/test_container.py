@@ -43,8 +43,6 @@ def mock_os_environ(mocker):
     os.environ["EZBAK_LOG_FILE"] = ""
     os.environ["EZBAK_LOG_LEVEL"] = ""
     os.environ["EZBAK_LOG_PREFIX"] = ""
-    os.environ["EZBAK_RENAME_FILES"] = "false"
-    os.environ["EZBAK_STORAGE_TYPE"] = "local"
     os.environ["EZBAK_TZ"] = "Etc/UTC"
 
 
@@ -65,7 +63,7 @@ def test_entrypoint_create_backup(filesystem, debug, capsys):
     output = capsys.readouterr().err
     # debug(output)
 
-    filename = f"test-{frozen_time_str}-yearly.tgz"
+    filename = f"test-{frozen_time_str}.tgz"
     assert Path(dest1 / filename).exists()
     assert Path(dest2 / filename).exists()
     assert f"INFO     | Created: dest1/{filename}" in output

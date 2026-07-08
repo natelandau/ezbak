@@ -46,38 +46,6 @@ def test_cli_create_backup(filesystem, debug, capsys, tmp_path):
     output = capsys.readouterr().err
     # debug(output)
 
-    filename = f"test-{frozen_time_str}-yearly.tgz"
-    assert Path(dest1 / filename).exists()
-    assert Path(dest2 / filename).exists()
-    assert f"INFO     | Created: dest1/{filename}" in output
-    assert f"INFO     | Created: dest2/{filename}" in output
-
-
-@time_machine.travel(frozen_time, tick=False)
-def test_cli_create_backup_no_labels(filesystem, debug, capsys, tmp_path):
-    """Verify that backups are pruned correctly."""
-    # Given: Source and destination directories from fixture
-    src_dir, dest1, dest2 = filesystem
-
-    cappa.invoke(
-        obj=EZBakCLI,
-        argv=[
-            "create",
-            "-n",
-            "test",
-            "--storage",
-            str(dest1),
-            "--storage",
-            str(dest2),
-            "--source",
-            str(src_dir),
-            "--no-label",
-        ],
-    )
-
-    output = capsys.readouterr().err
-    # debug(output)
-
     filename = f"test-{frozen_time_str}.tgz"
     assert Path(dest1 / filename).exists()
     assert Path(dest2 / filename).exists()

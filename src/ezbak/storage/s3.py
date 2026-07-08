@@ -132,13 +132,3 @@ class S3Backend(StorageBackend):
         tmp_file = self.tmp_dir / new_staging_filename()
         self.aws_service.get_object(key=backup.name, destination=tmp_file)
         return tmp_file
-
-    def rename(self, backup: Backup, new_name: str) -> None:
-        """Rename an object in the bucket via copy-and-delete.
-
-        Args:
-            backup (Backup): The backup to rename.
-            new_name (str): The new object name.
-        """
-        self.aws_service.rename_object(current_name=backup.name, new_name=new_name)
-        logger.debug(f"S3: Rename {backup.name} -> {new_name}")

@@ -1,28 +1,11 @@
 """Grammar for ezbak backup filenames.
 
-Single source of truth for how backup filenames are composed and disambiguated, so the naming convention does not drift between the code that creates names and the code that rewrites them.
+Single source of truth for how backup filenames are composed and disambiguated, so the naming convention does not drift across the code that creates them.
 """
 
 from nclutils.utils import new_uid
 
-from ezbak.constants import BACKUP_EXTENSION, BACKUP_NAME_REGEX
-
-
-def parse_backup_name(name: str) -> dict[str, str | None] | None:
-    """Split a backup filename into its named parts.
-
-    Use to read a name's components (name, timestamp, period, uuid, extension) when relabeling or stripping labels.
-
-    Args:
-        name (str): The backup filename to parse.
-
-    Returns:
-        dict[str, str | None] | None: The named groups, or None if the name does not match the grammar.
-    """
-    match = BACKUP_NAME_REGEX.search(name)
-    if match is None:
-        return None
-    return match.groupdict()
+from ezbak.constants import BACKUP_EXTENSION
 
 
 def new_staging_filename() -> str:
@@ -36,21 +19,19 @@ def new_staging_filename() -> str:
     return f"{new_uid(bits=24)}.{BACKUP_EXTENSION}"
 
 
-def build_backup_name(*, name: str, timestamp: str, period: str | None = None) -> str:
+def build_backup_name(*, name: str, timestamp: str) -> str:
     """Compose a backup filename from its parts.
 
-    Use to produce consistent, sortable names that the retention and rename logic can later parse.
+    Use to produce consistent, sortable names that the retention logic later
+    groups by timestamp.
 
     Args:
         name (str): The backup set name.
         timestamp (str): The formatted timestamp.
-        period (str | None): The time-unit label (e.g. "daily"). Omit for an unlabeled name. Defaults to None.
 
     Returns:
-        str: "{name}-{timestamp}-{period}.{ext}", or "{name}-{timestamp}.{ext}" when period is None.
+        str: "{name}-{timestamp}.{ext}".
     """
-    if period:
-        return f"{name}-{timestamp}-{period}.{BACKUP_EXTENSION}"
     return f"{name}-{timestamp}.{BACKUP_EXTENSION}"
 
 

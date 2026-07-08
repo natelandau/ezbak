@@ -14,13 +14,10 @@ from ezbak.env import EnvConfig
 def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
     """Create a backup of the service data directory and manage retention.
 
-    Performs a complete backup operation including creating the backup, pruning old backups based on retention policy, and optionally renaming backup files for better organization.
+    Performs a complete backup operation including creating the backup and pruning old backups based on retention policy.
     """
     app.create_backup()
     app.prune_backups()
-
-    if app.settings.rename_files:
-        app.rename_backups()
 
     if scheduler:  # pragma: no cover
         job = scheduler.get_job(job_id="backup")

@@ -25,3 +25,4 @@ docs/superpowers/
 .env
 .env.secrets
 .dev
+.agent/

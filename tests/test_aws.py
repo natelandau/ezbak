@@ -65,30 +65,6 @@ def test_aws_create_backup(
     backup_manager.create_backup()
     output = capsys.readouterr().err
     # debug(output)
-    assert "test-20250609T000000-yearly.tgz" in output
-
-
-@time_machine.travel(frozen_time, tick=False)
-def test_aws_create_backup_no_labels(filesystem, debug, capsys, tmp_path):
-    """Test AWS create backup."""
-    # Given: Source and destination directories from fixture
-    src_dir, _, _ = filesystem
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        label_time_units=False,
-        log_level="TRACE",
-        tz="Etc/UTC",
-        aws_s3_bucket_name="test-bucket",
-        aws_access_key="test-access-key-id",
-        aws_secret_key="test-secret-access-key",
-    )
-
-    # When: Creating a backup
-    backup_manager.create_backup()
-    output = capsys.readouterr().err
-    # debug(output)
     assert "test-20250609T000000.tgz" in output
 
 
@@ -137,31 +113,6 @@ def test_delete_object(mocker, debug, capsys, tmp_path):
     output = capsys.readouterr().err
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
-
-
-def test_rename_object(mocker, debug, capsys, tmp_path):
-    """Verify the aws service renames a file."""
-    # Given: A backup manager configured with test parameters
-    instantiate_logger(LogLevel.TRACE)
-
-    aws_service = AWSService(
-        bucket_name="test-bucket",
-        aws_access_key="test-access-key-id",
-        aws_secret_key="test-secret-access-key",
-    )
-    aws_service.rename_object(
-        current_name="test-20240609T000000-yearly.tgz", new_name="test-20240609T000000-yearly.tgz"
-    )
-    output = capsys.readouterr().err
-    # debug(output)
-    assert (
-        "S3: Attempting to rename 'test-20240609T000000-yearly.tgz' to 'test-20240609T000000-yearly.tgz'"
-        in output
-    )
-    assert (
-        "S3: Copied 'test-20240609T000000-yearly.tgz' to 'test-20240609T000000-yearly.tgz'."
-        in output
-    )
 
 
 def test_delete_objects(mocker, debug, capsys, tmp_path):

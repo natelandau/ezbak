@@ -36,7 +36,6 @@ class StorageBackend(ABC):
         """
         return StorageLocation(
             name=self.settings.name,
-            label_time_units=self.settings.label_time_units,
             tz=self.settings.tz,
             storage_path=storage_path,
             storage_type=self.storage_type,
@@ -62,7 +61,3 @@ class StorageBackend(ABC):
     @abstractmethod
     def prepare_for_restore(self, backup: Backup) -> Path | None:
         """Return a local path to the backup archive, or None if it cannot be retrieved."""
-
-    @abstractmethod
-    def rename(self, backup: Backup, new_name: str) -> None:
-        """Rename a single backup in place."""

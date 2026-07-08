@@ -80,16 +80,14 @@ class StorageLocation:
         storage_type: StorageType,
         backups: list[Backup],
         name: str,
-        label_time_units: bool,
         tz: str | None = None,
     ) -> None:
         self.storage_path = storage_path
         self.storage_type = storage_type
         self.backups = backups
         self.name = name
-        self.backups_by_time_unit, self.dates_in_use = self._categorize_backups_by_time_unit()
+        self.backups_by_time_unit = self._categorize_backups_by_time_unit()
         self.tz = tz
-        self.label_time_units = label_time_units
 
         # This variable is only used for logging purposes.
         self.logging_name = (
@@ -100,15 +98,15 @@ class StorageLocation:
 
     def _categorize_backups_by_time_unit(
         self,
-    ) -> tuple[dict[BackupType, list[Backup]], dict[BackupType, set[str]]]:
-        """Categorize backups by time unit and return a dictionary of backups grouped by time unit and a dictionary of dates in use.
+    ) -> dict[BackupType, list[Backup]]:
+        """Categorize backups by time unit for retention policy grouping.
 
         Returns:
-            tuple[dict[BackupType, list[Backup]], dict[BackupType, set[str]]]: A tuple containing a dictionary of backups grouped by time unit and a dictionary of dates in use.
+            dict[BackupType, list[Backup]]: Backups grouped by time unit.
         """
         backups_by_type: dict[BackupType, list[Backup]] = defaultdict(list)
-        # A set for O(1) membership: dates_in_use is only ever tested with `in`, never
-        # iterated in order (see generate_new_backup_name).
+        # A set for O(1) membership: existing_dates drives first-match-wins bucketing
+        # below and is not needed once categorization is complete.
         existing_dates: dict[BackupType, set[str]] = defaultdict(set)
 
         period_definitions = [
@@ -133,15 +131,17 @@ class StorageLocation:
                     backups_by_type[period_type].append(backup)
                     break
 
-        return backups_by_type, existing_dates
+        return backups_by_type
 
     def generate_new_backup_name(self) -> str:
-        """Generate a unique backup filename with timestamp and optional time unit classification.
+        """Generate a unique, sortable backup filename for the current time.
 
-        Create backup filenames that include timestamps and optionally classify backups by time periods (yearly, monthly, daily, etc.) to enable intelligent retention policies. Use this to ensure backup files have consistent, sortable names that support automated cleanup operations.
+        Produce a ``{name}-{timestamp}.{extension}`` filename, appending a short
+        unique id only when another backup already holds that exact name. Use this
+        to give each new archive a consistent, collision-free name.
 
         Returns:
-            str: The generated backup filename in format "{name}-{timestamp}-{period}.{extension}" or "{name}-{timestamp}.{extension}" depending on configuration.
+            str: The generated backup filename.
 
         Raises:
             TimeZoneNotFoundError: If the configured timezone identifier is invalid.
@@ -156,30 +156,7 @@ class StorageLocation:
             raise
 
         timestamp = now.to_stdlib().strftime(DEFAULT_DATE_FORMAT)
-
-        if not self.label_time_units:
-            filename = build_backup_name(name=self.name, timestamp=timestamp)
-        else:
-            period_checks = [
-                ("yearly", BackupType.YEARLY, str(now.year)),
-                ("monthly", BackupType.MONTHLY, str(now.month)),
-                ("weekly", BackupType.WEEKLY, now.to_stdlib().strftime("%W")),
-                ("daily", BackupType.DAILY, str(now.day)),
-                ("hourly", BackupType.HOURLY, str(now.hour)),
-                ("minutely", BackupType.MINUTELY, str(now.minute)),
-            ]
-
-            # Fall-through bucket when every coarser period for this timestamp is already taken
-            period = "minutely"
-
-            for period_name, backup_type, current_value in period_checks:
-                if current_value in self.dates_in_use[backup_type]:
-                    continue
-
-                period = period_name
-                break
-
-            filename = build_backup_name(name=self.name, timestamp=timestamp, period=period)
+        filename = build_backup_name(name=self.name, timestamp=timestamp)
 
         if filename in [x.name for x in self.backups]:
             filename = add_uid_suffix(filename)

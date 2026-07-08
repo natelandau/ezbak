@@ -29,7 +29,7 @@ Tool config (ruff, mypy, pytest, coverage) lives in `pyproject.toml`.
 ## Conventions
 
 - Commit subject max **50** chars (the `committed` pre-commit hook enforces this, not 70); body lines wrap at 72.
-- `CHANGELOG.md` is commitizen-managed (regenerated on `cz bump`). Put pending notes under `## Unreleased`.
+- `CHANGELOG.md` is commitizen-managed and regenerated on `cz bump`. Never hand-edit it, including for breaking changes; the release tooling owns it.
 - Version source is `constants.py:__version__` (commitizen `version_files`).
 
 ## Gotchas
