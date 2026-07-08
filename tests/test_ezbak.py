@@ -545,3 +545,39 @@ def test_merge_move_overlays_and_overwrites(tmp_path):
     assert (dst / "sub" / "existing.txt").read_text() == "old-existing"  # nested survives
     assert (dst / "sub" / "added.txt").read_text() == "added"  # nested merged
     assert not any(src.iterdir())  # staging emptied
+
+
+def test_merge_move_handles_type_collisions(tmp_path):
+    """Verify _merge_move replaces across type mismatches without following symlinks."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    # dir in src replaces a file in dst
+    (dst / "a").write_text("old-file")
+    (src / "a").mkdir()
+    (src / "a" / "inner.txt").write_text("inner")
+
+    # file in src replaces a dir in dst
+    (dst / "b").mkdir()
+    (dst / "b" / "leftover.txt").write_text("leftover")
+    (src / "b").write_text("new-file")
+
+    # file in src replaces a symlink in dst (symlink must be unlinked, not followed)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    (dst / "c").symlink_to(outside)
+    (src / "c").write_text("replacement")
+
+    _merge_move(src, dst)
+
+    assert (dst / "a").is_dir()
+    assert (dst / "a" / "inner.txt").read_text() == "inner"
+    assert (dst / "b").is_file()
+    assert (dst / "b").read_text() == "new-file"
+    assert (dst / "c").is_file()
+    assert not (dst / "c").is_symlink()
+    assert (dst / "c").read_text() == "replacement"
+    assert outside.read_text() == "outside"  # symlink target untouched (not followed)
+    assert not any(src.iterdir())
