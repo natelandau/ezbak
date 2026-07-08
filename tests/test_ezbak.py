@@ -6,11 +6,13 @@ from pathlib import Path
 from tempfile import mkdtemp
 from zoneinfo import ZoneInfo
 
+import pytest
 import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_DATE_FORMAT
 from ezbak.core import _commit_restore, _merge_move
+from ezbak.exceptions import RestoreFailedError
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -489,6 +491,79 @@ def test_restore_with_clean(debug, tmp_path, capsys, filesystem):
         assert (restore_dir / src_dir.name / file.name).exists()
 
     assert not (restore_dir / test_file.name).exists()
+
+
+def test_restore_clean_is_atomic(tmp_path, filesystem):
+    """Verify a clean restore replaces contents and leaves no staging dir behind."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "stale.txt").write_text("stale")
+
+    assert mgr.restore_backup(restore_dir, clean_before_restore=True) is True
+
+    for file in src_dir.rglob("*"):
+        assert (restore_dir / src_dir.name / file.name).exists()
+    assert not (restore_dir / "stale.txt").exists()
+    assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
+
+
+def test_restore_extract_failure_leaves_dest_intact(tmp_path, filesystem, monkeypatch):
+    """Verify a mid-extract failure leaves the destination untouched."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "keep.txt").write_text("keep")
+
+    def boom(self, *args: object, **kwargs: object):
+        msg = "simulated disk full during extract"
+        raise OSError(msg)
+
+    monkeypatch.setattr("tarfile.TarFile.extractall", boom)
+
+    with pytest.raises(RestoreFailedError):
+        mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    # Destination is untouched: pre-existing file survives, nothing extracted,
+    # no staging directory left behind.
+    assert (restore_dir / "keep.txt").read_text() == "keep"
+    assert not (restore_dir / src_dir.name).exists()
+    assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
+
+
+def test_restore_chowns_staging_tree(tmp_path, filesystem, monkeypatch):
+    """Verify chown targets the staging tree (a child of the restore path)."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        chown_uid=0,
+        chown_gid=0,
+        log_level="error",
+    )
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    called = {}
+
+    def fake_chown(directory, uid, gid):
+        called["directory"] = Path(directory)
+
+    monkeypatch.setattr("ezbak.core.chown_files", fake_chown)
+
+    mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    assert called["directory"].name.startswith(".ezbak-restore-")
+    assert called["directory"].parent.resolve() == restore_dir.resolve()
 
 
 def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):

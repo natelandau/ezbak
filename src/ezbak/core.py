@@ -6,7 +6,7 @@ import shutil
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory, mkdtemp  # noqa: F401
+from tempfile import TemporaryDirectory, mkdtemp
 from typing import TYPE_CHECKING, Literal, assert_never
 
 from loguru import logger
@@ -318,20 +318,27 @@ class EZBak:
         """
         self._backend_for(backup).delete(backup)
 
-    def _do_restore(self, backup: Backup, destination: Path) -> bool:
-        """Restore a backup file to the storage locations.
+    def _do_restore(self, backup: Backup, destination: Path, *, clean: bool) -> bool:
+        """Restore a backup archive into the destination directory.
 
-        Extract and decompress a backup archive to a specified destination directory, optionally changing file ownership. Use this to recover files from a backup archive for disaster recovery or data migration.
+        Extract the archive into a staging directory created inside `destination`,
+        change ownership of the staged files if configured, then swap the staged
+        contents into `destination`. Staging inside `destination` keeps the swap a
+        same-filesystem rename even when `destination` is a mount point, and means
+        the live directory is not touched until the extract fully succeeds.
 
         Args:
             backup (Backup): The backup to restore.
             destination (Path): The destination path to restore the backup to.
+            clean (bool): Remove existing contents of `destination` during the
+                commit before moving the restored files in.
 
         Returns:
             bool: True if the backup was successfully restored.
 
         Raises:
-            RestoreFailedError: If the archive is missing from storage or cannot be extracted.
+            RestoreFailedError: If the archive is missing, cannot be extracted, or
+                the swap into the destination fails.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
         tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
@@ -340,24 +347,55 @@ class EZBak:
             logger.error(msg)
             raise RestoreFailedError(msg)
 
-        logger.trace(f"Attempting to extract backup to '{destination}'")
-        # Catch OSError alongside TarError so a missing or unreadable local archive
-        # fails loudly instead of escaping as a raw error, which matters most after a
-        # clean-before-restore has already emptied the destination.
+        # Stage inside the destination (a child, not a sibling) so the commit is a
+        # same-filesystem rename even when the destination is itself a mount point.
         try:
-            with tarfile.open(tarfile_path) as archive:
-                archive.extractall(path=destination, filter="data")
-        except (tarfile.TarError, OSError) as e:
-            msg = f"Failed to extract backup archive: {tarfile_path}: {e}"
+            staging = Path(mkdtemp(dir=destination, prefix=".ezbak-restore-"))
+        except OSError as e:
+            msg = f"Failed to create restore staging directory in '{destination}': {e}"
             logger.error(msg)
             raise RestoreFailedError(msg) from e
 
-        # Compare against None, not truthiness: uid/gid 0 (root) is a valid target
-        # and must not be treated as "unset".
-        if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
-            chown_files(
-                directory=destination, uid=self.settings.chown_uid, gid=self.settings.chown_gid
-            )
+        logger.trace(f"Attempting to extract backup to staging dir '{staging}'")
+        try:
+            # Catch OSError alongside TarError so a missing or unreadable archive
+            # fails loudly rather than escaping as a raw error. The extract runs
+            # entirely in staging, so a failure here never touches the live data.
+            try:
+                with tarfile.open(tarfile_path) as archive:
+                    archive.extractall(path=staging, filter="data")
+            except (tarfile.TarError, OSError) as e:
+                msg = f"Failed to extract backup archive: {tarfile_path}: {e}"
+                logger.error(msg)
+                raise RestoreFailedError(msg) from e
+
+            # chown the staging tree, not the destination: in overlay mode only the
+            # restored files change ownership; in clean mode staging becomes the
+            # whole destination. Compare against None, not truthiness: uid/gid 0
+            # (root) is a valid target and must not be treated as "unset".
+            if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
+                chown_files(
+                    directory=staging,
+                    uid=self.settings.chown_uid,
+                    gid=self.settings.chown_gid,
+                )
+
+            # Commit only after a fully successful extract.
+            try:
+                _commit_restore(staging, destination, clean=clean)
+            except OSError as e:
+                # The commit deletes then moves, so a failure here can leave the
+                # destination partial. This window is a handful of fast renames
+                # after a validated extract; make it loud.
+                msg = (
+                    f"Restore failed while swapping files into '{destination}'; "
+                    f"the directory may be in an inconsistent state: {e}"
+                )
+                logger.error(msg)
+                raise RestoreFailedError(msg) from e
+        finally:
+            # Never leak the staging dir inside the mount, on success or failure.
+            shutil.rmtree(staging, ignore_errors=True)
 
         logger.info(f"Backup restored to '{destination}'")
         return True
@@ -787,8 +825,8 @@ class EZBak:
                 self._log_no_backup("No backup found to restore")
                 return False
 
-        if clean_before_restore or self.settings.clean_before_restore:
-            clean_directory(dest)
-            logger.info("Cleaned all files in restore path before restore")
+        # Clean happens inside the commit now, after a successful extract, so a
+        # failed restore never empties the destination.
+        effective_clean = clean_before_restore or self.settings.clean_before_restore
 
-        return self._do_restore(backup=target, destination=dest)
+        return self._do_restore(backup=target, destination=dest, clean=effective_clean)
