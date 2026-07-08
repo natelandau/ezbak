@@ -277,6 +277,35 @@ def test_run_scheduled_pings_failure(filesystem, mocker):
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
 
 
+def test_entrypoint_restore_fails_when_no_backup_for_date(filesystem, capsys, tmp_path):
+    """Verify the container exits non-zero when EZBAK_RESTORE_DATE matches no backup."""
+    # Given a backup archive dated 2025 at the configured storage path
+    src_dir, dest1, _ = filesystem
+    backup_name = f"test-{frozen_time_str}-yearly.tgz"
+    backup_path = Path(dest1 / backup_name)
+    shutil.copy2(fixture_archive_path, backup_path)
+
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    # A restore date before the only backup on disk resolves to no match.
+    os.environ["EZBAK_RESTORE_DATE"] = "2024"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When running the entrypoint, then it exits non-zero instead of a silent success
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().err
+    assert "Backup restored" not in output
+    assert "Restore complete" not in output
+
+
 def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_path):
     """Verify the container exits non-zero when a restore cannot extract the archive."""
     # Given a corrupt backup archive at the configured storage path

@@ -200,6 +200,16 @@ class RestoreCommand:
         ),
     ] = None
 
+    date: Annotated[
+        str,
+        cappa.Arg(
+            long="date",
+            short="t",
+            help="Restore the newest backup at or before this time. Formats: YYYY, YYYYMM, YYYYMMDD, YYYYMMDDTHH, YYYYMMDDTHHMM, YYYYMMDDTHHMMSS.",
+            group=(3, "Optional"),
+        ),
+    ] = None
+
 
 @cappa.command(name="prune", invoke="ezbak.cli_commands.prune.main")
 class PruneCommand:
@@ -336,6 +346,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
     elif isinstance(cmd, RestoreCommand):
         extra = {
             "restore_path": cmd.destination,
+            "restore_date": cmd.date,
             "clean_before_restore": cmd.clean,
             "chown_uid": cmd.uid,
             "chown_gid": cmd.gid,

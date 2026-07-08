@@ -6,14 +6,20 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
 from loguru import logger
 from nclutils.fs import clean_directory
 from pydantic import ValidationError
+from whenever import PlainDateTime
 
 from ezbak.config import BackupConfig
-from ezbak.constants import RetentionPolicyType, StorageType
+from ezbak.constants import (
+    DEFAULT_DATE_PATTERN,
+    RESTORE_DATE_REGEX,
+    RetentionPolicyType,
+    StorageType,
+)
 from ezbak.exceptions import (
     BackendNotFoundError,
     BackupFailedError,
@@ -36,6 +42,8 @@ from ezbak.storage.aws import AWSService
 
 if TYPE_CHECKING:
     from ezbak.backup import Backup, StorageLocation
+
+PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
 
 
 def ezbak(**kwargs: object) -> EZBak:
@@ -470,6 +478,133 @@ class EZBak:
         """
         return [x for y in self.storage_locations for x in y.backups]
 
+    @staticmethod
+    def _add_one_unit(period_start: PlainDateTime, unit: PeriodUnit) -> PlainDateTime:
+        """Advance a plain date/time by one calendar or exact unit.
+
+        Dispatched on the literal ``unit`` string (rather than **kwargs-unpacked) so
+        each ``add()`` call has a literal keyword mypy can match against its
+        overloads.
+
+        Args:
+            period_start (PlainDateTime): The start-of-period instant to advance.
+            unit (PeriodUnit): One of "years", "months", "days", "hours", "minutes", "seconds".
+
+        Returns:
+            PlainDateTime: `period_start` advanced by one unit.
+        """
+        # naive_arithmetic_ok: hour/minute/second are exact units; adding them to a
+        # plain datetime is intentional here because the caller converts the result
+        # to a zoned instant immediately.
+        match unit:
+            case "years":
+                return period_start.add(years=1, naive_arithmetic_ok=True)
+            case "months":
+                return period_start.add(months=1, naive_arithmetic_ok=True)
+            case "days":
+                return period_start.add(days=1, naive_arithmetic_ok=True)
+            case "hours":
+                return period_start.add(hours=1, naive_arithmetic_ok=True)
+            case "minutes":
+                return period_start.add(minutes=1, naive_arithmetic_ok=True)
+            case "seconds":
+                return period_start.add(seconds=1, naive_arithmetic_ok=True)
+            case _:
+                assert_never(unit)
+
+    def _resolve_upper_boundary(self, point_in_time: str) -> float:
+        """Convert a partial date/time to an exclusive upper-boundary timestamp.
+
+        Pad the value to the start of its period, then advance by one unit of that
+        period so an "at or before" match is a strict "less than" the returned
+        instant. The "+1 unit" boundary avoids end-of-month, leap-year, and
+        59-second edge cases.
+
+        Args:
+            point_in_time (str): A no-dash date/time, e.g. "202506" or "20250701T0330".
+
+        Returns:
+            float: POSIX timestamp of the exclusive upper boundary.
+
+        Raises:
+            ConfigurationError: If the value is not a recognized date/time shape, has an out-of-range field, or overflows the boundary calculation.
+            AssertionError: If the value's length doesn't match one of the six recognized shapes (unreachable given the regex check above).
+        """
+        if not RESTORE_DATE_REGEX.match(point_in_time):
+            msg = f"Invalid restore date: {point_in_time!r} (expected YYYY[MM[DD[THH[MM[SS]]]]])"
+            raise ConfigurationError(msg)
+
+        # Single source of truth: shape length determines both the start-of-period
+        # padding and the unit to advance by one for the exclusive boundary.
+        suffix: str
+        unit: PeriodUnit
+        match len(point_in_time):
+            case 4:
+                suffix, unit = "0101T000000", "years"
+            case 6:
+                suffix, unit = "01T000000", "months"
+            case 8:
+                suffix, unit = "T000000", "days"
+            case 11:
+                suffix, unit = "0000", "hours"
+            case 13:
+                suffix, unit = "00", "minutes"
+            case 15:
+                suffix, unit = "", "seconds"
+            case _:
+                # Unreachable: RESTORE_DATE_REGEX above only matches these six
+                # lengths, so no other length can reach this branch. `len()`
+                # returns plain `int`, not a Literal, so mypy can't prove this
+                # via `assert_never`; fail loudly instead of a silent fallback.
+                msg = f"Unhandled restore date length: {len(point_in_time)}"
+                raise AssertionError(msg)
+
+        try:
+            period_start = PlainDateTime.parse(point_in_time + suffix, format=DEFAULT_DATE_PATTERN)
+            # Advance inside the try: an out-of-range field (e.g. month 13) fails the
+            # parse, and a boundary past PlainDateTime's max year (e.g. "9999" + 1 year)
+            # fails the add. Both must surface as a clean ConfigurationError, not a raw
+            # ValueError that escapes the CLI/container EZBakError handlers.
+            boundary_plain = self._add_one_unit(period_start=period_start, unit=unit)
+        except ValueError as e:
+            msg = f"Invalid restore date: {point_in_time!r}"
+            raise ConfigurationError(msg) from e
+
+        boundary = (
+            boundary_plain.assume_tz(self.settings.tz)
+            if self.settings.tz
+            else boundary_plain.assume_system_tz()
+        )
+        return boundary.timestamp()
+
+    def get_backup_as_of(self, point_in_time: str) -> Backup | None:
+        """Find the newest backup at or before a point in time for point-in-time recovery.
+
+        Select the most recent backup whose timestamp falls at or before the end of the
+        period named by ``point_in_time``, so an older backup can be restored instead of
+        only the latest. Accepts the no-dash filename timestamp shape at any granularity:
+        ``YYYY``, ``YYYYMM``, ``YYYYMMDD``, ``YYYYMMDDTHH``, ``YYYYMMDDTHHMM``, or
+        ``YYYYMMDDTHHMMSS``.
+
+        Args:
+            point_in_time (str): The moment to restore as of, e.g. "20250102".
+
+        Returns:
+            Backup | None: The newest qualifying backup, or None when none is old enough.
+        """
+        boundary = self._resolve_upper_boundary(point_in_time)
+
+        candidates = [
+            backup for backup in self.list_backups() if backup.zoned_datetime.timestamp() < boundary
+        ]
+        if not candidates:
+            logger.error(f"No backup at or before {point_in_time}")
+            return None
+
+        selected = max(candidates, key=lambda b: b.zoned_datetime.timestamp())
+        logger.debug(f"Selected backup as of {point_in_time}: {selected.name}")
+        return selected
+
     def prune_backups(self, *, dry_run: bool = False) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.
 
@@ -514,7 +649,11 @@ class EZBak:
         return backups_to_delete
 
     def restore_backup(
-        self, restore_path: Path | str | None = None, *, clean_before_restore: bool = False
+        self,
+        restore_path: Path | str | None = None,
+        *,
+        clean_before_restore: bool = False,
+        backup: Backup | None = None,
     ) -> bool:
         """Restore the latest or specified backup to `restore_path`.
 
@@ -523,6 +662,7 @@ class EZBak:
         Args:
             restore_path (Path | str | None): Target directory to restore into. When None, restore the latest backup to its original path or default target. Defaults to None.
             clean_before_restore (bool): Remove existing contents at the target before restoring. Defaults to False.
+            backup (Backup | None): Restore this specific backup instead of selecting one. When None, use the configured restore_date if set, else the latest backup. Defaults to None.
 
         Returns:
             bool: True when a backup is successfully restored; False when there is no
@@ -550,15 +690,31 @@ class EZBak:
             msg = f"Restore destination does not exist: {dest}"
             raise ConfigurationError(msg)
 
-        # Confirm there is a backup to restore before cleaning, so clean_before_restore
-        # never empties the destination when there is nothing to restore into it.
-        most_recent_backup = self.get_latest_backup()
-        if not most_recent_backup:
-            logger.error("No backup found to restore")
-            return False
+        # A blank restore_date (empty or whitespace, e.g. an unset EZBAK_RESTORE_DATE
+        # templated to "") means no point in time was requested: fall through to the
+        # latest backup, consistently for "" and "  ", rather than one silently
+        # restoring latest while the other raises on the whitespace.
+        restore_date = (self.settings.restore_date or "").strip()
+
+        # Precedence: an explicit Backup wins; else a configured restore_date selects a
+        # point in time; else the latest. Confirm a target before cleaning, so
+        # clean_before_restore never empties the destination with nothing to restore.
+        if backup is not None:
+            target = backup
+        elif restore_date:
+            target = self.get_backup_as_of(restore_date)
+            # get_backup_as_of already logged the miss. Fail rather than silently
+            # falling back to the newest backup, which would restore the wrong data.
+            if target is None:
+                return False
+        else:
+            target = self.get_latest_backup()
+            if target is None:
+                logger.error("No backup found to restore")
+                return False
 
         if clean_before_restore or self.settings.clean_before_restore:
             clean_directory(dest)
             logger.info("Cleaned all files in backup destination before restore")
 
-        return self._do_restore(backup=most_recent_backup, destination=dest)
+        return self._do_restore(backup=target, destination=dest)

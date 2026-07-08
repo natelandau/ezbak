@@ -78,6 +78,11 @@ backups.prune_backups()
 
 # Restore the latest backup
 backups.restore_backup(restore_path=Path("/path/to/restore_location"))
+
+# Restore an older backup instead of the latest
+backup = backups.get_backup_as_of("20241201")
+if backup:
+    backups.restore_backup(restore_path=Path("/path/to/restore_location"), backup=backup)
 ```
 
 For quick scripts, `ezbak(**kwargs)` is a shortcut that builds the `BackupConfig` for you. These two calls are equivalent:
@@ -89,7 +94,9 @@ backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backu
 backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_paths=["/backups"]))
 ```
 
-An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, and `get_latest_backup()`. Call `prune_backups(dry_run=True)` to get back the list of backups the retention policy would delete without removing any of them.
+An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, `get_latest_backup()`, and `get_backup_as_of()`. Call `prune_backups(dry_run=True)` to get back the list of backups the retention policy would delete without removing any of them.
+
+`get_backup_as_of(point_in_time)` returns the newest backup at or before the end of the period you name, so you can restore an older backup instead of the latest. Pass its result to `restore_backup(backup=...)`. An explicit `backup` argument takes priority over a configured `restore_date`, which in turn takes priority over the latest backup.
 
 `create_backup()` raises `BackupFailedError` when a configured destination can't be used, so a failed backup never looks like a success. It still writes to every destination that works, so a partial failure keeps the copies that succeeded. Catch the error to handle a failed run:
 
@@ -134,7 +141,12 @@ ezbak --name my-documents --storage ~/Backups prune --max-backups 10 --dry-run
 
 # Restore the latest backup
 ezbak --name my-documents --storage ~/Backups restore --destination ~/restore
+
+# Restore the newest backup at or before a point in time
+ezbak --name my-documents --storage ~/Backups restore --destination ~/restore --date 202412
 ```
+
+`restore --date` (short `-t`) restores the newest backup at or before the end of the period you name, not the backup closest to it: `--date 202412` restores the last backup from December 2024, even if that backup landed on December 30. Accepted formats, from a year down to a second, are `YYYY`, `YYYYMM`, `YYYYMMDD`, `YYYYMMDDTHH`, `YYYYMMDDTHHMM`, and `YYYYMMDDTHHMMSS`. The full `YYYYMMDDTHHMMSS` form matches the timestamp the `list` command prints for each backup, so you can copy a value straight from `list` output to restore that exact backup.
 
 To back up to S3 from the command line, pass `--s3-bucket` and provide credentials through the `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` environment variables:
 
@@ -185,6 +197,17 @@ docker run -it \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_STORAGE_PATHS=/backups \
     -e EZBAK_RESTORE_PATH=/restore \
+    ghcr.io/natelandau/ezbak:latest
+
+# Restore the newest backup at or before a point in time
+docker run -it \
+    -v /path/to/backups:/backups:ro \
+    -v /path/to/restore:/restore \
+    -e EZBAK_ACTION=restore \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_RESTORE_PATH=/restore \
+    -e EZBAK_RESTORE_DATE=202412 \
     ghcr.io/natelandau/ezbak:latest
 ```
 
@@ -317,6 +340,7 @@ Restore:
 
 ```python
 restore_path=Path("/restore")  # Where to restore (or pass it to restore_backup())
+restore_date="202412"          # Restore the newest backup at or before this point in time
 clean_before_restore=True      # Empty the restore path first
 chown_uid=1000                 # Set owner on restored files
 chown_gid=1000                 # Set group on restored files
@@ -347,9 +371,12 @@ Some options apply only when running the container:
 EZBAK_ACTION=backup           # backup or restore
 EZBAK_CRON="0 2 * * *"        # Cron schedule (daily at 2 AM)
 EZBAK_RESTORE_PATH=/restore   # Where a restore writes files
+EZBAK_RESTORE_DATE=202412     # Restore action: newest backup at or before this point in time
 TZ="America/New_York"         # Timezone for backup timestamps
 EZBAK_HEALTHCHECK_URL="https://hc-ping.com/your-uuid"  # Monitor scheduled runs
 ```
+
+`EZBAK_RESTORE_DATE` only applies to the `restore` action. See [Command line](#command-line) for the accepted date formats and the at-or-before matching rule.
 
 When you set `EZBAK_HEALTHCHECK_URL`, a scheduled container pings that URL after every run: the base URL on success, and the URL with `/fail` appended on failure. Point it at a monitor like [Healthchecks.io](https://healthchecks.io) to get alerted when a scheduled backup fails or stops running altogether. The ping never blocks or fails the backup itself. This applies only to scheduled runs (`EZBAK_CRON`); a one-shot container run reports its result through the exit code instead.
 

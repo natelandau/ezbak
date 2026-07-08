@@ -9,10 +9,11 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import cappa
+import pytest
 import time_machine
 
 from ezbak.backup import Backup
-from ezbak.cli import CreateCommand, EZBakCLI, build_config
+from ezbak.cli import CreateCommand, EZBakCLI, RestoreCommand, build_config
 from ezbak.cli_commands import list as list_cmd
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
 from ezbak.logging import instantiate_logger
@@ -361,3 +362,80 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     # Then parsing succeeds and the config has no local paths but the S3 bucket
     assert config.storage_paths == []
     assert config.aws_s3_bucket_name == "my-bucket"
+
+
+def test_build_config_maps_restore_date():
+    """Verify --date is mapped onto restore_date in the built config."""
+    # Given a restore command carrying a date
+    cli = EZBakCLI(
+        command=RestoreCommand(destination=Path("/tmp/restore"), date="20250102"),  # noqa: S108
+        name="test",
+        storage_paths=[Path("/tmp")],  # noqa: S108
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then restore_date is set
+    assert config.restore_date == "20250102"
+
+
+def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
+    """Verify restore --date restores the point-in-time backup."""
+    # Given two backups on different days in one storage location
+    _, dest1, _ = filesystem
+    for ts in ("20250101T120000", "20250103T090000"):
+        shutil.copy2(fixture_archive_path, dest1 / f"test-{ts}.tgz")
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    # When restoring as of 2025-01-02 (only the Jan 1 backup qualifies).
+    # -v raises the log level to DEBUG so the selection line is emitted.
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "restore",
+            "-v",
+            "--name",
+            "test",
+            "--storage",
+            str(dest1),
+            "--destination",
+            str(restore_path),
+            "--date",
+            "20250102",
+        ],
+    )
+    output = capsys.readouterr().err
+
+    # Then a restore happens and the point-in-time backup was selected
+    assert "Backup restored to 'restore'" in output
+    assert "Selected backup as of 20250102: test-20250101T120000.tgz" in output
+
+
+def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
+    """Verify restore --date exits non-zero when nothing qualifies."""
+    # Given a single 2025 backup
+    _, dest1, _ = filesystem
+    shutil.copy2(fixture_archive_path, dest1 / "test-20250103T090000.tgz")
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    # When restoring as of a year before it
+    # Then the CLI exits non-zero
+    with pytest.raises(cappa.Exit) as exc:
+        cappa.invoke(
+            obj=EZBakCLI,
+            argv=[
+                "restore",
+                "--name",
+                "test",
+                "--storage",
+                str(dest1),
+                "--destination",
+                str(restore_path),
+                "--date",
+                "2024",
+            ],
+        )
+    assert exc.value.code == 1
