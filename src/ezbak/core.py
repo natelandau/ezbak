@@ -476,6 +476,38 @@ class EZBak:
         """
         return [x for y in self.storage_locations for x in y.backups]
 
+    @staticmethod
+    def _add_one_unit(period_start: PlainDateTime, unit: str) -> PlainDateTime:
+        """Advance a plain date/time by one calendar or exact unit.
+
+        Dispatched on the literal ``unit`` string (rather than **kwargs-unpacked) so
+        each ``add()`` call has a literal keyword mypy can match against its
+        overloads.
+
+        Args:
+            period_start (PlainDateTime): The start-of-period instant to advance.
+            unit (str): One of "years", "months", "days", "hours", "minutes", "seconds".
+
+        Returns:
+            PlainDateTime: `period_start` advanced by one unit.
+        """
+        # naive_arithmetic_ok: hour/minute/second are exact units; adding them to a
+        # plain datetime is intentional here because the caller converts the result
+        # to a zoned instant immediately.
+        match unit:
+            case "years":
+                return period_start.add(years=1, naive_arithmetic_ok=True)
+            case "months":
+                return period_start.add(months=1, naive_arithmetic_ok=True)
+            case "days":
+                return period_start.add(days=1, naive_arithmetic_ok=True)
+            case "hours":
+                return period_start.add(hours=1, naive_arithmetic_ok=True)
+            case "minutes":
+                return period_start.add(minutes=1, naive_arithmetic_ok=True)
+            case _:
+                return period_start.add(seconds=1, naive_arithmetic_ok=True)
+
     def _resolve_upper_boundary(self, point_in_time: str) -> float:
         """Convert a partial date/time to an exclusive upper-boundary timestamp.
 
@@ -497,16 +529,21 @@ class EZBak:
             msg = f"Invalid restore date: {point_in_time!r} (expected YYYY[MM[DD[THH[MM[SS]]]]])"
             raise ConfigurationError(msg)
 
-        # start-of-period padding, keyed by the length of the recognized shape
-        suffix_by_length = {
-            4: "0101T000000",
-            6: "01T000000",
-            8: "T000000",
-            11: "0000",
-            13: "00",
-            15: "",
-        }
-        suffix = suffix_by_length[len(point_in_time)]
+        # Single source of truth: shape length determines both the start-of-period
+        # padding and the unit to advance by one for the exclusive boundary.
+        match len(point_in_time):
+            case 4:
+                suffix, unit = "0101T000000", "years"
+            case 6:
+                suffix, unit = "01T000000", "months"
+            case 8:
+                suffix, unit = "T000000", "days"
+            case 11:
+                suffix, unit = "0000", "hours"
+            case 13:
+                suffix, unit = "00", "minutes"
+            case _:
+                suffix, unit = "", "seconds"
 
         try:
             period_start = PlainDateTime.parse(point_in_time + suffix, format=DEFAULT_DATE_PATTERN)
@@ -514,23 +551,7 @@ class EZBak:
             msg = f"Invalid restore date: {point_in_time!r}"
             raise ConfigurationError(msg) from e
 
-        # naive_arithmetic_ok: hour/minute/second are exact units; adding them to a plain
-        # datetime is intentional here because we convert to a zoned instant immediately.
-        # Branched (rather than dict-dispatched) so each `add()` call has literal keyword
-        # arguments that mypy can match against its overloads.
-        match len(point_in_time):
-            case 4:
-                boundary_plain = period_start.add(years=1, naive_arithmetic_ok=True)
-            case 6:
-                boundary_plain = period_start.add(months=1, naive_arithmetic_ok=True)
-            case 8:
-                boundary_plain = period_start.add(days=1, naive_arithmetic_ok=True)
-            case 11:
-                boundary_plain = period_start.add(hours=1, naive_arithmetic_ok=True)
-            case 13:
-                boundary_plain = period_start.add(minutes=1, naive_arithmetic_ok=True)
-            case _:
-                boundary_plain = period_start.add(seconds=1, naive_arithmetic_ok=True)
+        boundary_plain = self._add_one_unit(period_start, unit)
         boundary = (
             boundary_plain.assume_tz(self.settings.tz)
             if self.settings.tz
