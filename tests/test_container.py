@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import urllib.error
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -13,7 +14,7 @@ import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT
-from ezbak.container import do_backup
+from ezbak.container import _ping_healthcheck, _run_scheduled, do_backup
 from ezbak.container import main as entrypoint
 from ezbak.exceptions import BackupFailedError
 
@@ -180,6 +181,100 @@ def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
 
     # Then pruning still ran despite the failed backup
     prune_spy.assert_called_once()
+
+
+def test_ping_healthcheck_success_pings_base_url(mocker):
+    """Verify a successful outcome pings the configured base URL unchanged."""
+    # Given a mocked HTTP call
+    mock_urlopen = mocker.patch("ezbak.container.urllib.request.urlopen", autospec=True)
+
+    # When pinging for a successful run
+    _ping_healthcheck("https://hc-ping.com/abc-123", failed=False)
+
+    # Then the base URL is fetched
+    assert mock_urlopen.call_args.args[0] == "https://hc-ping.com/abc-123"
+
+
+def test_ping_healthcheck_failure_pings_fail_url(mocker):
+    """Verify a failed outcome pings the base URL with the /fail suffix."""
+    # Given a mocked HTTP call
+    mock_urlopen = mocker.patch("ezbak.container.urllib.request.urlopen", autospec=True)
+
+    # When pinging for a failed run
+    _ping_healthcheck("https://hc-ping.com/abc-123", failed=True)
+
+    # Then the /fail endpoint is fetched
+    assert mock_urlopen.call_args.args[0] == "https://hc-ping.com/abc-123/fail"
+
+
+def test_ping_healthcheck_strips_trailing_slash(mocker):
+    """Verify a trailing slash in the URL does not produce a double-slash failure ping."""
+    # Given a mocked HTTP call and a URL configured with a trailing slash
+    mock_urlopen = mocker.patch("ezbak.container.urllib.request.urlopen", autospec=True)
+
+    # When pinging for a failed run
+    _ping_healthcheck("https://hc-ping.com/abc-123/", failed=True)
+
+    # Then the /fail endpoint is fetched without a double slash
+    assert mock_urlopen.call_args.args[0] == "https://hc-ping.com/abc-123/fail"
+
+
+def test_ping_healthcheck_no_url_is_noop(mocker):
+    """Verify no HTTP call is made when no healthcheck URL is configured."""
+    # Given a mocked HTTP call
+    mock_urlopen = mocker.patch("ezbak.container.urllib.request.urlopen", autospec=True)
+
+    # When pinging without a configured URL
+    _ping_healthcheck(None, failed=False)
+
+    # Then no request is made
+    mock_urlopen.assert_not_called()
+
+
+def test_ping_healthcheck_swallows_errors(mocker):
+    """Verify a failed ping never propagates and cannot break a backup run."""
+    # Given an HTTP call that raises
+    mocker.patch(
+        "ezbak.container.urllib.request.urlopen",
+        autospec=True,
+        side_effect=urllib.error.URLError("boom"),
+    )
+
+    # When pinging, then no exception escapes
+    _ping_healthcheck("https://hc-ping.com/abc-123", failed=False)
+
+
+def test_run_scheduled_pings_success(filesystem, mocker):
+    """Verify a scheduled run pings the success URL after the run completes cleanly."""
+    # Given a scheduled run that succeeds
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    run = mocker.MagicMock()
+    mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
+    scheduler = mocker.MagicMock()
+
+    # When running the scheduled job
+    _run_scheduled(app, scheduler, "https://hc-ping.com/abc-123", run)
+
+    # Then the run executed and it pings for success
+    run.assert_called_once_with(app, scheduler)
+    mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
+
+
+def test_run_scheduled_pings_failure(filesystem, mocker):
+    """Verify a scheduled run pings the failure URL when the run raises."""
+    # Given a scheduled run that fails
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    run = mocker.MagicMock(side_effect=BackupFailedError(["dest1"]))
+    mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
+    scheduler = mocker.MagicMock()
+
+    # When running the scheduled job
+    _run_scheduled(app, scheduler, "https://hc-ping.com/abc-123", run)
+
+    # Then it pings for failure
+    mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
 
 
 def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_path):

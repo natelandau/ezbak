@@ -2,6 +2,8 @@
 
 import sys
 import time
+import urllib.request
+from collections.abc import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -31,16 +33,26 @@ def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
             logger.info(f"Next scheduled run: {job.next_run_time}")
 
 
-def _run_scheduled_backup(app: EZBak, scheduler: BackgroundScheduler) -> None:  # pragma: no cover
-    """Run a scheduled backup, logging a destination failure without stopping the scheduler.
+def _ping_healthcheck(url: str | None, *, failed: bool) -> None:
+    """Signal an external monitor with the outcome of a scheduled run.
 
-    APScheduler routes a job exception through the stdlib logging system, which bypasses
-    the loguru sink this app configures, so catch it here and log it via loguru instead.
+    A silently failed cron backup is a backup tool's worst failure mode, so ping a
+    healthcheck monitor (Healthchecks.io convention: the base URL on success, the URL
+    plus ``/fail`` on failure). Any ping error is swallowed so monitoring can never
+    break or fail a backup run.
     """
+    if not url:
+        return
+
+    # Strip a trailing slash so a failure ping is `base/fail`, not `base//fail` (which 404s).
+    base_url = url.rstrip("/")
+    ping_url = f"{base_url}/fail" if failed else base_url
     try:
-        do_backup(app, scheduler)
-    except EZBakError as e:
-        logger.error(e)
+        # Config-supplied URL; a monitoring ping must never fail the backup it reports on.
+        with urllib.request.urlopen(ping_url, timeout=10):  # noqa: S310
+            pass
+    except (OSError, ValueError) as e:
+        logger.warning(f"Healthcheck ping failed: {e}")
 
 
 def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
@@ -56,16 +68,25 @@ def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None
             logger.info(f"Next scheduled run: {job.next_run_time}")
 
 
-def _run_scheduled_restore(app: EZBak, scheduler: BackgroundScheduler) -> None:  # pragma: no cover
-    """Run a scheduled restore, logging a failure without stopping the scheduler.
+def _run_scheduled(
+    app: EZBak,
+    scheduler: BackgroundScheduler,
+    healthcheck_url: str | None,
+    run: Callable[[EZBak, BackgroundScheduler], None],
+) -> None:
+    """Run a scheduled backup or restore, signaling the outcome without stopping the scheduler.
 
     APScheduler routes a job exception through the stdlib logging system, which bypasses
-    the loguru sink this app configures, so catch it here and log it via loguru instead.
+    the loguru sink this app configures, so catch it here and log it via loguru instead,
+    then ping the healthcheck monitor with the run's success or failure.
     """
     try:
-        do_restore(app, scheduler)
+        run(app, scheduler)
     except EZBakError as e:
         logger.error(e)
+        _ping_healthcheck(healthcheck_url, failed=True)
+    else:
+        _ping_healthcheck(healthcheck_url, failed=False)
 
 
 def log_debug_info(app: EZBak) -> None:
@@ -87,26 +108,32 @@ def main() -> None:
 
     Sets up logging, validates configuration settings, and either runs a one-time backup/restore operation or starts a scheduled backup service based on cron configuration.
     """
-    app = EZBak(EnvConfig())
+    # Hold the EnvConfig directly: container-only settings (entrypoint_action,
+    # healthcheck_url) live here, not on the library-facing BackupConfig that app.settings exposes.
+    config = EnvConfig()
+    app = EZBak(config)
 
     log_debug_info(app)
 
-    if app.settings.cron:
+    if config.entrypoint_action is None:
+        logger.error("No action configured: set EZBAK_ACTION to 'backup' or 'restore'")
+        sys.exit(1)
+
+    if config.cron:
         scheduler = BackgroundScheduler()
 
+        run = do_backup if config.entrypoint_action == Action.BACKUP else do_restore
         job = scheduler.add_job(
-            func=_run_scheduled_backup
-            if app.settings.entrypoint_action == Action.BACKUP
-            else _run_scheduled_restore,
-            args=[app, scheduler],
-            trigger=CronTrigger.from_crontab(app.settings.cron),
+            func=_run_scheduled,
+            args=[app, scheduler, config.healthcheck_url, run],
+            trigger=CronTrigger.from_crontab(config.cron),
             jitter=600,
-            id=app.settings.entrypoint_action.value,
+            id=config.entrypoint_action.value,
         )
         logger.info(job)
         scheduler.start()
 
-        job = scheduler.get_job(job_id=app.settings.entrypoint_action.value)
+        job = scheduler.get_job(job_id=config.entrypoint_action.value)
         if job and job.next_run_time:
             logger.info(f"Next scheduled run: {job.next_run_time}")
         else:
@@ -121,7 +148,7 @@ def main() -> None:
             logger.info("Exiting...")
             scheduler.shutdown()
 
-    elif app.settings.entrypoint_action == Action.BACKUP:
+    elif config.entrypoint_action == Action.BACKUP:
         try:
             do_backup(app)
         except EZBakError as e:
@@ -130,7 +157,7 @@ def main() -> None:
         time.sleep(1)
         logger.info("Backup complete. Exiting.")
 
-    elif app.settings.entrypoint_action == Action.RESTORE:
+    elif config.entrypoint_action == Action.RESTORE:
         try:
             do_restore(app)
         except EZBakError as e:

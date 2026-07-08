@@ -13,7 +13,6 @@ from pydantic import BaseModel, BeforeValidator, Field, PrivateAttr, model_valid
 
 from ezbak.constants import (
     DEFAULT_COMPRESSION_LEVEL,
-    Action,
     BackupType,
     LogLevel,
     RetentionPolicyType,
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
 E = TypeVar("E", bound=Enum)
 
 
-def _make_enum_coercer(
+def make_enum_coercer(
     enum_cls: type[E],
     *,
     error_label: str,
@@ -61,8 +60,7 @@ def _make_enum_coercer(
     return coerce
 
 
-coerce_log_level = _make_enum_coercer(LogLevel, error_label="log level", transform=str.upper)
-coerce_action = _make_enum_coercer(Action, error_label="action")
+coerce_log_level = make_enum_coercer(LogLevel, error_label="log level", transform=str.upper)
 
 
 def coerce_path_list(value: list[str] | str | None) -> list[Path]:
@@ -91,9 +89,6 @@ class BackupConfig(BaseModel):
     Build this to describe what to back up, where to store it, and how to name, retain, and restore it. Pass the instance to ``EZBak``.
     """
 
-    entrypoint_action: Annotated[Action | None, BeforeValidator(coerce_action)] = Field(
-        default=None, alias="ezbak_action"
-    )
     name: str | None = None
     source_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
         default_factory=list

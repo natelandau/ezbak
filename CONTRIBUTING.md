@@ -68,7 +68,7 @@ Docker is configured entirely with environment variables. To test the entrypoint
 
 1. Run `duty dev-setup` to create the development environment. This will create a `.dev/` folder and create a `.env` file at the project root.
 2. Edit the `.env` file at the project root to configure the environment
-3. Run `uv run -m ezbak.entrypoint` to run the entrypoint; or
+3. Run `uv run -m ezbak.container` to run the entrypoint; or
 4. Run `docker compose up` to run the docker container
 
 ## Development Guidelines

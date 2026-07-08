@@ -170,6 +170,7 @@ docker run -d \
     -e EZBAK_STORAGE_PATHS=/backups \
     -e EZBAK_MAX_BACKUPS=7 \
     -e EZBAK_CRON="0 2 * * *" \
+    -e EZBAK_HEALTHCHECK_URL=https://hc-ping.com/your-uuid \
     -e TZ=America/New_York \
     ghcr.io/natelandau/ezbak:latest
 
@@ -211,7 +212,7 @@ ezbak sends each backup to whatever destinations you configure. There is no sepa
 
 At least one destination is required.
 
-If a configured destination can't be used, whether from bad S3 credentials, an unreachable bucket, or a local directory ezbak can't create, the run fails instead of reporting success. The library raises `BackupFailedError`, and the `ezbak create` command and the one-shot container exit with a non-zero status. A scheduled container (`EZBAK_CRON`) logs the error and keeps running, so the next scheduled run retries. Any backups that reached a working destination are kept.
+If a configured destination can't be used, whether from bad S3 credentials, an unreachable bucket, or a local directory ezbak can't create, the run fails instead of reporting success. The library raises `BackupFailedError`, and the `ezbak create` command and the one-shot container exit with a non-zero status. A scheduled container (`EZBAK_CRON`) logs the error and keeps running, so the next scheduled run retries, and it pings the failure endpoint when `EZBAK_HEALTHCHECK_URL` is set. Any backups that reached a working destination are kept.
 
 Restores fail the same way. If ezbak can't download, read, or extract the archive, the library raises `RestoreFailedError`, and the `ezbak restore` command and the one-shot container exit non-zero. A scheduled restore logs the error and keeps the container running.
 
@@ -344,7 +345,10 @@ EZBAK_ACTION=backup           # backup or restore
 EZBAK_CRON="0 2 * * *"        # Cron schedule (daily at 2 AM)
 EZBAK_RESTORE_PATH=/restore   # Where a restore writes files
 TZ="America/New_York"         # Timezone for backup timestamps
+EZBAK_HEALTHCHECK_URL="https://hc-ping.com/your-uuid"  # Monitor scheduled runs
 ```
+
+When you set `EZBAK_HEALTHCHECK_URL`, a scheduled container pings that URL after every run: the base URL on success, and the URL with `/fail` appended on failure. Point it at a monitor like [Healthchecks.io](https://healthchecks.io) to get alerted when a scheduled backup fails or stops running altogether. The ping never blocks or fails the backup itself. This applies only to scheduled runs (`EZBAK_CRON`); a one-shot container run reports its result through the exit code instead.
 
 ## Contributing
 
