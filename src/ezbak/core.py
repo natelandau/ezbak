@@ -11,9 +11,15 @@ from typing import TYPE_CHECKING, assert_never
 from loguru import logger
 from nclutils.fs import clean_directory
 from pydantic import ValidationError
+from whenever import PlainDateTime
 
 from ezbak.config import BackupConfig
-from ezbak.constants import RetentionPolicyType, StorageType
+from ezbak.constants import (
+    DEFAULT_DATE_PATTERN,
+    RESTORE_DATE_REGEX,
+    RetentionPolicyType,
+    StorageType,
+)
 from ezbak.exceptions import (
     BackendNotFoundError,
     BackupFailedError,
@@ -469,6 +475,96 @@ class EZBak:
             list[Backup]: A list of backup objects sorted by creation time from oldest to newest.
         """
         return [x for y in self.storage_locations for x in y.backups]
+
+    def _resolve_upper_boundary(self, point_in_time: str) -> float:
+        """Convert a partial date/time to an exclusive upper-boundary timestamp.
+
+        Pad the value to the start of its period, then advance by one unit of that
+        period so an "at or before" match is a strict "less than" the returned
+        instant. The "+1 unit" boundary avoids end-of-month, leap-year, and
+        59-second edge cases.
+
+        Args:
+            point_in_time (str): A no-dash date/time, e.g. "202506" or "20250701T0330".
+
+        Returns:
+            float: POSIX timestamp of the exclusive upper boundary.
+
+        Raises:
+            ConfigurationError: If the value is not a recognized date/time shape or has an out-of-range field.
+        """
+        if not RESTORE_DATE_REGEX.match(point_in_time):
+            msg = f"Invalid restore date: {point_in_time!r} (expected YYYY[MM[DD[THH[MM[SS]]]]])"
+            raise ConfigurationError(msg)
+
+        # start-of-period padding, keyed by the length of the recognized shape
+        suffix_by_length = {
+            4: "0101T000000",
+            6: "01T000000",
+            8: "T000000",
+            11: "0000",
+            13: "00",
+            15: "",
+        }
+        suffix = suffix_by_length[len(point_in_time)]
+
+        try:
+            period_start = PlainDateTime.parse(point_in_time + suffix, format=DEFAULT_DATE_PATTERN)
+        except ValueError as e:
+            msg = f"Invalid restore date: {point_in_time!r}"
+            raise ConfigurationError(msg) from e
+
+        # naive_arithmetic_ok: hour/minute/second are exact units; adding them to a plain
+        # datetime is intentional here because we convert to a zoned instant immediately.
+        # Branched (rather than dict-dispatched) so each `add()` call has literal keyword
+        # arguments that mypy can match against its overloads.
+        match len(point_in_time):
+            case 4:
+                boundary_plain = period_start.add(years=1, naive_arithmetic_ok=True)
+            case 6:
+                boundary_plain = period_start.add(months=1, naive_arithmetic_ok=True)
+            case 8:
+                boundary_plain = period_start.add(days=1, naive_arithmetic_ok=True)
+            case 11:
+                boundary_plain = period_start.add(hours=1, naive_arithmetic_ok=True)
+            case 13:
+                boundary_plain = period_start.add(minutes=1, naive_arithmetic_ok=True)
+            case _:
+                boundary_plain = period_start.add(seconds=1, naive_arithmetic_ok=True)
+        boundary = (
+            boundary_plain.assume_tz(self.settings.tz)
+            if self.settings.tz
+            else boundary_plain.assume_system_tz()
+        )
+        return boundary.timestamp()
+
+    def get_backup_as_of(self, point_in_time: str) -> Backup | None:
+        """Find the newest backup at or before a point in time for point-in-time recovery.
+
+        Select the most recent backup whose timestamp falls at or before the end of the
+        period named by ``point_in_time``, so an older backup can be restored instead of
+        only the latest. Accepts the no-dash filename timestamp shape at any granularity:
+        ``YYYY``, ``YYYYMM``, ``YYYYMMDD``, ``YYYYMMDDTHH``, ``YYYYMMDDTHHMM``, or
+        ``YYYYMMDDTHHMMSS``.
+
+        Args:
+            point_in_time (str): The moment to restore as of, e.g. "20250102".
+
+        Returns:
+            Backup | None: The newest qualifying backup, or None when none is old enough.
+        """
+        boundary = self._resolve_upper_boundary(point_in_time)
+
+        candidates = [
+            backup for backup in self.list_backups() if backup.zoned_datetime.timestamp() < boundary
+        ]
+        if not candidates:
+            logger.error(f"No backup at or before {point_in_time}")
+            return None
+
+        selected = max(candidates, key=lambda b: b.zoned_datetime.timestamp())
+        logger.debug(f"Selected backup as of {point_in_time}: {selected.name}")
+        return selected
 
     def prune_backups(self, *, dry_run: bool = False) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.

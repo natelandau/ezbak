@@ -9,6 +9,9 @@ DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
 # whenever's parse pattern equivalent of DEFAULT_DATE_FORMAT — Y/M/D for date, h/m/s for time, 'T' is a quoted literal
 DEFAULT_DATE_PATTERN = "YYYYMMDD'T'hhmmss"
 TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
+# Accepts the no-dash filename timestamp shape at any granularity:
+# YYYY, YYYYMM, YYYYMMDD, YYYYMMDDTHH, YYYYMMDDTHHMM, YYYYMMDDTHHMMSS
+RESTORE_DATE_REGEX = re.compile(r"^\d{4}(\d{2}(\d{2}(T\d{2}(\d{2}(\d{2})?)?)?)?)?$")
 DEFAULT_COMPRESSION_LEVEL = 9
 DEFAULT_RETENTION = 1
 ENVAR_PREFIX = "EZBAK_"
