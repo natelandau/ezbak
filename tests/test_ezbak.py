@@ -3,14 +3,14 @@
 import shutil
 from datetime import datetime
 from pathlib import Path
-from tempfile import mkdtemp  # noqa: F401
+from tempfile import mkdtemp
 from zoneinfo import ZoneInfo
 
 import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_DATE_FORMAT
-from ezbak.core import _merge_move
+from ezbak.core import _commit_restore, _merge_move
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -581,3 +581,35 @@ def test_merge_move_handles_type_collisions(tmp_path):
     assert (dst / "c").read_text() == "replacement"
     assert outside.read_text() == "outside"  # symlink target untouched (not followed)
     assert not any(src.iterdir())
+
+
+def test_commit_restore_clean_replaces_contents(tmp_path):
+    """Verify clean commit removes existing dest entries but not the staging dir."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "old.txt").write_text("old")
+    staging = Path(mkdtemp(dir=dest, prefix=".ezbak-restore-"))
+    (staging / "new.txt").write_text("new")
+
+    _commit_restore(staging, dest, clean=True)
+
+    remaining = {p.name for p in dest.iterdir() if p != staging}
+    assert remaining == {"new.txt"}
+    assert not (dest / "old.txt").exists()
+    assert staging.exists()  # staging survives the clean loop
+    assert not any(staging.iterdir())  # emptied; caller removes it
+
+
+def test_commit_restore_overlay_keeps_existing(tmp_path):
+    """Verify overlay commit keeps non-colliding existing files."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "keep.txt").write_text("keep")
+    staging = Path(mkdtemp(dir=dest, prefix=".ezbak-restore-"))
+    (staging / "new.txt").write_text("new")
+
+    _commit_restore(staging, dest, clean=False)
+
+    assert (dest / "keep.txt").read_text() == "keep"
+    assert (dest / "new.txt").read_text() == "new"
+    assert staging.exists()

@@ -95,6 +95,26 @@ def _merge_move(src: Path, dst: Path) -> None:
             entry.rename(target)
 
 
+def _commit_restore(staging: Path, dest: Path, *, clean: bool) -> None:
+    """Swap the extracted staging tree into the live destination.
+
+    In clean mode, remove every existing entry in `dest` except `staging` itself,
+    then move the staged contents in. This runs only after a fully successful
+    extract, so the destination is emptied at the last possible moment. The
+    caller removes `staging` afterward.
+    """
+    if clean:
+        for entry in dest.iterdir():
+            if entry == staging:
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+
+    _merge_move(staging, dest)
+
+
 class EZBak:
     """Manage and control backup operations for specified sources and storage_paths."""
 
