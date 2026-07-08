@@ -92,7 +92,7 @@ name a point in time or use `--if-exists`.
 | --- | --- | --- | --- |
 | `--restore-path` | `-d` | Directory to restore into. Required. | |
 | `--restore-date` | `-t` | Restore the newest backup at or before this time. | |
-| `--clean-before-restore` | | Empty the restore path before extracting. | `False` |
+| `--clean-before-restore` | | Empty the restore path as part of the restore. Refuses to target a storage location. | `False` |
 | `--if-exists` | | Exit cleanly instead of failing when no backup exists. | `False` |
 | `--uid` | `-u` | Set owner UID on restored files. | |
 | `--gid` | `-g` | Set owner GID on restored files. | |

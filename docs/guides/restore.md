@@ -66,20 +66,27 @@ so you can copy a value from `list` output to restore that exact backup.
 
 ## Empty the target before restoring
 
-`clean_before_restore` deletes everything in the restore path before extracting,
-so the result matches the backup exactly with no leftover files.
+`clean_before_restore` removes the existing contents of the restore path, so the
+result matches the backup exactly with no leftover files.
 
 ```bash
 ezbak --name my-backup --storage ~/Backups \
   restore --restore-path ~/restore --clean-before-restore
 ```
 
-!!! danger "This deletes the target's contents first"
+ezbak extracts the archive into a staging directory inside the restore path and
+swaps it into place only after the extract succeeds. The target is emptied at
+that last step, so a download or extract failure leaves the existing contents
+intact instead of deleting them first. See [Failure
+behavior](../concepts/failure-behavior.md).
 
-    If the archive cannot be read after the target is emptied, you would be left
-    with an empty directory. ezbak raises an error in that case instead of exiting
-    quietly, so a failure is never mistaken for a clean restore. See [Failure
-    behavior](../concepts/failure-behavior.md).
+!!! warning "A clean restore refuses to target a storage location"
+
+    ezbak rejects a clean restore whose path is, or contains, one of your
+    `--storage` locations, because emptying it would delete the backups. Restoring
+    into a subdirectory of a storage location is still allowed. The check compares
+    the real directories, so it also catches two container mounts that point at the
+    same host path.
 
 ## Set ownership on restored files
 

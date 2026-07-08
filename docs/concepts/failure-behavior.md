@@ -63,16 +63,20 @@ The same failure surfaces three ways.
 ## Restore failures and clean-before-restore
 
 A restore fails loudly when ezbak cannot download, read, or extract the archive.
-This matters most with `clean_before_restore`, which empties the target before
-extracting. Without a raised error, a silent failure would leave you with an
-empty directory and no signal that anything went wrong.
+It raises `RestoreFailedError` instead of failing silently, so a failure is never
+mistaken for a successful restore.
 
-!!! danger "clean_before_restore empties the target first"
+The restore is atomic. ezbak extracts the archive into a staging directory inside
+the restore path and swaps it into the target only after the extract succeeds.
+With `clean_before_restore`, the target is emptied as part of that final swap, so
+a download, read, or extract failure leaves the existing contents in place.
 
-    `clean_before_restore` deletes the contents of the restore path before
-    extracting. If the archive then cannot be read, you would be left with an
-    empty directory. ezbak raises `RestoreFailedError` in that case rather than
-    exiting quietly, so the failure is never mistaken for a clean restore.
+!!! note "A failed swap preserves the extracted files"
+
+    The one point where the target can be left partial is the final swap itself,
+    for example when the disk fills mid-swap. If that happens, ezbak keeps the
+    extracted files in a `.ezbak-restore-*` directory inside the target so you can
+    recover them by hand, and it still raises `RestoreFailedError`.
 
 ## The "nothing to restore" case
 

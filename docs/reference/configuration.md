@@ -110,8 +110,9 @@ option set, each unset period keeps 1. See [Retention policies](../guides/retent
 | `chown_gid` | `EZBAK_CHOWN_GID` | `restore -g`, `--gid` | `None` |
 
 `restore_date` selects the newest backup at or before a point in time.
-`clean_before_restore` empties the target first. `restore_if_exists` turns a
-missing backup into a clean no-op instead of a failure. `chown_uid` and
+`clean_before_restore` empties the target as part of the restore, after a
+successful extract, and refuses to target a storage location. `restore_if_exists`
+turns a missing backup into a clean no-op instead of a failure. `chown_uid` and
 `chown_gid` set ownership on restored files, and both must be set together. See
 [Restore backups](../guides/restore.md).
 
