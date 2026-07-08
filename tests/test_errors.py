@@ -7,6 +7,7 @@ from ezbak import EZBak, ezbak
 from ezbak.backup import Backup
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
+from ezbak.exceptions import BackupFailedError, StorageWriteError
 
 
 def test_no_name(filesystem):
@@ -195,3 +196,91 @@ def test_list_and_restore_without_source_paths(filesystem, tmp_path):
 
     # When restoring, then no backup is found and no "No source paths provided" error is raised
     assert app.restore_backup(restore_path=tmp_path) is False
+
+
+def test_local_backend_write_raises_storage_write_error(filesystem, mocker):
+    """Verify LocalBackend.write raises StorageWriteError when the copy fails."""
+    # Given an ezbak app with a local destination
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backend = app.backends[0]
+    location = app.storage_locations[0]
+    tmp_backup = app.tmp_dir / "staged.tgz"
+    tmp_backup.write_bytes(b"data")
+
+    # Given the underlying copy fails
+    mocker.patch("ezbak.storage.local.copy_file", side_effect=OSError("disk full"))
+
+    # When writing, then a StorageWriteError is raised
+    with pytest.raises(StorageWriteError, match="Local write failed"):
+        backend.write(tmp_backup=tmp_backup, storage_location=location)
+
+
+def test_create_backup_s3_only_bad_credentials_raises(filesystem):
+    """Verify an S3-only run with missing credentials fails instead of a silent success."""
+    # Given an S3-only config with no credentials
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="",
+        aws_secret_key="",
+    )
+
+    # When creating a backup, then it raises rather than reporting a silent success
+    with pytest.raises(BackupFailedError, match="S3 bucket 'test-bucket'"):
+        app.create_backup()
+
+
+def test_create_backup_keeps_source_when_destination_fails(filesystem):
+    """Verify sources are not deleted when the only destination is unusable."""
+    # Given an S3-only config with delete_src_after_backup and no credentials
+    src_dir, _, _ = filesystem
+    marker = src_dir / "keep.txt"
+    marker.write_text("important")
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="",
+        aws_secret_key="",
+        delete_src_after_backup=True,
+    )
+
+    # When the backup fails, then the source is left intact
+    with pytest.raises(BackupFailedError):
+        app.create_backup()
+    assert marker.exists()
+
+
+def test_create_backup_raises_when_archive_creation_fails(filesystem, mocker):
+    """Verify create_backup fails loudly when the tmp archive cannot be built."""
+    # Given an app with a valid local destination
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # Given archive creation fails
+    mocker.patch.object(app, "_create_tmp_backup_file", return_value=None)
+
+    # When creating a backup, then it raises instead of returning silently
+    with pytest.raises(BackupFailedError):
+        app.create_backup()
+
+
+def test_create_backup_uncreatable_local_path_fails_loudly(filesystem, mocker):
+    """Verify an uncreatable local storage path fails cleanly instead of a raw OSError crash."""
+    # Given a local destination whose directory cannot be created (e.g. a read-only mount)
+    src_dir, dest1, _ = filesystem
+    mocker.patch(
+        "ezbak.core.validate_storage_paths",
+        side_effect=OSError("Read-only file system"),
+    )
+
+    # When constructing EZBak, then it does not crash and registers no local backend
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    assert app.backends == []
+
+    # When creating a backup, then it fails loudly instead of raising a raw OSError
+    with pytest.raises(BackupFailedError):
+        app.create_backup()

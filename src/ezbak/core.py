@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +14,13 @@ from pydantic import ValidationError
 
 from ezbak.config import BackupConfig
 from ezbak.constants import RetentionPolicyType, StorageType
-from ezbak.filters import chown_files, should_include_file, validate_source_paths
+from ezbak.exceptions import BackupFailedError, StorageInitError, StorageWriteError
+from ezbak.filters import (
+    chown_files,
+    should_include_file,
+    validate_source_paths,
+    validate_storage_paths,
+)
 from ezbak.logging import instantiate_logger
 from ezbak.naming import new_staging_filename
 from ezbak.storage import LocalBackend, S3Backend, StorageBackend
@@ -65,6 +70,7 @@ class EZBak:
         self.aws_service: AWSService | None = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
+        self._failed_destinations: list[str] = []
 
         # TemporaryDirectory registers its own finalizer, so the staging dir is removed
         # when this EZBak is garbage-collected or the process exits. Registering an extra
@@ -75,7 +81,17 @@ class EZBak:
 
         self.backends: list[StorageBackend] = []
         if self.settings.storage_paths:
-            self.backends.append(LocalBackend(self.settings))
+            try:
+                # Create/validate the local directories up front so an unusable path
+                # (read-only mount, permission denied) is recorded as a failed
+                # destination and create_backup fails loudly, instead of a raw OSError
+                # escaping later from the write loop's lazy index() call.
+                validate_storage_paths(self.settings.storage_paths, create_if_missing=True)
+            except OSError as e:
+                logger.error(f"Cannot use local storage path(s): {e}")
+                self._failed_destinations.append("local storage paths")
+            else:
+                self.backends.append(LocalBackend(self.settings))
 
         if self.settings.aws_s3_bucket_name:
             try:
@@ -85,8 +101,10 @@ class EZBak:
                     bucket_name=self.settings.aws_s3_bucket_name,
                     bucket_path=self.settings.aws_s3_bucket_path,
                 )
-            except ValueError as e:
-                logger.error(e)
+            except StorageInitError:
+                # AWSService already logged the failure at the raise site; just record
+                # the destination so create_backup fails loudly for it.
+                self._failed_destinations.append(f"S3 bucket '{self.settings.aws_s3_bucket_name}'")
 
             if self.aws_service:
                 self.backends.append(
@@ -144,8 +162,9 @@ class EZBak:
         files_to_add = []
 
         if not self.settings.source_paths:
-            logger.error("No source paths provided")
-            sys.exit(1)
+            msg = "No source paths provided"
+            logger.error(msg)
+            raise ValueError(msg)
 
         for source in self.settings.source_paths:
             if source.is_dir():
@@ -319,6 +338,9 @@ class EZBak:
 
         Returns:
             list[Backup]: A list of Backup objects which were created.
+
+        Raises:
+            BackupFailedError: If the backup archive could not be created or any configured destination could not be written.
         """
         validate_source_paths(source_paths=self.settings.source_paths)
 
@@ -326,14 +348,9 @@ class EZBak:
         tmp_backup = self._create_tmp_backup_file()
         if tmp_backup is None:
             logger.error("Backup creation aborted: temporary archive was not created")
-            return []
-        created_backups: list[Backup] = []
+            raise BackupFailedError(["backup archive could not be created"])
 
-        for storage_location in self.storage_locations:
-            backend = self._backend_for_type(storage_location.storage_type)
-            created_backups.append(
-                backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
-            )
+        created_backups, write_failures = self._write_to_backends(tmp_backup)
 
         try:
             tmp_backup.unlink()
@@ -342,21 +359,70 @@ class EZBak:
         else:
             logger.debug(f"Deleted tmp backup: {tmp_backup}")
 
-        if self.settings.delete_src_after_backup:
-            logger.debug("Clean source paths after backup")
-
-            if self.settings.source_paths:
-                for source in self.settings.source_paths:
-                    if source.is_dir():
-                        clean_directory(source)
-                        logger.info(f"Cleaned source: {source}")
-                    else:
-                        source.unlink()
-                        logger.info(f"Deleted source: {source}")
-
         logger.trace("Require storage location re-index on next call")
         self.rebuild_storage_locations = True
+
+        # A destination that was requested but unusable (bad creds) or that failed
+        # mid-write must fail the run loudly. Raise only after writing to healthy
+        # destinations so their backups are preserved.
+        failed_destinations = self._failed_destinations + write_failures
+        if failed_destinations:
+            raise BackupFailedError(failed_destinations)
+
+        # Clean sources only on a fully successful run: for an S3-only run with bad
+        # credentials this guard prevents deleting the only copy of the data.
+        if self.settings.delete_src_after_backup:
+            self._clean_source_paths()
+
         return created_backups
+
+    def _write_to_backends(self, tmp_backup: Path) -> tuple[list[Backup], list[str]]:
+        """Write the staged archive to every configured destination, tolerating per-backend failures.
+
+        Use this to attempt every destination independently so one unhealthy backend
+        does not block backups from being written to the others.
+
+        Args:
+            tmp_backup (Path): The staged tar.gz archive to distribute.
+
+        Returns:
+            tuple[list[Backup], list[str]]: The backups successfully written, and the
+                logging names of storage locations that failed to write.
+        """
+        created_backups: list[Backup] = []
+        write_failures: list[str] = []
+
+        for storage_location in self.storage_locations:
+            backend = self._backend_for_type(storage_location.storage_type)
+            try:
+                created_backups.append(
+                    backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
+                )
+            except StorageWriteError:
+                # The backend already logged the failure with its destination context;
+                # just record it so create_backup fails loudly after the loop.
+                write_failures.append(str(storage_location.logging_name))
+
+        return created_backups, write_failures
+
+    def _clean_source_paths(self) -> None:
+        """Remove source files and directories after a fully successful backup.
+
+        Use this once every configured destination has confirmed a successful write,
+        so source data is never deleted before it is safely backed up.
+        """
+        logger.debug("Clean source paths after backup")
+
+        if not self.settings.source_paths:
+            return
+
+        for source in self.settings.source_paths:
+            if source.is_dir():
+                clean_directory(source)
+                logger.info(f"Cleaned source: {source}")
+            else:
+                source.unlink()
+                logger.info(f"Deleted source: {source}")
 
     def get_latest_backup(self) -> Backup | None:
         """Get the latest backup from the storage locations.
