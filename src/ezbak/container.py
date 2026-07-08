@@ -62,12 +62,21 @@ def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None
 
     Restores data from a previously created backup to recover from data loss or system failures. Requires RESTORE_DIR environment variable to be set.
 
+    Args:
+        app (EZBak): The configured backup manager.
+        scheduler (BackgroundScheduler | None): The scheduler, when run on a cron trigger. Defaults to None.
+
     Raises:
-        RestoreFailedError: No backup matched the restore criteria.
+        RestoreFailedError: No backup matched the restore criteria and restore_if_exists is not set.
     """
     if not app.restore_backup():
-        # restore_backup() returns False (rather than raising) when no backup matches,
-        # so raise here to keep a failed restore from looking like a success.
+        # restore_backup() returns False (rather than raising) only when no backup
+        # matches; a real download or extract error raises RestoreFailedError from within.
+        # With restore_if_exists, a missing backup is a clean no-op (a fresh deployment).
+        if app.settings.restore_if_exists:
+            logger.info("No backup matched and restore_if_exists is set; exiting without error")
+            return
+        # Raise here to keep a failed restore from looking like a success.
         msg = "Restore failed: no backup matched the restore criteria"
         raise RestoreFailedError(msg)
 

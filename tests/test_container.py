@@ -48,6 +48,7 @@ def mock_os_environ(mocker):
     os.environ["EZBAK_LOG_FILE"] = ""
     os.environ["EZBAK_LOG_LEVEL"] = ""
     os.environ["EZBAK_LOG_PREFIX"] = ""
+    os.environ["EZBAK_RESTORE_IF_EXISTS"] = "false"
     os.environ["EZBAK_TZ"] = "Etc/UTC"
 
 
@@ -322,6 +323,57 @@ def test_entrypoint_restore_fails_when_no_backup_for_date(filesystem, capsys, tm
     output = capsys.readouterr().err
     assert "Backup restored" not in output
     assert "Restore complete" not in output
+
+
+def test_entrypoint_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):
+    """Verify EZBAK_RESTORE_IF_EXISTS exits cleanly when no backup exists yet."""
+    # Given an empty storage path, a fresh deployment with no backup to restore
+    src_dir, dest1, _ = filesystem
+
+    restore_path = tmp_path / "restore"
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_RESTORE_DATE"] = ""
+    os.environ["EZBAK_RESTORE_IF_EXISTS"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When running the entrypoint, then it completes without exiting non-zero
+    entrypoint()
+
+    # Then it reports the no-op instead of failing the pre-start task
+    output = capsys.readouterr().err
+    assert "restore_if_exists is set" in output
+    assert "Backup restored" not in output
+
+
+def test_entrypoint_restore_if_exists_still_fails_on_corrupt_archive(filesystem, tmp_path):
+    """Verify EZBAK_RESTORE_IF_EXISTS still fails a restore when the archive is corrupt."""
+    # Given a corrupt backup archive, a real error rather than a missing backup
+    src_dir, dest1, _ = filesystem
+    backup_path = dest1 / f"test-{frozen_time_str}-yearly.tgz"
+    backup_path.write_bytes(b"not a tarball")
+
+    restore_path = tmp_path / "restore"
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_RESTORE_DATE"] = ""
+    os.environ["EZBAK_RESTORE_IF_EXISTS"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When running the entrypoint, then a real failure still exits non-zero
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+    assert exc_info.value.code == 1
 
 
 def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_path):

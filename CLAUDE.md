@@ -2,6 +2,16 @@
 
 Backup tool: tar.gz archives with local + S3 destinations and retention policies. One codebase, three interfaces (Python library, CLI, Docker container).
 
+## Primary purpose
+
+ezbak exists to move shared state between jobs and hosts in an orchestrated setting (Nomad, Kubernetes, etc.). **The container is the primary surface.** The canonical deployment is three cooperating tasks around a job:
+
+- a **sidecar** taking cron-based backups while the job runs,
+- a **post-stop** task taking a final backup before the orchestrator clears the job, and
+- a **pre-start** task that fetches the most recent backup and stages it on the target host before the job starts.
+
+The CLI and Python library are conveniences: ezbak happens to be an extensible backup manager, so they are exposed, but they are not the design center. ezbak is **not** trying to compete with restic/borg/etc. Weigh design and feature decisions against the orchestrated container workflow first.
+
 ## Architecture
 
 One typed config schema, one core class, thin adapters.

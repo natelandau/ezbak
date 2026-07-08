@@ -396,6 +396,81 @@ def test_build_config_maps_restore_date():
     assert config.restore_date == "20250102"
 
 
+def test_build_config_maps_if_exists():
+    """Verify --if-exists is mapped onto restore_if_exists in the built config."""
+    # Given a restore command with --if-exists set
+    cli = EZBakCLI(
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), if_exists=True),  # noqa: S108
+        name="test",
+        storage_paths=[Path("/tmp")],  # noqa: S108
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then restore_if_exists is set
+    assert config.restore_if_exists is True
+
+
+def test_cli_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):
+    """Verify restore --if-exists exits cleanly when no backup exists yet."""
+    # Given an empty storage path, a fresh deployment with no backup to restore
+    _, dest1, _ = filesystem
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    # When restoring with --if-exists and no backup present, then it does not raise
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "restore",
+            "--name",
+            "test",
+            "--storage",
+            str(dest1),
+            "--restore-path",
+            str(restore_path),
+            "--if-exists",
+        ],
+    )
+
+    # Then it reports the no-op instead of failing the restore
+    output = capsys.readouterr().err
+    assert "nothing to restore" in output
+    assert "Backup restored" not in output
+
+
+def test_cli_restore_if_exists_date_miss_is_noop(filesystem, capsys, tmp_path):
+    """Verify restore --if-exists is a clean no-op on a restore-date miss, without an error log."""
+    # Given a backup exists but none is old enough for the requested date
+    _, dest1, _ = filesystem
+    shutil.copy2(fixture_archive_path, dest1 / "test-20250103T090000.tgz")
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    # When restoring as of 2024 (before the only backup) with --if-exists, it does not raise
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "restore",
+            "--name",
+            "test",
+            "--storage",
+            str(dest1),
+            "--restore-path",
+            str(restore_path),
+            "--restore-date",
+            "2024",
+            "--if-exists",
+        ],
+    )
+
+    # Then it is a clean no-op with no error line on a successful run
+    output = capsys.readouterr().err
+    assert "nothing to restore" in output
+    assert "ERROR" not in output
+
+
 def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
     """Verify restore --restore-date restores the point-in-time backup."""
     # Given two backups on different days in one storage location

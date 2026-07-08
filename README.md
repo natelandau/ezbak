@@ -2,7 +2,9 @@
 
 # ezbak
 
-A simple backup tool that creates, prunes, and restores compressed archives of your files. Use it as a Python package, a command-line tool, or a Docker container.
+ezbak moves shared state between jobs and hosts in an orchestrated environment like Nomad or Kubernetes. It creates, prunes, and restores compressed archives on the local filesystem, in AWS S3, or both. The Docker container is the main way to run it. A Python package and a command-line tool are included for scripting and one-off use.
+
+ezbak is a small, focused backup manager. It does not aim to replace restic, borg, or a full backup system.
 
 ## Features
 
@@ -10,16 +12,33 @@ A simple backup tool that creates, prunes, and restores compressed archives of y
 - Store backups on the local filesystem, in AWS S3, or both at once
 - Filter files with include and exclude regex patterns
 - Prune old backups with count-based or time-based retention policies
-- Restore the latest backup to any location
+- Restore the latest backup, or the newest backup at or before a point in time
 - Run scheduled backups in a container with a cron expression
+- Ping a healthcheck monitor so a silent scheduled failure gets noticed
+
+## The orchestration pattern
+
+ezbak is built for a job that owns some state, a database volume, a cache, or uploaded files, running under an orchestrator that can place it on any host. The backup follows the job so a restart or a move to a new host comes up with the state already in place.
+
+The canonical setup runs the same container image as three cooperating tasks around the job:
+
+- A **sidecar** takes backups on a cron schedule (`EZBAK_ACTION=backup` with `EZBAK_CRON`) while the job runs.
+- A **post-stop** task takes one final backup (`EZBAK_ACTION=backup`, no cron) before the orchestrator tears the job down.
+- A **pre-start** task fetches the most recent backup and stages it on the target host (`EZBAK_ACTION=restore`) before the job starts.
+
+Point every task at the same S3 bucket, or shared storage, and the backups follow the job wherever it lands. Set `EZBAK_NAME` to the same value across all three so they operate on one backup set.
+
+> **Note:** On a fresh deployment there is no backup yet. Set `EZBAK_RESTORE_IF_EXISTS=true` (CLI: `restore --if-exists`) so the pre-start restore treats a missing backup as a clean no-op and exits zero, letting the job start. A real download or extract failure still fails the run.
+
+The Python package and CLI use the same configuration and are covered below for local scripting and testing.
 
 ## Table of Contents
 
 - [Installation](#installation)
 - [Usage](#usage)
+  - [Docker container](#docker-container)
   - [Python package](#python-package)
   - [Command line](#command-line)
-  - [Docker container](#docker-container)
 - [Core concepts](#core-concepts)
   - [Backup names](#backup-names)
   - [Storage locations](#storage-locations)
@@ -48,6 +67,63 @@ python -m pip install --user ezbak     # with pip
 ```
 
 ## Usage
+
+The [Docker container](#docker-container) is the primary interface and the one to reach for in an orchestrated deployment. The [command line](#command-line) and [Python package](#python-package) share the same configuration and are handy for scripting, local testing, and one-off backups.
+
+### Docker container
+
+The container reads its configuration from `EZBAK_`-prefixed environment variables. The examples below are the building blocks of [the orchestration pattern](#the-orchestration-pattern): a scheduled run for the sidecar, a one-shot backup for the post-stop task, and a one-shot restore for the pre-start task.
+
+```bash
+# Create a backup and keep the 7 most recent
+docker run -it \
+    -v /path/to/source:/source:ro \
+    -v /path/to/backups:/backups \
+    -e EZBAK_ACTION=backup \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_SOURCE_PATHS=/source \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_MAX_BACKUPS=7 \
+    ghcr.io/natelandau/ezbak:latest
+
+# Run backups on a schedule (daily at 2 AM)
+docker run -d \
+    --name ezbak-scheduled \
+    --restart unless-stopped \
+    -v /path/to/source:/source:ro \
+    -v /path/to/backups:/backups \
+    -e EZBAK_ACTION=backup \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_SOURCE_PATHS=/source \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_MAX_BACKUPS=7 \
+    -e EZBAK_CRON="0 2 * * *" \
+    -e EZBAK_HEALTHCHECK_URL=https://hc-ping.com/your-uuid \
+    -e TZ=America/New_York \
+    ghcr.io/natelandau/ezbak:latest
+
+# Restore the latest backup (pre-start task; skip cleanly if no backup exists yet)
+docker run -it \
+    -v /path/to/backups:/backups:ro \
+    -v /path/to/restore:/restore \
+    -e EZBAK_ACTION=restore \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_RESTORE_PATH=/restore \
+    -e EZBAK_RESTORE_IF_EXISTS=true \
+    ghcr.io/natelandau/ezbak:latest
+
+# Restore the newest backup at or before a point in time
+docker run -it \
+    -v /path/to/backups:/backups:ro \
+    -v /path/to/restore:/restore \
+    -e EZBAK_ACTION=restore \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_RESTORE_PATH=/restore \
+    -e EZBAK_RESTORE_DATE=202412 \
+    ghcr.io/natelandau/ezbak:latest
+```
 
 ### Python package
 
@@ -145,7 +221,12 @@ ezbak --name my-documents --storage ~/Backups restore --restore-path ~/restore
 
 # Restore the newest backup at or before a point in time
 ezbak --name my-documents --storage ~/Backups restore --restore-path ~/restore --restore-date 202412
+
+# Restore the latest backup, but exit cleanly if none exists yet
+ezbak --name my-documents --storage ~/Backups restore --restore-path ~/restore --if-exists
 ```
+
+Pass `restore --if-exists` when a missing backup should not be an error. Without it, a restore that finds no backup exits non-zero; with it, the command logs that there is nothing to restore and exits zero. A real download or extract failure still exits non-zero either way.
 
 `restore --restore-date` (short `-t`) restores the newest backup at or before the end of the period you name, not the backup closest to it: `--restore-date 202412` restores the last backup from December 2024, even if that backup landed on December 30. Accepted formats, from a year down to a second, are `YYYY`, `YYYYMM`, `YYYYMMDD`, `YYYYMMDDTHH`, `YYYYMMDDTHHMM`, and `YYYYMMDDTHHMMSS`. The full `YYYYMMDDTHHMMSS` form matches the timestamp the `list` command prints for each backup, so you can copy a value straight from `list` output to restore that exact backup.
 
@@ -156,60 +237,6 @@ export EZBAK_AWS_ACCESS_KEY="your-access-key"
 export EZBAK_AWS_SECRET_KEY="your-secret-key"
 
 ezbak --name my-documents --storage ~/Backups --s3-bucket my-bucket create --source ~/Documents
-```
-
-### Docker container
-
-The container reads its configuration from `EZBAK_`-prefixed environment variables.
-
-```bash
-# Create a backup and keep the 7 most recent
-docker run -it \
-    -v /path/to/source:/source:ro \
-    -v /path/to/backups:/backups \
-    -e EZBAK_ACTION=backup \
-    -e EZBAK_NAME=my-backup \
-    -e EZBAK_SOURCE_PATHS=/source \
-    -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_MAX_BACKUPS=7 \
-    ghcr.io/natelandau/ezbak:latest
-
-# Run backups on a schedule (daily at 2 AM)
-docker run -d \
-    --name ezbak-scheduled \
-    --restart unless-stopped \
-    -v /path/to/source:/source:ro \
-    -v /path/to/backups:/backups \
-    -e EZBAK_ACTION=backup \
-    -e EZBAK_NAME=my-backup \
-    -e EZBAK_SOURCE_PATHS=/source \
-    -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_MAX_BACKUPS=7 \
-    -e EZBAK_CRON="0 2 * * *" \
-    -e EZBAK_HEALTHCHECK_URL=https://hc-ping.com/your-uuid \
-    -e TZ=America/New_York \
-    ghcr.io/natelandau/ezbak:latest
-
-# Restore the latest backup
-docker run -it \
-    -v /path/to/backups:/backups:ro \
-    -v /path/to/restore:/restore \
-    -e EZBAK_ACTION=restore \
-    -e EZBAK_NAME=my-backup \
-    -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_RESTORE_PATH=/restore \
-    ghcr.io/natelandau/ezbak:latest
-
-# Restore the newest backup at or before a point in time
-docker run -it \
-    -v /path/to/backups:/backups:ro \
-    -v /path/to/restore:/restore \
-    -e EZBAK_ACTION=restore \
-    -e EZBAK_NAME=my-backup \
-    -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_RESTORE_PATH=/restore \
-    -e EZBAK_RESTORE_DATE=202412 \
-    ghcr.io/natelandau/ezbak:latest
 ```
 
 ## Core concepts
@@ -313,6 +340,7 @@ EZBak(
 | `restore_path` | `EZBAK_RESTORE_PATH` | `restore --restore-path`, `-d` |
 | `restore_date` | `EZBAK_RESTORE_DATE` | `restore --restore-date`, `-t` |
 | `clean_before_restore` | `EZBAK_CLEAN_BEFORE_RESTORE` | `restore --clean-before-restore` |
+| `restore_if_exists` | `EZBAK_RESTORE_IF_EXISTS` | `restore --if-exists` |
 | `chown_uid` | `EZBAK_CHOWN_UID` | `restore --uid`, `-u` |
 | `chown_gid` | `EZBAK_CHOWN_GID` | `restore --gid`, `-g` |
 | `log_level` | `EZBAK_LOG_LEVEL` | `-v`, `-vv` |
@@ -358,9 +386,12 @@ Restore:
 restore_path=Path("/restore")  # Where to restore (or pass it to restore_backup())
 restore_date="202412"          # Restore the newest backup at or before this point in time
 clean_before_restore=True      # Empty the restore path first
+restore_if_exists=True         # Treat "no backup to restore" as success, not an error
 chown_uid=1000                 # Set owner on restored files
 chown_gid=1000                 # Set group on restored files
 ```
+
+The library reports a missing backup directly: `restore_backup()` returns `False` when there is nothing to restore and raises only on a real failure, so a Python caller decides how to react without `restore_if_exists`. The setting exists so the CLI and container can make the same distinction through their exit codes.
 
 Logging:
 

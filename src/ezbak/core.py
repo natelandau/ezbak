@@ -462,7 +462,9 @@ class EZBak:
         """
         all_backups = [x for y in self.storage_locations for x in y.backups]
         if not all_backups:
-            logger.error("No backups found")
+            # A getter finding nothing is not itself an error; the caller decides the
+            # severity (a plain restore treats it as a failure, restore_if_exists does not).
+            logger.debug("No backups found")
             return None
 
         latest_backup = max(all_backups, key=lambda x: x.zoned_datetime.timestamp())
@@ -601,12 +603,26 @@ class EZBak:
             backup for backup in self.list_backups() if backup.zoned_datetime.timestamp() < boundary
         ]
         if not candidates:
-            logger.error(f"No backup at or before {point_in_time}")
+            # A getter finding nothing is not itself an error; the caller decides the
+            # severity (a plain restore treats it as a failure, restore_if_exists does not).
+            logger.debug(f"No backup at or before {point_in_time}")
             return None
 
         selected = max(candidates, key=lambda b: b.zoned_datetime.timestamp())
         logger.debug(f"Selected backup as of {point_in_time}: {selected.name}")
         return selected
+
+    def _log_no_backup(self, message: str) -> None:
+        """Log a "nothing to restore" outcome at the severity the config implies.
+
+        A missing backup is an error for a plain restore, but an expected no-op when
+        restore_if_exists is set (a fresh deployment), so keep it out of the error stream
+        in that case to avoid a misleading error line on a successful run.
+        """
+        if self.settings.restore_if_exists:
+            logger.debug(message)
+        else:
+            logger.error(message)
 
     def prune_backups(self, *, dry_run: bool = False) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.
@@ -710,14 +726,16 @@ class EZBak:
             target = backup
         elif restore_date:
             target = self.get_backup_as_of(restore_date)
-            # get_backup_as_of already logged the miss. Fail rather than silently
-            # falling back to the newest backup, which would restore the wrong data.
             if target is None:
+                # Fail rather than silently falling back to the newest backup, which would
+                # restore the wrong data. A miss is a failure for a plain restore but a
+                # tolerated no-op when restore_if_exists is set (like the latest branch).
+                self._log_no_backup(f"No backup at or before {restore_date}")
                 return False
         else:
             target = self.get_latest_backup()
             if target is None:
-                logger.error("No backup found to restore")
+                self._log_no_backup("No backup found to restore")
                 return False
 
         if clean_before_restore or self.settings.clean_before_restore:
