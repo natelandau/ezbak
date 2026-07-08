@@ -1,12 +1,13 @@
 """AWS service class for managing S3 bucket operations."""
 
-import sys
 from pathlib import Path
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
+
+from ezbak.exceptions import StorageInitError
 
 
 class AWSService:
@@ -24,7 +25,7 @@ class AWSService:
         Set up the S3 client with retry configuration and validate that the bucket exists and is accessible. Use this class when you need to perform file operations on a specific S3 bucket with predefined credentials.
 
         Raises:
-            ValueError: If the AWS credentials are not set.
+            StorageInitError: If the credentials are missing or the bucket cannot be accessed.
         """
         logger.debug("AWSService: Initializing")
 
@@ -36,7 +37,7 @@ class AWSService:
         if not all([self.aws_access_key, self.aws_secret_key, self.bucket]):
             msg = "AWS credentials are not set"
             logger.error(msg)
-            raise ValueError(msg)
+            raise StorageInitError(msg)
 
         self.s3 = boto3.client(
             "s3",
@@ -47,9 +48,10 @@ class AWSService:
 
         try:
             self.location = self.s3.get_bucket_location(Bucket=self.bucket)  # Ex. us-east-1
-        except ClientError as e:
-            logger.error(e)
-            sys.exit(1)
+        except (BotoCoreError, ClientError) as e:
+            msg = f"Cannot access S3 bucket '{self.bucket}': {e}"
+            logger.error(msg)
+            raise StorageInitError(msg) from e
 
     def _build_full_key(self, key: str) -> str:
         """Build the full S3 key by prepending bucket_path if needed.
@@ -247,21 +249,14 @@ class AWSService:
             name (str, optional): The desired name for the file in S3. If not provided, use the original filename.
 
         Returns:
-            bool: True if upload succeeds, False if any error occurs during upload.
-
-        Raises:
-            ClientError: If the file cannot be uploaded.
+            bool: True if upload succeeds. Botocore errors from the upload propagate to the caller.
         """
         if not name:
             name = file.name
 
         full_name = self._build_full_key(name)
 
-        try:
-            self.s3.upload_file(Filename=file, Bucket=self.bucket, Key=full_name)
-        except ClientError as e:
-            logger.error(e)
-            raise
+        self.s3.upload_file(Filename=file, Bucket=self.bucket, Key=full_name)
 
         if name != file.name:
             logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
