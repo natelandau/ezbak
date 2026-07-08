@@ -19,7 +19,7 @@ affects an existing setup and what to do about each one.
 | --- | --- |
 | Environment variables | Two renamed, three removed. |
 | CLI flags | Two renamed on `restore`, one flag removed on `create`. |
-| Python library | Class renamed, construction changed, one method and one exception attribute renamed. |
+| Python library | Class renamed, construction changed, one method removed. |
 | Behavior | Failed backups, restores, and prunes now exit non-zero. |
 
 Your existing backup files need no changes. See [Backup files stay
@@ -121,11 +121,8 @@ The library was restructured around one typed config schema and one class.
     )
     ```
 
-Two more library changes to note:
-
-- `EZBak` no longer has a `rename_backups()` method.
-- `BackupFailedError.failed_destinations` is now
-  `BackupFailedError.failed_storage_locations`.
+One more library change to note: `EZBak` no longer has a `rename_backups()`
+method.
 
 The `ezbak()` factory dropped the `storage_type`, `label_time_units`, and
 `aws_s3_bucket_path` keyword arguments and renamed `delete_src_after_backup` to

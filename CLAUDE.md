@@ -41,6 +41,7 @@ Tool config (ruff, mypy, pytest, coverage) lives in `pyproject.toml`.
 - Commit subject max **50** chars (the `committed` pre-commit hook enforces this, not 70); body lines wrap at 72.
 - `CHANGELOG.md` is commitizen-managed and regenerated on `cz bump`. Never hand-edit it, including for breaking changes; the release tooling owns it.
 - Version source is `constants.py:__version__` (commitizen `version_files`).
+- User-facing documentation lives in `docs/` (the Zensical site). `README.md` is intentionally kept light: a short overview that links into the site. Add or expand user docs under `docs/`, not in the README.
 
 ## Gotchas
 
