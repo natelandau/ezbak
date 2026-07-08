@@ -13,16 +13,16 @@ from ezbak.exceptions import (
 )
 
 
-def test_backup_failed_error_lists_destinations():
-    """Verify BackupFailedError stores and names each failed destination."""
-    # Given a set of failed destinations
+def test_backup_failed_error_lists_storage_locations():
+    """Verify BackupFailedError stores and names each failed storage location."""
+    # Given a set of failed storage locations
     failed = ["S3 bucket 'backups'", "dest1"]
 
     # When the error is created
     error = BackupFailedError(failed)
 
     # Then it stores them and names them in the message
-    assert error.failed_destinations == failed
+    assert error.failed_storage_locations == failed
     assert "S3 bucket 'backups'" in str(error)
     assert "dest1" in str(error)
 

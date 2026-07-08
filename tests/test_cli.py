@@ -313,7 +313,7 @@ def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
             "test",
             "--storage",
             str(dest1),
-            "--destination",
+            "--restore-path",
             str(restore_path),
         ],
     )
@@ -365,10 +365,10 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
 
 
 def test_build_config_maps_restore_date():
-    """Verify --date is mapped onto restore_date in the built config."""
+    """Verify --restore-date is mapped onto restore_date in the built config."""
     # Given a restore command carrying a date
     cli = EZBakCLI(
-        command=RestoreCommand(destination=Path("/tmp/restore"), date="20250102"),  # noqa: S108
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), restore_date="20250102"),  # noqa: S108
         name="test",
         storage_paths=[Path("/tmp")],  # noqa: S108
     )
@@ -381,7 +381,7 @@ def test_build_config_maps_restore_date():
 
 
 def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
-    """Verify restore --date restores the point-in-time backup."""
+    """Verify restore --restore-date restores the point-in-time backup."""
     # Given two backups on different days in one storage location
     _, dest1, _ = filesystem
     for ts in ("20250101T120000", "20250103T090000"):
@@ -400,9 +400,9 @@ def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
             "test",
             "--storage",
             str(dest1),
-            "--destination",
+            "--restore-path",
             str(restore_path),
-            "--date",
+            "--restore-date",
             "20250102",
         ],
     )
@@ -414,7 +414,7 @@ def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
 
 
 def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
-    """Verify restore --date exits non-zero when nothing qualifies."""
+    """Verify restore --restore-date exits non-zero when nothing qualifies."""
     # Given a single 2025 backup
     _, dest1, _ = filesystem
     shutil.copy2(fixture_archive_path, dest1 / "test-20250103T090000.tgz")
@@ -432,9 +432,9 @@ def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
                 "test",
                 "--storage",
                 str(dest1),
-                "--destination",
+                "--restore-path",
                 str(restore_path),
-                "--date",
+                "--restore-date",
                 "2024",
             ],
         )

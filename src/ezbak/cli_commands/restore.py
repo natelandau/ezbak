@@ -9,7 +9,7 @@ from ezbak.exceptions import EZBakError
 
 
 def main(cmd: EZBakCLI) -> None:
-    """Restores the latest backup to the destination path.
+    """Restores the latest backup to the restore path.
 
     Raises:
         cappa.Exit: If the restore fails or no backup is found.

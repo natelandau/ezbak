@@ -39,7 +39,7 @@ def test_create_backup(filesystem, debug, capsys, tmp_path):
         source_paths=[src_dir, test_file],
         storage_paths=[dest1, dest2],
         log_level="trace",
-        delete_src_after_backup=False,
+        delete_source_after_backup=False,
         tz="Etc/UTC",
     )
 
@@ -464,7 +464,7 @@ def test_restore_with_clean(debug, tmp_path, capsys, filesystem):
     assert not (restore_dir / test_file.name).exists()
 
 
-def test_delete_src_after_backup(debug, capsys, tmp_path, filesystem):
+def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
     """Verify that source paths are deleted after backup."""
     src_dir, dest1, _ = filesystem
     test_file = tmp_path / "test_file.txt"
@@ -475,7 +475,7 @@ def test_delete_src_after_backup(debug, capsys, tmp_path, filesystem):
         source_paths=[src_dir, test_file],
         storage_paths=[dest1],
         log_level="trace",
-        delete_src_after_backup=True,
+        delete_source_after_backup=True,
     )
     assert len(list(src_dir.iterdir())) != 0
     backup_manager.create_backup()

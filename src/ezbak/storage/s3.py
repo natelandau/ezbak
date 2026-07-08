@@ -43,20 +43,20 @@ class S3Backend(StorageBackend):
         logger.trace("Indexing S3 storage location")
         found_backups = self.aws_service.list_objects(prefix=self.settings.name)
 
-        if self.settings.aws_s3_bucket_path:
+        if self.settings.aws_s3_bucket_prefix:
             found_backups = [
-                x.replace(f"{self.settings.aws_s3_bucket_path.rstrip('/')}/", "")
+                x.replace(f"{self.settings.aws_s3_bucket_prefix.rstrip('/')}/", "")
                 for x in found_backups
             ]
 
         location = self._build_storage_location(
-            storage_path=self.settings.aws_s3_bucket_path,
+            storage_path=self.settings.aws_s3_bucket_prefix,
             backups=[
                 Backup(
                     storage_type=StorageType.AWS,
                     name=x,
                     tz=self.settings.tz,
-                    storage_path=self.settings.aws_s3_bucket_path,
+                    storage_path=self.settings.aws_s3_bucket_prefix,
                 )
                 for x in found_backups
             ],
@@ -93,7 +93,7 @@ class S3Backend(StorageBackend):
             storage_type=StorageType.AWS,
             name=backup_name,
             tz=self.settings.tz,
-            storage_path=self.settings.aws_s3_bucket_path,
+            storage_path=self.settings.aws_s3_bucket_prefix,
         )
 
     def delete(self, backup: Backup) -> bool:

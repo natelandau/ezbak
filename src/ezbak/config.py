@@ -98,7 +98,7 @@ class BackupConfig(BaseModel):
     )
 
     strip_source_paths: bool = False
-    delete_src_after_backup: bool = False
+    delete_source_after_backup: bool = False
     exclude_regex: str | None = None
     include_regex: str | None = None
     compression_level: int = DEFAULT_COMPRESSION_LEVEL
@@ -125,7 +125,7 @@ class BackupConfig(BaseModel):
 
     aws_access_key: str | None = None
     aws_s3_bucket_name: str | None = None
-    aws_s3_bucket_path: str | None = None
+    aws_s3_bucket_prefix: str | None = None
     aws_secret_key: str | None = None
 
     _cached_retention_policy: RetentionPolicyManager | None = PrivateAttr(default=None)
@@ -185,7 +185,7 @@ class BackupConfig(BaseModel):
             raise ValueError(msg)
 
         if not self.storage_paths and not self.aws_s3_bucket_name:
-            msg = "No destination configured: set storage_paths and/or aws_s3_bucket_name"
+            msg = "No storage configured: set storage_paths and/or aws_s3_bucket_name"
             raise ValueError(msg)
 
         return self

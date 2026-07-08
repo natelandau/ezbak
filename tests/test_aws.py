@@ -328,7 +328,7 @@ def test_create_backup_local_written_when_s3_fails(filesystem, mocker):
         app.create_backup()
 
     # Then the local backup was still written and S3 was recorded as failed
-    assert exc_info.value.failed_destinations
+    assert exc_info.value.failed_storage_locations
     assert list(dest1.glob("test-*.tgz"))
 
 

@@ -86,7 +86,7 @@ class EZBak:
         self.aws_service: AWSService | None = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
-        self._failed_destinations: list[str] = []
+        self._failed_storage_locations: list[str] = []
 
         # TemporaryDirectory registers its own finalizer, so the staging dir is removed
         # when this EZBak is garbage-collected or the process exits. Registering an extra
@@ -100,12 +100,12 @@ class EZBak:
             try:
                 # Create/validate the local directories up front so an unusable path
                 # (read-only mount, permission denied) is recorded as a failed
-                # destination and create_backup fails loudly, instead of a raw OSError
+                # storage location and create_backup fails loudly, instead of a raw OSError
                 # escaping later from the write loop's lazy index() call.
                 validate_storage_paths(self.settings.storage_paths, create_if_missing=True)
             except OSError as e:
                 logger.error(f"Cannot use local storage path(s): {e}")
-                self._failed_destinations.append("local storage paths")
+                self._failed_storage_locations.append("local storage paths")
             else:
                 self.backends.append(LocalBackend(self.settings))
 
@@ -115,12 +115,14 @@ class EZBak:
                     aws_access_key=self.settings.aws_access_key,
                     aws_secret_key=self.settings.aws_secret_key,
                     bucket_name=self.settings.aws_s3_bucket_name,
-                    bucket_path=self.settings.aws_s3_bucket_path,
+                    bucket_path=self.settings.aws_s3_bucket_prefix,
                 )
             except StorageInitError:
                 # AWSService already logged the failure at the raise site; just record
-                # the destination so create_backup fails loudly for it.
-                self._failed_destinations.append(f"S3 bucket '{self.settings.aws_s3_bucket_name}'")
+                # the storage location so create_backup fails loudly for it.
+                self._failed_storage_locations.append(
+                    f"S3 bucket '{self.settings.aws_s3_bucket_name}'"
+                )
 
             if self.aws_service:
                 self.backends.append(
@@ -359,13 +361,13 @@ class EZBak:
     def create_backup(self) -> list[Backup]:
         """Create compressed backup archives of all configured sources and distribute them to all storage_paths.
 
-        Generate new backup files by compressing all source files and directories into tar.gz archives, then copy these archives to each configured destination directory. Use this to perform the core backup operation that preserves your data with configurable compression and multi-destination redundancy.
+        Generate new backup files by compressing all source files and directories into tar.gz archives, then copy these archives to each configured storage location. Use this to perform the core backup operation that preserves your data with configurable compression and redundancy across multiple storage locations.
 
         Returns:
             list[Backup]: A list of Backup objects which were created.
 
         Raises:
-            BackupFailedError: If the backup archive could not be created or any configured destination could not be written.
+            BackupFailedError: If the backup archive could not be created or any configured storage location could not be written.
         """
         validate_source_paths(source_paths=self.settings.source_paths)
 
@@ -387,16 +389,16 @@ class EZBak:
         logger.trace("Require storage location re-index on next call")
         self.rebuild_storage_locations = True
 
-        # A destination that was requested but unusable (bad creds) or that failed
+        # A storage location that was requested but unusable (bad creds) or that failed
         # mid-write must fail the run loudly. Raise only after writing to healthy
-        # destinations so their backups are preserved.
-        failed_destinations = self._failed_destinations + write_failures
-        if failed_destinations:
-            raise BackupFailedError(failed_destinations)
+        # storage locations so their backups are preserved.
+        failed_storage_locations = self._failed_storage_locations + write_failures
+        if failed_storage_locations:
+            raise BackupFailedError(failed_storage_locations)
 
         # Clean sources only on a fully successful run: for an S3-only run with bad
         # credentials this guard prevents deleting the only copy of the data.
-        if self.settings.delete_src_after_backup:
+        if self.settings.delete_source_after_backup:
             self._clean_source_paths()
 
         return created_backups
@@ -669,25 +671,25 @@ class EZBak:
                 backup to restore.
 
         Raises:
-            ConfigurationError: If the destination is not provided and no restore directory is configured, or the destination does not exist or is not a directory.
+            ConfigurationError: If no restore path is provided and none is configured, or the restore path does not exist or is not a directory.
         """
-        destination = restore_path or self.settings.restore_path
+        target_path = restore_path or self.settings.restore_path
 
         try:
-            dest = Path(destination).expanduser().absolute()
+            dest = Path(target_path).expanduser().absolute()
         except (TypeError, ValueError, OSError, RuntimeError) as e:
-            # Covers a None/bad-type destination (TypeError), an unresolvable ~ home
+            # Covers a None/bad-type restore path (TypeError), an unresolvable ~ home
             # (RuntimeError from expanduser), and a removed cwd for a relative path
-            # (OSError from absolute()), all of which mean the destination is unusable.
-            msg = f"Invalid destination: {destination}"
+            # (OSError from absolute()), all of which mean the restore path is unusable.
+            msg = f"Invalid restore path: {target_path}"
             raise ConfigurationError(msg) from e
 
         if not dest:
-            msg = "No destination provided and no restore directory configured"
+            msg = "No restore path provided and none configured"
             raise ConfigurationError(msg)
 
         if not dest.exists() or not dest.is_dir():
-            msg = f"Restore destination does not exist: {dest}"
+            msg = f"Restore path does not exist: {dest}"
             raise ConfigurationError(msg)
 
         # A blank restore_date (empty or whitespace, e.g. an unset EZBAK_RESTORE_DATE
@@ -698,7 +700,7 @@ class EZBak:
 
         # Precedence: an explicit Backup wins; else a configured restore_date selects a
         # point in time; else the latest. Confirm a target before cleaning, so
-        # clean_before_restore never empties the destination with nothing to restore.
+        # clean_before_restore never empties the restore path with nothing to restore.
         if backup is not None:
             target = backup
         elif restore_date:
@@ -715,6 +717,6 @@ class EZBak:
 
         if clean_before_restore or self.settings.clean_before_restore:
             clean_directory(dest)
-            logger.info("Cleaned all files in backup destination before restore")
+            logger.info("Cleaned all files in restore path before restore")
 
         return self._do_restore(backup=target, destination=dest)

@@ -11,10 +11,10 @@ from ezbak.exceptions import EZBakError
 
 
 def main(cmd: EZBakCLI) -> None:
-    """Create a backup and exit non-zero if any destination failed.
+    """Create a backup and exit non-zero if any storage location failed.
 
     Raises:
-        cappa.Exit: If the backup fails for any configured destination or the config is invalid.
+        cappa.Exit: If the backup fails for any configured storage location or the config is invalid.
     """
     app = EZBak(build_config(cmd))
     try:

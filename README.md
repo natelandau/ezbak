@@ -22,7 +22,7 @@ A simple backup tool that creates, prunes, and restores compressed archives of y
   - [Docker container](#docker-container)
 - [Core concepts](#core-concepts)
   - [Backup names](#backup-names)
-  - [Storage destinations](#storage-destinations)
+  - [Storage locations](#storage-locations)
   - [Retention policies](#retention-policies)
   - [Including and excluding files](#including-and-excluding-files)
 - [Configuration reference](#configuration-reference)
@@ -61,7 +61,7 @@ backups = EZBak(
     BackupConfig(
         name="my-backup",
         source_paths=[Path("/path/to/source")],
-        storage_paths=[Path("/path/to/destination")],
+        storage_paths=[Path("/path/to/backups")],
         # Keep 1 yearly, 12 monthly, 4 weekly, 7 daily, 24 hourly, 60 minutely
         retention_yearly=1,
         retention_monthly=12,
@@ -98,7 +98,7 @@ An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups(
 
 `get_backup_as_of(point_in_time)` returns the newest backup at or before the end of the period you name, so you can restore an older backup instead of the latest. Pass its result to `restore_backup(backup=...)`. An explicit `backup` argument takes priority over a configured `restore_date`, which in turn takes priority over the latest backup.
 
-`create_backup()` raises `BackupFailedError` when a configured destination can't be used, so a failed backup never looks like a success. It still writes to every destination that works, so a partial failure keeps the copies that succeeded. Catch the error to handle a failed run:
+`create_backup()` raises `BackupFailedError` when a configured storage location can't be used, so a failed backup never looks like a success. It still writes to every storage location that works, so a partial failure keeps the copies that succeeded. Catch the error to handle a failed run:
 
 ```python
 from ezbak.exceptions import BackupFailedError
@@ -106,7 +106,7 @@ from ezbak.exceptions import BackupFailedError
 try:
     backups.create_backup()
 except BackupFailedError as error:
-    print(f"Backup failed for: {error.failed_destinations}")
+    print(f"Backup failed for: {error.failed_storage_locations}")
 ```
 
 `restore_backup()` raises `RestoreFailedError` when the archive can't be downloaded, read, or extracted, so a failed restore never looks like a success. This matters most with `clean_before_restore`, which empties the target before extracting: a silent failure would leave you with an empty directory and no error. The method returns `False` only when there is no backup to restore. Catch the error to handle a failed run:
@@ -140,13 +140,13 @@ ezbak --name my-documents --storage ~/Backups prune --max-backups 10
 ezbak --name my-documents --storage ~/Backups prune --max-backups 10 --dry-run
 
 # Restore the latest backup
-ezbak --name my-documents --storage ~/Backups restore --destination ~/restore
+ezbak --name my-documents --storage ~/Backups restore --restore-path ~/restore
 
 # Restore the newest backup at or before a point in time
-ezbak --name my-documents --storage ~/Backups restore --destination ~/restore --date 202412
+ezbak --name my-documents --storage ~/Backups restore --restore-path ~/restore --restore-date 202412
 ```
 
-`restore --date` (short `-t`) restores the newest backup at or before the end of the period you name, not the backup closest to it: `--date 202412` restores the last backup from December 2024, even if that backup landed on December 30. Accepted formats, from a year down to a second, are `YYYY`, `YYYYMM`, `YYYYMMDD`, `YYYYMMDDTHH`, `YYYYMMDDTHHMM`, and `YYYYMMDDTHHMMSS`. The full `YYYYMMDDTHHMMSS` form matches the timestamp the `list` command prints for each backup, so you can copy a value straight from `list` output to restore that exact backup.
+`restore --restore-date` (short `-t`) restores the newest backup at or before the end of the period you name, not the backup closest to it: `--restore-date 202412` restores the last backup from December 2024, even if that backup landed on December 30. Accepted formats, from a year down to a second, are `YYYY`, `YYYYMM`, `YYYYMMDD`, `YYYYMMDDTHH`, `YYYYMMDDTHHMM`, and `YYYYMMDDTHHMMSS`. The full `YYYYMMDDTHHMMSS` form matches the timestamp the `list` command prints for each backup, so you can copy a value straight from `list` output to restore that exact backup.
 
 To back up to S3 from the command line, pass `--s3-bucket` and provide credentials through the `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` environment variables:
 
@@ -228,17 +228,17 @@ A few details worth knowing:
 - Timestamps use the format `YYYYMMDDTHHMMSS`.
 - A duplicate name gets a short unique suffix so files never overwrite each other.
 
-### Storage destinations
+### Storage locations
 
-ezbak sends each backup to whatever destinations you configure. There is no separate storage-type setting: the destinations you provide decide where backups go.
+ezbak sends each backup to whatever storage locations you configure. There is no separate storage-type setting: the locations you provide decide where backups go.
 
 - Set `storage_paths` to back up to one or more local directories.
 - Set `aws_s3_bucket_name` (with `aws_access_key` and `aws_secret_key`) to back up to S3.
 - Set both to write every backup to local storage and S3 at the same time.
 
-At least one destination is required.
+At least one storage location is required.
 
-If a configured destination can't be used, whether from bad S3 credentials, an unreachable bucket, or a local directory ezbak can't create, the run fails instead of reporting success. The library raises `BackupFailedError`, and the `ezbak create` command and the one-shot container exit with a non-zero status. A scheduled container (`EZBAK_CRON`) logs the error and keeps running, so the next scheduled run retries, and it pings the failure endpoint when `EZBAK_HEALTHCHECK_URL` is set. Any backups that reached a working destination are kept.
+If a configured storage location can't be used, whether from bad S3 credentials, an unreachable bucket, or a local directory ezbak can't create, the run fails instead of reporting success. The library raises `BackupFailedError`, and the `ezbak create` command and the one-shot container exit with a non-zero status. A scheduled container (`EZBAK_CRON`) logs the error and keeps running, so the next scheduled run retries, and it pings the failure endpoint when `EZBAK_HEALTHCHECK_URL` is set. Any backups that reached a working storage location are kept.
 
 Restores fail the same way. If ezbak can't download, read, or extract the archive, the library raises `RestoreFailedError`, and the `ezbak restore` command and the one-shot container exit non-zero. A scheduled restore logs the error and keeps the container running.
 
@@ -253,7 +253,7 @@ EZBak(
     BackupConfig(
         name="my-backup",
         source_paths=[Path("/path/to/source")],
-        storage_paths=[Path("/path/to/destination")],
+        storage_paths=[Path("/path/to/backups")],
         max_backups=10,
     )
 )
@@ -266,7 +266,7 @@ EZBak(
     BackupConfig(
         name="my-backup",
         source_paths=[Path("/path/to/source")],
-        storage_paths=[Path("/path/to/destination")],
+        storage_paths=[Path("/path/to/backups")],
         retention_daily=7,
         retention_weekly=4,
         retention_monthly=12,
@@ -299,16 +299,31 @@ EZBak(
 
 ## Configuration reference
 
-`BackupConfig` accepts the following options. The same names work as `EZBAK_`-prefixed environment variables for the container.
+`BackupConfig` accepts the options below. Each library field name also works as an `EZBAK_`-prefixed environment variable: uppercase the field and add the prefix, so `source_paths` becomes `EZBAK_SOURCE_PATHS`. The CLI uses its own flag names, which do not always match the field names. This table maps the three surfaces for the options whose names differ or that you set most often. Every other option follows the same field-to-`EZBAK_` rule; run `ezbak create --help` or `ezbak prune --help` for the create and prune flags (for example `retention_yearly` is `prune --yearly`).
+
+| Library field (`BackupConfig`) | Environment variable | CLI flag |
+| --- | --- | --- |
+| `name` | `EZBAK_NAME` | `--name`, `-n` |
+| `source_paths` | `EZBAK_SOURCE_PATHS` | `create --source` |
+| `storage_paths` | `EZBAK_STORAGE_PATHS` | `--storage` |
+| `aws_s3_bucket_name` | `EZBAK_AWS_S3_BUCKET_NAME` | `--s3-bucket` |
+| `aws_s3_bucket_prefix` | `EZBAK_AWS_S3_BUCKET_PREFIX` | `--s3-bucket-prefix` |
+| `max_backups` | `EZBAK_MAX_BACKUPS` | `prune --max-backups`, `-x` |
+| `restore_path` | `EZBAK_RESTORE_PATH` | `restore --restore-path`, `-d` |
+| `restore_date` | `EZBAK_RESTORE_DATE` | `restore --restore-date`, `-t` |
+| `clean_before_restore` | `EZBAK_CLEAN_BEFORE_RESTORE` | `restore --clean-before-restore` |
+| `chown_uid` | `EZBAK_CHOWN_UID` | `restore --uid`, `-u` |
+| `chown_gid` | `EZBAK_CHOWN_GID` | `restore --gid`, `-g` |
+| `log_level` | `EZBAK_LOG_LEVEL` | `-v`, `-vv` |
 
 Storage and sources:
 
 ```python
 name="my-backup"                     # Identifier for this backup set (required)
 source_paths=[Path("/path/to/src")]  # Files or directories to back up
-storage_paths=[Path("/backups")]     # Local destination directories
+storage_paths=[Path("/backups")]     # Local storage directories
 aws_s3_bucket_name="my-bucket"       # S3 bucket to back up to
-aws_s3_bucket_path="prefix/path"     # Optional prefix within the bucket
+aws_s3_bucket_prefix="prefix/path"   # Optional key prefix within the bucket
 aws_access_key="your-access-key"     # S3 credentials
 aws_secret_key="your-secret-key"
 ```
@@ -331,7 +346,7 @@ Backup behavior:
 ```python
 compression_level=9           # gzip level, 1 to 9 (default: 9)
 strip_source_paths=False      # Flatten directory sources in the archive
-delete_src_after_backup=False # Delete sources after a successful backup
+delete_source_after_backup=False # Delete sources after a successful backup
 include_regex=r"\.txt$"       # Only back up files matching this pattern
 exclude_regex=r"temp|cache"   # Skip files matching this pattern
 ```

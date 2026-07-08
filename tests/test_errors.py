@@ -76,7 +76,7 @@ def test_source_paths_symlink(tmp_path, capsys, debug):
 def test_storage_paths(filesystem):
     """Test EZBak errors."""
     src_dir, _, _ = filesystem
-    with pytest.raises(ValueError, match="No destination configured"):
+    with pytest.raises(ValueError, match="No storage configured"):
         ezbak(
             name="test",
             source_paths=[src_dir],
@@ -111,7 +111,7 @@ def test_restore_no_dest(filesystem, tmp_path, debug, capsys):
         source_paths=[src_dir],
         storage_paths=[dest1],
     )
-    with pytest.raises(ConfigurationError, match="Restore destination does not exist"):
+    with pytest.raises(ConfigurationError, match="Restore path does not exist"):
         backup_manager.restore_backup(tmp_path / "new_dest")
 
 
@@ -128,7 +128,7 @@ def test_restore_dest_not_dir(filesystem, tmp_path, debug, capsys):
         storage_paths=[dest1],
     )
     backup_manager.create_backup()
-    with pytest.raises(ConfigurationError, match="Restore destination does not exist"):
+    with pytest.raises(ConfigurationError, match="Restore path does not exist"):
         backup_manager.restore_backup(new_dest)
 
 
@@ -158,7 +158,7 @@ def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
         source_paths=[src_dir],
         storage_paths=[dest1],
     )
-    with pytest.raises(ConfigurationError, match="Invalid destination: None"):
+    with pytest.raises(ConfigurationError, match="Invalid restore path: None"):
         backup_manager.restore_backup(None)
 
 
@@ -241,7 +241,7 @@ def test_create_backup_s3_only_bad_credentials_raises(filesystem):
 
 def test_create_backup_keeps_source_when_destination_fails(filesystem):
     """Verify sources are not deleted when the only destination is unusable."""
-    # Given an S3-only config with delete_src_after_backup and no credentials
+    # Given an S3-only config with delete_source_after_backup and no credentials
     src_dir, _, _ = filesystem
     marker = src_dir / "keep.txt"
     marker.write_text("important")
@@ -251,7 +251,7 @@ def test_create_backup_keeps_source_when_destination_fails(filesystem):
         aws_s3_bucket_name="test-bucket",
         aws_access_key="",
         aws_secret_key="",
-        delete_src_after_backup=True,
+        delete_source_after_backup=True,
     )
 
     # When the backup fails, then the source is left intact
@@ -378,5 +378,5 @@ def test_restore_backup_unresolvable_destination_raises_configuration_error(
     )
 
     # When restoring, then it surfaces a ConfigurationError, not a raw RuntimeError
-    with pytest.raises(ConfigurationError, match="Invalid destination"):
+    with pytest.raises(ConfigurationError, match="Invalid restore path"):
         app.restore_backup("~/restore")

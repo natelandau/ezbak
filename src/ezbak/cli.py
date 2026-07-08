@@ -88,11 +88,11 @@ class EZBakCLI:
         ),
     ] = None
 
-    s3_bucket_path: Annotated[
+    s3_bucket_prefix: Annotated[
         str,
         cappa.Arg(
-            long="s3-bucket-path",
-            help="Prefix within the S3 bucket.",
+            long="s3-bucket-prefix",
+            help="Key prefix within the S3 bucket.",
             propagate=True,
             group=(3, "Optional"),
         ),
@@ -160,22 +160,22 @@ class CreateCommand:
 class RestoreCommand:
     """Restore a backup."""
 
-    destination: Annotated[
+    restore_path: Annotated[
         Path,
         cappa.Arg(
-            long="destination",
+            long="restore-path",
             short="d",
             required=True,
-            help="The directory to restore to.",
+            help="The directory to restore into.",
             group=(1, "Required"),
         ),
     ]
 
-    clean: Annotated[
+    clean_before_restore: Annotated[
         bool,
         cappa.Arg(
-            long="clean",
-            help="Clean the destination directory before restoring.",
+            long="clean-before-restore",
+            help="Empty the restore path before restoring.",
             group=(3, "Optional"),
         ),
     ] = False
@@ -200,10 +200,10 @@ class RestoreCommand:
         ),
     ] = None
 
-    date: Annotated[
+    restore_date: Annotated[
         str,
         cappa.Arg(
-            long="date",
+            long="restore-date",
             short="t",
             help="Restore the newest backup at or before this time. Formats: YYYY, YYYYMM, YYYYMMDD, YYYYMMDDTHH, YYYYMMDDTHHMM, YYYYMMDDTHHMMSS.",
             group=(3, "Optional"),
@@ -319,7 +319,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
     # explicit overrides (init kwargs are highest priority in pydantic-settings); EnvConfig
     # fills ONLY the omitted fields (tz, aws_access_key, aws_secret_key) from EZBAK_-prefixed
     # env vars. Do NOT construct a bare EnvConfig() to read those first: bare construction
-    # runs validate_settings, which requires name + a destination (both flag-supplied, not in
+    # runs validate_settings, which requires name + storage (both flag-supplied, not in
     # env) and would raise. _env_file=None keeps the CLI from silently absorbing a project
     # .env file (matches the prior factory behavior). EnvConfig is a BackupConfig subclass,
     # so returning it satisfies the -> BackupConfig contract.
@@ -332,7 +332,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         "log_file": str(cli.log_file) if cli.log_file else None,
         "log_prefix": cli.log_prefix,
         "aws_s3_bucket_name": cli.s3_bucket,
-        "aws_s3_bucket_path": cli.s3_bucket_path,
+        "aws_s3_bucket_prefix": cli.s3_bucket_prefix,
     }
 
     if isinstance(cmd, CreateCommand):
@@ -345,9 +345,9 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         }
     elif isinstance(cmd, RestoreCommand):
         extra = {
-            "restore_path": cmd.destination,
-            "restore_date": cmd.date,
-            "clean_before_restore": cmd.clean,
+            "restore_path": cmd.restore_path,
+            "restore_date": cmd.restore_date,
+            "clean_before_restore": cmd.clean_before_restore,
             "chown_uid": cmd.uid,
             "chown_gid": cmd.gid,
         }

@@ -29,7 +29,7 @@ class BackendNotFoundError(EZBakError):
 
 
 class StorageInitError(EZBakError):
-    """A configured storage destination could not be initialized.
+    """A configured storage location could not be initialized.
 
     Covers missing or invalid credentials and unreachable buckets.
     """
@@ -60,21 +60,21 @@ class StorageDeleteError(EZBakError):
 
 
 class BackupFailedError(EZBakError):
-    """One or more configured destinations could not be backed up.
+    """One or more configured storage locations could not be backed up.
 
-    Destinations that succeeded are already written; this signals callers to
+    Storage locations that succeeded are already written; this signals callers to
     exit non-zero because the run did not fully succeed.
     """
 
-    def __init__(self, failed_destinations: list[str]) -> None:
-        """Build a message naming every destination that failed.
+    def __init__(self, failed_storage_locations: list[str]) -> None:
+        """Build a message naming every storage location that failed.
 
         Args:
-            failed_destinations (list[str]): Human-readable descriptions of the destinations that failed.
+            failed_storage_locations (list[str]): Human-readable descriptions of the storage locations that failed.
         """
-        self.failed_destinations = failed_destinations
-        destinations = ", ".join(failed_destinations)
-        super().__init__(f"Backup failed for destination(s): {destinations}")
+        self.failed_storage_locations = failed_storage_locations
+        storage_locations = ", ".join(failed_storage_locations)
+        super().__init__(f"Backup failed for storage location(s): {storage_locations}")
 
 
 class RestoreFailedError(EZBakError):
