@@ -2,8 +2,8 @@
 
 import cappa
 
-from ezbak.cli import EZBakCLI
-from ezbak.cli_commands.factory import get_app_for_cli
+from ezbak.cli import EZBakCLI, build_config
+from ezbak.core import EZBak
 
 
 def main(cmd: EZBakCLI) -> None:
@@ -12,6 +12,6 @@ def main(cmd: EZBakCLI) -> None:
     Raises:
         cappa.Exit: If the restore fails.
     """
-    app = get_app_for_cli(cmd)
+    app = EZBak(build_config(cmd))
     if not app.restore_backup():
         raise cappa.Exit(code=1)

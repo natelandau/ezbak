@@ -56,4 +56,4 @@ LABEL org.opencontainers.image.url=https://github.com/natelandau/ezbak
 LABEL org.opencontainers.image.title="ezbak"
 
 ENTRYPOINT ["tini", "--"]
-CMD ["python", "-m", "ezbak.entrypoint"]
+CMD ["python", "-m", "ezbak.container"]

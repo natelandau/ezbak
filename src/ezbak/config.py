@@ -1,25 +1,27 @@
-"""Settings model for EZBak backup configuration and management."""
+"""Typed backup configuration schema for ezbak.
 
-import atexit
-from collections.abc import Callable
+Single source of truth for every ezbak option. Library callers construct this directly and never trigger environment loading. The CLI and container adapters build ``EnvConfig`` (a subclass in ``ezbak.env``), which populates these same fields from ``EZBAK_``-prefixed environment variables and ``.env`` files.
+"""
+
+from __future__ import annotations
+
 from enum import Enum
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Annotated, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Annotated, Self, TypeVar, cast
 
-from pydantic import BeforeValidator, Field, PrivateAttr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, BeforeValidator, Field, PrivateAttr, model_validator
 
 from ezbak.constants import (
     DEFAULT_COMPRESSION_LEVEL,
-    ENVAR_PREFIX,
     Action,
     BackupType,
     LogLevel,
     RetentionPolicyType,
-    StorageType,
 )
-from ezbak.models.retention_policy import RetentionPolicyManager
+from ezbak.retention import RetentionPolicyManager
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 E = TypeVar("E", bound=Enum)
 
@@ -29,17 +31,15 @@ def _make_enum_coercer(
     *,
     error_label: str,
     transform: Callable[[str], str] = str.lower,
-    default: E | None = None,
 ) -> Callable[[str | E | None], E | None]:
     """Build a pydantic BeforeValidator that coerces a string into an enum member.
 
-    Centralize the shared coercion shape (pass through None and existing members, normalize case, raise a uniform error) so each enum-typed setting declares only what differs: the enum, the case transform, and the value used when nothing is provided.
+    Centralize the shared coercion shape (pass through None and existing members, normalize case, raise a uniform error) so each enum-typed setting declares only what differs: the enum and the case transform.
 
     Args:
         enum_cls (type[E]): The enum the value must resolve to.
         error_label (str): Human-readable name used in the error message.
         transform (Callable[[str], str]): Case normalizer applied before lookup. Defaults to str.lower.
-        default (E | None): Value returned when the input is None. Defaults to None.
 
     Returns:
         Callable[[str | E | None], E | None]: A validator for use with pydantic BeforeValidator.
@@ -47,7 +47,7 @@ def _make_enum_coercer(
 
     def coerce(value: str | E | None) -> E | None:
         if value is None:
-            return default
+            return None
         if isinstance(value, enum_cls):
             return value
         # value is a str here; cast tells the type checker so, since it cannot narrow the
@@ -62,9 +62,6 @@ def _make_enum_coercer(
 
 
 coerce_log_level = _make_enum_coercer(LogLevel, error_label="log level", transform=str.upper)
-coerce_storage_type = _make_enum_coercer(
-    StorageType, error_label="storage location", default=StorageType.LOCAL
-)
 coerce_action = _make_enum_coercer(Action, error_label="action")
 
 
@@ -86,16 +83,11 @@ def coerce_path_list(value: list[str] | str | None) -> list[Path]:
     return [Path(path).expanduser().absolute() for path in value]
 
 
-class Settings(BaseSettings):
-    """Configuration settings for EZBak backup operations."""
+class BackupConfig(BaseModel):
+    """Validated configuration for a set of ezbak backups.
 
-    model_config = SettingsConfigDict(
-        env_prefix=ENVAR_PREFIX,
-        extra="ignore",
-        case_sensitive=False,
-        env_file=[".env", ".env.secrets"],
-        env_file_encoding="utf-8",
-    )
+    Build this to describe what to back up, where to store it, and how to name, retain, and restore it. Pass the instance to ``EZBak``.
+    """
 
     entrypoint_action: Annotated[Action | None, BeforeValidator(coerce_action)] = Field(
         default=None, alias="ezbak_action"
@@ -107,8 +99,6 @@ class Settings(BaseSettings):
     storage_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
         default_factory=list
     )
-
-    storage_type: Annotated[StorageType | None, BeforeValidator(coerce_storage_type)] = None
 
     strip_source_paths: bool = False
     delete_src_after_backup: bool = False
@@ -143,7 +133,6 @@ class Settings(BaseSettings):
     aws_secret_key: str | None = None
 
     _cached_retention_policy: RetentionPolicyManager | None = PrivateAttr(default=None)
-    _cached_tmp_dir: TemporaryDirectory | None = PrivateAttr(default=None)
 
     @property
     def retention_policy(self) -> RetentionPolicyManager:
@@ -185,16 +174,8 @@ class Settings(BaseSettings):
 
         return self._cached_retention_policy
 
-    @property
-    def tmp_dir(self) -> TemporaryDirectory:
-        """Temporary directory used for staging backups."""
-        if self._cached_tmp_dir is None:
-            self._cached_tmp_dir = TemporaryDirectory()
-            atexit.register(self.cleanup_tmp_dir)
-        return self._cached_tmp_dir
-
     @model_validator(mode="after")
-    def validate_settings(self) -> Self:  # noqa: C901
+    def validate_settings(self) -> Self:
         """Validate that required settings are provided for backup operations.
 
         Returns:
@@ -207,35 +188,8 @@ class Settings(BaseSettings):
             msg = "No backup name provided"
             raise ValueError(msg)
 
-        if self.entrypoint_action == Action.BACKUP:
-            if not self.source_paths:
-                msg = "No source paths provided but are required for backup"
-                raise ValueError(msg)
-
-            for source in self.source_paths:
-                if not source.exists():
-                    msg = f"Source does not exist: {source}"
-                    raise ValueError(msg)
-
-            if self.storage_paths:
-                for destination in self.storage_paths:
-                    if not destination.exists():
-                        destination.mkdir(parents=True, exist_ok=True)
-
-        if not self.storage_paths and self.storage_type != StorageType.AWS:
-            msg = "No local storage paths provided"
+        if not self.storage_paths and not self.aws_s3_bucket_name:
+            msg = "No destination configured: set storage_paths and/or aws_s3_bucket_name"
             raise ValueError(msg)
 
-        if self.storage_paths and self.entrypoint_action == Action.RESTORE:
-            for destination in self.storage_paths:
-                if not destination.exists():
-                    msg = f"Backup storage path does not exist: {destination}"
-                    raise ValueError(msg)
-
         return self
-
-    def cleanup_tmp_dir(self) -> None:
-        """Clean up the temporary directory."""
-        if self._cached_tmp_dir:
-            self._cached_tmp_dir.cleanup()
-            self._cached_tmp_dir = None

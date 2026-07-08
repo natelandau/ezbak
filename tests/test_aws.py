@@ -9,10 +9,10 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
+from ezbak.backup import Backup
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
-from ezbak.controllers.aws import AWSService
-from ezbak.models import Backup
-from ezbak.utils.log_config import instantiate_logger
+from ezbak.logging import instantiate_logger
+from ezbak.storage.aws import AWSService
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -38,7 +38,7 @@ def mock_aws_client(mocker) -> None:
         ],
     }
 
-    mocker.patch("ezbak.controllers.aws.boto3.client", return_value=mock_s3_client)
+    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_s3_client)
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -56,7 +56,6 @@ def test_aws_create_backup(
         source_paths=[src_dir],
         log_level="trace",
         tz="Etc/UTC",
-        storage_type="aws",
         aws_s3_bucket_name="test-bucket",
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
@@ -81,7 +80,6 @@ def test_aws_create_backup_no_labels(filesystem, debug, capsys, tmp_path):
         label_time_units=False,
         log_level="TRACE",
         tz="Etc/UTC",
-        storage_type="aws",
         aws_s3_bucket_name="test-bucket",
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
@@ -108,7 +106,6 @@ def test_get_latest_backup(filesystem, debug, capsys, tmp_path):
         source_paths=[src_dir],
         log_level="TRACE",
         tz="Etc/UTC",
-        storage_type="aws",
         aws_s3_bucket_name="test-bucket",
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
@@ -130,14 +127,13 @@ def test_delete_object(mocker, debug, capsys, tmp_path):
         source_paths=[tmp_path],
         log_level="TRACE",
         tz="Etc/UTC",
-        storage_type="aws",
         aws_s3_bucket_name="test-bucket",
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
     )
 
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
-    backup_manager.backup_manager._delete_backup(backup)
+    backup_manager._delete_backup(backup)
     output = capsys.readouterr().err
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
@@ -188,3 +184,24 @@ def test_delete_objects(mocker, debug, capsys, tmp_path):
     assert "S3: Attempting to delete 2 objects" in output
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
     assert "S3: Failed to delete 'test-20240609T000000-yearly.tgz': 404 - Not Found" in output
+
+
+def test_both_backends_configured(filesystem):
+    """Verify an app with both local and S3 destinations builds one backend per type."""
+    # Given source and local destination directories plus S3 bucket settings
+    src_dir, dest1, _ = filesystem
+
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="test-access-key-id",
+        aws_secret_key="test-secret-access-key",
+    )
+
+    # When inspecting the derived backends
+    types = {b.storage_type for b in backup_manager.backends}
+
+    # Then both a local and an S3 backend exist
+    assert types == {StorageType.LOCAL, StorageType.AWS}

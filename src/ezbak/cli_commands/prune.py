@@ -3,13 +3,13 @@
 from loguru import logger
 from rich.prompt import Confirm
 
-from ezbak.cli import EZBakCLI
-from ezbak.cli_commands.factory import get_app_for_cli
+from ezbak.cli import EZBakCLI, build_config
+from ezbak.core import EZBak
 
 
 def main(cmd: EZBakCLI) -> None:
     """The main function for the prune command."""
-    app = get_app_for_cli(cmd)
+    app = EZBak(build_config(cmd))
     policy = app.settings.retention_policy.get_full_policy()
 
     if not policy:
@@ -26,7 +26,9 @@ def main(cmd: EZBakCLI) -> None:
 
     deleted_files = app.prune_backups()
     if deleted_files:
-        print_backups = "\n  - ".join([str(x.path) for x in deleted_files])
+        # S3 backups have no local path; fall back to the object name so the output
+        # names the key instead of printing "None".
+        print_backups = "\n  - ".join([str(x.path) if x.path else x.name for x in deleted_files])
         logger.info(f"Deleted {len(deleted_files)} backups:\n   - {print_backups}")
     else:
         logger.info("No backups deleted")

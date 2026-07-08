@@ -1,31 +1,55 @@
-"""Backup management controller."""
+"""Core EZBak class: create, list, prune, rename, and restore backups."""
+
+from __future__ import annotations
 
 import re
 import sys
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import assert_never
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, assert_never
 
 from loguru import logger
 from nclutils.fs import clean_directory
+from pydantic import ValidationError
 
-from ezbak.constants import (
-    RetentionPolicyType,
-    StorageType,
-)
-from ezbak.models import Backup, StorageLocation
-from ezbak.models.backup_name import (
+from ezbak.config import BackupConfig
+from ezbak.constants import RetentionPolicyType, StorageType
+from ezbak.filters import chown_files, should_include_file, validate_source_paths
+from ezbak.logging import instantiate_logger
+from ezbak.naming import (
     add_uid_suffix,
     build_backup_name,
     new_staging_filename,
     parse_backup_name,
 )
-from ezbak.models.settings import Settings
-from ezbak.utils import chown_files, should_include_file, validate_source_paths
+from ezbak.storage import LocalBackend, S3Backend, StorageBackend
+from ezbak.storage.aws import AWSService
 
-from .aws import AWSService
-from .backends import LocalBackend, S3Backend, StorageBackend
+if TYPE_CHECKING:
+    from ezbak.backup import Backup, StorageLocation
+
+
+def ezbak(**kwargs: object) -> EZBak:
+    """Build an ``EZBak`` from keyword options without importing ``BackupConfig``.
+
+    Convenience for quick scripts. Validates via ``BackupConfig`` and returns a ready core. Prefer ``EZBak(BackupConfig(...))`` when you want an explicit, reusable config object.
+
+    Returns:
+        EZBak: A configured backup core.
+
+    Raises:
+        ValidationError: If provided settings are invalid.
+    """
+    try:
+        config = BackupConfig(**kwargs)  # type: ignore[arg-type]
+    except ValidationError as e:
+        for error in e.errors():
+            logger.error(error["msg"])
+        raise
+
+    return EZBak(config)
 
 
 @dataclass
@@ -40,25 +64,38 @@ class FileForRename:
     do_rename: bool = False
 
 
-class BackupManager:
+class EZBak:
     """Manage and control backup operations for specified sources and storage_paths."""
 
-    def __init__(self, config: Settings) -> None:
-        """Initialize a backup manager to automate backup creation, management, and cleanup operations.
+    def __init__(self, config: BackupConfig) -> None:
+        """Initialize the backup core with a validated `BackupConfig` and prepare logging, staging, and storage backends.
 
-        Create a backup manager that handles the complete backup lifecycle including file selection, compression, storage across multiple storage_paths, and automated cleanup based on retention policies. Use this when you need reliable, automated backup management with flexible scheduling and retention controls.
+        Args:
+            config (BackupConfig): Application configuration. Prefer using `ezbak()` to construct a validated configuration.
         """
         self.settings = config
+        instantiate_logger(
+            log_level=self.settings.log_level,
+            log_file=self.settings.log_file,
+            prefix=self.settings.log_prefix,
+        )
+
         self.aws_service: AWSService | None = None
         self._storage_locations: list[StorageLocation] = []
         self.rebuild_storage_locations = False
-        self.tmp_dir = Path(self.settings.tmp_dir.name)
+
+        # TemporaryDirectory registers its own finalizer, so the staging dir is removed
+        # when this EZBak is garbage-collected or the process exits. Registering an extra
+        # atexit callback bound to self would instead pin the whole EZBak (and its boto3
+        # client and cached indexes) in memory until exit.
+        self._tmp_dir_handle = TemporaryDirectory()
+        self.tmp_dir = Path(self._tmp_dir_handle.name)
 
         self.backends: list[StorageBackend] = []
-        if self.settings.storage_type in {StorageType.LOCAL, StorageType.ALL}:
+        if self.settings.storage_paths:
             self.backends.append(LocalBackend(self.settings))
 
-        if self.settings.storage_type in {StorageType.AWS, StorageType.ALL}:
+        if self.settings.aws_s3_bucket_name:
             try:
                 self.aws_service = AWSService(
                     aws_access_key=self.settings.aws_access_key,
@@ -175,6 +212,35 @@ class BackupManager:
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile
 
+    def _backend_for_type(self, storage_type: StorageType) -> StorageBackend:
+        """Return the backend for a storage type, or fail with a clear message.
+
+        Args:
+            storage_type (StorageType): The storage type to route.
+
+        Returns:
+            StorageBackend: The matching backend.
+
+        Raises:
+            ValueError: If no configured backend handles the storage type.
+        """
+        backend = self._backend_by_type.get(storage_type)
+        if backend is None:
+            msg = f"No configured backend for storage type: {storage_type.value}"
+            raise ValueError(msg)
+        return backend
+
+    def _backend_for(self, backup: Backup) -> StorageBackend:
+        """Return the backend that owns a backup, or fail with a clear message.
+
+        Args:
+            backup (Backup): The backup to route.
+
+        Returns:
+            StorageBackend: The matching backend.
+        """
+        return self._backend_for_type(backup.storage_type)
+
     def _delete_backup(self, backup: Backup) -> None:
         """Delete a backup file from the storage locations.
 
@@ -183,7 +249,7 @@ class BackupManager:
         Args:
             backup (Backup): The backup object containing information about the file to delete.
         """
-        self._backend_by_type[backup.storage_type].delete(backup)
+        self._backend_for(backup).delete(backup)
 
     def _do_restore(self, backup: Backup, destination: Path) -> bool:
         """Restore a backup file to the storage locations.
@@ -198,7 +264,7 @@ class BackupManager:
             bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
-        tarfile_path = self._backend_by_type[backup.storage_type].prepare_for_restore(backup)
+        tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
         if tarfile_path is None:
             return False
 
@@ -210,7 +276,9 @@ class BackupManager:
             logger.error(f"Failed to restore backup: {tarfile_path}\n{e}")
             return False
 
-        if self.settings.chown_uid and self.settings.chown_gid:
+        # Compare against None, not truthiness: uid/gid 0 (root) is a valid target
+        # and must not be treated as "unset".
+        if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
             chown_files(
                 directory=destination, uid=self.settings.chown_uid, gid=self.settings.chown_gid
             )
@@ -355,7 +423,7 @@ class BackupManager:
         created_backups: list[Backup] = []
 
         for storage_location in self.storage_locations:
-            backend = self._backend_by_type[storage_location.storage_type]
+            backend = self._backend_for_type(storage_location.storage_type)
             created_backups.append(
                 backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
             )
@@ -389,7 +457,7 @@ class BackupManager:
         Find the most recent backup across all configured storage locations based on timestamp. Use this to identify the newest backup for restoration operations or to determine if new backups are needed.
 
         Returns:
-            Backup: The latest backup, or None if no backups exist.
+            Backup | None: The latest backup, or None if no backups exist.
         """
         all_backups = [x for y in self.storage_locations for x in y.backups]
         if not all_backups:
@@ -418,7 +486,7 @@ class BackupManager:
         Delete excess backup files while preserving the most important backups based on the retention policy configuration. Use this to automatically clean up old backups and prevent unlimited storage growth while maintaining appropriate historical coverage.
 
         Returns:
-            list[Backup]: A list of backup objects that were successfully deleted during the pruning operation.
+            list[Backup]: A list of backup objects targeted for deletion by the retention policy.
         """
         logger.trace("Pruning backups")
         backups_to_delete = self._identify_backups_to_delete()
@@ -470,9 +538,7 @@ class BackupManager:
                     )
                     file.new_name = add_uid_suffix(file.new_name)
 
-                self._backend_by_type[file.backup.storage_type].rename(
-                    backup=file.backup, new_name=file.new_name
-                )
+                self._backend_for(file.backup).rename(backup=file.backup, new_name=file.new_name)
 
         renamed = [x for x in files_for_rename if x.do_rename]
         if len(renamed) > 0:
@@ -486,24 +552,24 @@ class BackupManager:
             logger.info("No backups to rename")
 
     def restore_backup(
-        self, destination: Path | str | None = None, *, clean_before_restore: bool = False
+        self, restore_path: Path | str | None = None, *, clean_before_restore: bool = False
     ) -> bool:
-        """Extract and restore the most recent backup to a specified destination directory.
+        """Restore the latest or specified backup to `restore_path`.
 
         Decompress and extract the latest backup archive to recover files and directories to their original structure. Use this for disaster recovery, file restoration, or migrating backup contents to a new location.
 
         Args:
-            destination (Path | str | None, optional): The directory path where backup contents should be extracted and restored. If None, uses the configured restore path. Defaults to None.
-            clean_before_restore (bool): Whether to clean the restore path before restoring. Defaults to False.
+            restore_path (Path | str | None): Target directory to restore into. When None, restore the latest backup to its original path or default target. Defaults to None.
+            clean_before_restore (bool): Remove existing contents at the target before restoring. Defaults to False.
 
         Returns:
-            bool: True if the backup was successfully restored, False if restoration failed due to missing backups or invalid destination.
+            bool: True when a backup is successfully restored; otherwise False.
 
         Raises:
             ValueError: If the destination is not provided and no restore directory is configured.
             ValueError: If the destination does not exist or is not a directory.
         """
-        destination = destination or self.settings.restore_path
+        destination = restore_path or self.settings.restore_path
 
         try:
             dest = Path(destination).expanduser().absolute()

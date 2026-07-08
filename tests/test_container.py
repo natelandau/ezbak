@@ -12,7 +12,7 @@ import pytest
 import time_machine
 
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT
-from ezbak.entrypoint import main as entrypoint
+from ezbak.container import main as entrypoint
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
@@ -24,7 +24,7 @@ fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 def mock_run(mocker):
     """Mock the Run class to prevent infinite loop in scheduler."""
     # Mock the Run class to prevent infinite loop in scheduler
-    mock_scheduler = mocker.patch("ezbak.entrypoint.BackgroundScheduler")
+    mock_scheduler = mocker.patch("ezbak.container.BackgroundScheduler")
     mock_scheduler_instance = mock_scheduler.return_value
     mock_scheduler_instance.running = False
     mocker.patch("time.sleep", return_value=None)

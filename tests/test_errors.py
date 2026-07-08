@@ -1,14 +1,21 @@
 """Test EZBak errors."""
 
 import pytest
+from pydantic import ValidationError
 
-from ezbak import ezbak
+from ezbak import EZBak, ezbak
+from ezbak.backup import Backup
+from ezbak.config import BackupConfig
+from ezbak.constants import StorageType
 
 
 def test_no_name(filesystem):
-    """Test EZBak errors."""
+    """Verify building an EZBak without a name is rejected."""
+    # Given source and destination directories
     src_dir, dest1, _ = filesystem
-    with pytest.raises(TypeError, match="required positional argument"):
+
+    # When building without a name, then a validation error is raised
+    with pytest.raises(ValidationError, match="No backup name provided"):
         ezbak(
             # name="test",
             source_paths=[src_dir],
@@ -62,7 +69,7 @@ def test_source_paths_symlink(tmp_path, capsys, debug):
 def test_storage_paths(filesystem):
     """Test EZBak errors."""
     src_dir, _, _ = filesystem
-    with pytest.raises(ValueError, match="No local storage paths provided "):
+    with pytest.raises(ValueError, match="No destination configured"):
         ezbak(
             name="test",
             source_paths=[src_dir],
@@ -146,3 +153,45 @@ def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
     )
     with pytest.raises(ValueError, match="Invalid destination: None"):
         backup_manager.restore_backup(None)
+
+
+def test_delete_unmapped_backend_raises_clear_error(filesystem):
+    """Verify deleting a backup whose backend is not configured fails loudly."""
+    # Given an app with only a local backend
+    src, dest1, _ = filesystem
+    app = ezbak(name="t", source_paths=[src], storage_paths=[dest1])
+
+    # And a backup tagged for a backend that was never built
+    orphan = Backup(name="t-20200101T000000-daily.tgz", storage_type=StorageType.AWS)
+
+    # When attempting to delete it, then a clear error names the missing backend
+    with pytest.raises(ValueError, match="No configured backend for storage type: aws"):
+        app._delete_backup(orphan)
+
+
+def test_restore_backup_missing_local_storage_path(filesystem, tmp_path):
+    """Verify restoring with a missing local storage path fails gracefully and indexes it."""
+    # Given an app whose storage path does not exist on disk yet
+    src, dest1, _ = filesystem
+    missing_storage_path = dest1 / "not_yet_created"
+    app = ezbak(name="t", source_paths=[src], storage_paths=[missing_storage_path])
+
+    # When restoring to an existing directory
+    result = app.restore_backup(restore_path=tmp_path)
+
+    # Then no backup is found, but the storage path now exists (created during indexing)
+    assert result is False
+    assert missing_storage_path.exists()
+
+
+def test_list_and_restore_without_source_paths(filesystem, tmp_path):
+    """Verify listing and restoring do not require source paths."""
+    # Given an app configured with no source paths (e.g. a container restore)
+    _, dest1, _ = filesystem
+    app = EZBak(BackupConfig(name="t", storage_paths=[dest1]))
+
+    # When listing backups, then no error is raised for the missing source paths
+    assert app.list_backups() == []
+
+    # When restoring, then no backup is found and no "No source paths provided" error is raised
+    assert app.restore_backup(restore_path=tmp_path) is False

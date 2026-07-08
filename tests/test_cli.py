@@ -11,11 +11,11 @@ from zoneinfo import ZoneInfo
 import cappa
 import time_machine
 
-from ezbak.cli import EZBakCLI
+from ezbak.backup import Backup
+from ezbak.cli import CreateCommand, EZBakCLI, build_config
 from ezbak.cli_commands import list as list_cmd
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
-from ezbak.models import Backup
-from ezbak.utils.log_config import instantiate_logger
+from ezbak.logging import instantiate_logger
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -215,7 +215,7 @@ def test_cli_list_backups(debug, capsys, tmp_path):
 
 
 def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
-    """Verify listing shows both local and S3 backups when storage_type is ALL."""
+    """Verify listing shows both local and S3 backups when both destinations have backups."""
     # Given a logger writing to stderr and an app reporting one local and one AWS backup
     instantiate_logger(LogLevel.INFO)
 
@@ -227,10 +227,10 @@ def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
     )
     aws_backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     fake_app = SimpleNamespace(
-        settings=SimpleNamespace(storage_type=StorageType.ALL),
         list_backups=lambda: [local_backup, aws_backup],
     )
-    mocker.patch.object(list_cmd, "get_app_for_cli", return_value=fake_app)
+    mocker.patch.object(list_cmd, "build_config", return_value=mocker.MagicMock())
+    mocker.patch.object(list_cmd, "EZBak", return_value=fake_app)
 
     # When listing backups
     list_cmd.main(mocker.MagicMock())
@@ -273,3 +273,42 @@ def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
 
     assert "INFO     | Backup restored to 'restore'" in output
     assert Path(restore_path / "src" / "baz.txt").exists()
+
+
+def test_build_config_reads_s3_bucket(monkeypatch, filesystem):
+    """Verify the CLI builder wires an S3 bucket into the config."""
+    # Given credentials in the environment and a bucket flag
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "AKIA_TEST")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
+    src, dest1, _ = filesystem
+
+    # When building a config for a create command targeting S3
+    cli = EZBakCLI(
+        command=CreateCommand(sources=[src]),
+        name="t",
+        storage_paths=[dest1],
+        s3_bucket="my-bucket",
+    )
+    config = build_config(cli)
+
+    # Then the bucket and env-sourced credentials are present
+    assert config.aws_s3_bucket_name == "my-bucket"
+    assert config.aws_access_key == "AKIA_TEST"
+
+
+def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
+    """Verify an S3-only backup parses without the --storage flag."""
+    # Given S3 credentials in the environment
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "AKIA_TEST")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
+
+    # When parsing a create command with only --s3-bucket (no --storage)
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=["--name", "t", "--s3-bucket", "my-bucket", "create", "--source", str(tmp_path)],
+    )
+    config = build_config(cli)
+
+    # Then parsing succeeds and the config has no local paths but the S3 bucket
+    assert config.storage_paths == []
+    assert config.aws_s3_bucket_name == "my-bucket"
