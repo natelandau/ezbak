@@ -12,7 +12,7 @@ import time_machine
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_DATE_FORMAT
 from ezbak.core import _commit_restore, _merge_move
-from ezbak.exceptions import RestoreFailedError
+from ezbak.exceptions import ConfigurationError, RestoreFailedError
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -612,6 +612,30 @@ def test_restore_preserves_staging_on_commit_failure(tmp_path, filesystem, monke
     staging_dirs = [p for p in restore_dir.iterdir() if p.name.startswith(".ezbak-restore-")]
     assert len(staging_dirs) == 1
     assert any(staging_dirs[0].iterdir())  # holds the extracted files
+
+
+def test_restore_into_storage_path_is_rejected(tmp_path, filesystem):
+    """Verify restoring into or above a storage location is refused before any deletion."""
+    src_dir = filesystem[0]
+    storage = tmp_path / "store"
+    storage.mkdir()
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[storage], log_level="error")
+    mgr.create_backup()
+
+    archives_before = {p.name for p in storage.iterdir() if p.is_file()}
+    assert archives_before  # the backup archive lives in the storage dir
+
+    # Restoring into the storage dir itself is rejected...
+    with pytest.raises(ConfigurationError):
+        mgr.restore_backup(storage, clean_before_restore=True)
+
+    # ...and into a parent that contains the storage dir (a clean restore there
+    # would empty the storage subtree).
+    with pytest.raises(ConfigurationError):
+        mgr.restore_backup(tmp_path, clean_before_restore=True)
+
+    # No archive was deleted by either rejected restore.
+    assert {p.name for p in storage.iterdir() if p.is_file()} == archives_before
 
 
 def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
