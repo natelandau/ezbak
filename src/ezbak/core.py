@@ -527,7 +527,7 @@ class EZBak:
             float: POSIX timestamp of the exclusive upper boundary.
 
         Raises:
-            ConfigurationError: If the value is not a recognized date/time shape or has an out-of-range field.
+            ConfigurationError: If the value is not a recognized date/time shape, has an out-of-range field, or overflows the boundary calculation.
             AssertionError: If the value's length doesn't match one of the six recognized shapes (unreachable given the regex check above).
         """
         if not RESTORE_DATE_REGEX.match(point_in_time):
@@ -561,11 +561,15 @@ class EZBak:
 
         try:
             period_start = PlainDateTime.parse(point_in_time + suffix, format=DEFAULT_DATE_PATTERN)
+            # Advance inside the try: an out-of-range field (e.g. month 13) fails the
+            # parse, and a boundary past PlainDateTime's max year (e.g. "9999" + 1 year)
+            # fails the add. Both must surface as a clean ConfigurationError, not a raw
+            # ValueError that escapes the CLI/container EZBakError handlers.
+            boundary_plain = self._add_one_unit(period_start=period_start, unit=unit)
         except ValueError as e:
             msg = f"Invalid restore date: {point_in_time!r}"
             raise ConfigurationError(msg) from e
 
-        boundary_plain = self._add_one_unit(period_start, unit)
         boundary = (
             boundary_plain.assume_tz(self.settings.tz)
             if self.settings.tz
@@ -686,13 +690,19 @@ class EZBak:
             msg = f"Restore destination does not exist: {dest}"
             raise ConfigurationError(msg)
 
+        # A blank restore_date (empty or whitespace, e.g. an unset EZBAK_RESTORE_DATE
+        # templated to "") means no point in time was requested: fall through to the
+        # latest backup, consistently for "" and "  ", rather than one silently
+        # restoring latest while the other raises on the whitespace.
+        restore_date = (self.settings.restore_date or "").strip()
+
         # Precedence: an explicit Backup wins; else a configured restore_date selects a
         # point in time; else the latest. Confirm a target before cleaning, so
         # clean_before_restore never empties the destination with nothing to restore.
         if backup is not None:
             target = backup
-        elif self.settings.restore_date:
-            target = self.get_backup_as_of(self.settings.restore_date)
+        elif restore_date:
+            target = self.get_backup_as_of(restore_date)
             # get_backup_as_of already logged the miss. Fail rather than silently
             # falling back to the newest backup, which would restore the wrong data.
             if target is None:

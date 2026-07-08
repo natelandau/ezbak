@@ -211,3 +211,69 @@ def test_restore_backup_restore_date_unresolvable_returns_false(tmp_path, mocker
     # Then it fails and never restores the newest backup
     assert result is False
     spy.assert_not_called()
+
+
+def test_get_backup_as_of_year_overflow_raises(tmp_path):
+    """Verify a year whose boundary overflows PlainDateTime raises ConfigurationError."""
+    # Given any configured app
+    app = ezbak(name="test", source_paths=[tmp_path], storage_paths=[tmp_path])
+
+    # When the +1-year boundary would exceed the max supported year
+    # Then a clean ConfigurationError is raised, not a raw ValueError
+    with pytest.raises(ConfigurationError):
+        app.get_backup_as_of("9999")
+
+
+def test_get_backup_as_of_trailing_newline_raises(tmp_path):
+    """Verify a trailing newline is rejected as ConfigurationError, not AssertionError."""
+    # Given any configured app
+    app = ezbak(name="test", source_paths=[tmp_path], storage_paths=[tmp_path])
+
+    # When the value carries a trailing newline (e.g. from EZBAK_RESTORE_DATE=$(cat file))
+    # Then it is rejected cleanly rather than tripping the length assertion
+    with pytest.raises(ConfigurationError):
+        app.get_backup_as_of("20250101\n")
+
+
+def test_restore_backup_explicit_backup_overrides_restore_date(tmp_path, mocker):
+    """Verify an explicit backup arg wins over a configured restore_date."""
+    # Given backups and a config whose restore_date points at a different backup
+    _seed_backups(tmp_path, ["20250101T120000", "20250102T090000", "20250103T090000"])
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    app = ezbak(
+        name="test",
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
+        restore_date="20250102",
+    )
+    chosen = next(b for b in app.list_backups() if b.name == "test-20250103T090000.tgz")
+    spy = mocker.spy(app, "_do_restore")
+
+    # When restoring with an explicit backup that differs from the restore_date target
+    app.restore_backup(restore_dir, backup=chosen)
+
+    # Then the explicit backup is restored, not the restore_date selection
+    assert spy.call_args.kwargs["backup"].name == "test-20250103T090000.tgz"
+
+
+def test_restore_backup_blank_restore_date_uses_latest(tmp_path, mocker):
+    """Verify a whitespace-only restore_date falls back to the latest backup."""
+    # Given backups and a blank (whitespace) restore_date
+    _seed_backups(tmp_path, ["20250101T120000", "20250103T090000"])
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    app = ezbak(
+        name="test",
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
+        restore_date="   ",
+    )
+    spy = mocker.spy(app, "_do_restore")
+
+    # When restoring with no explicit backup
+    result = app.restore_backup(restore_dir)
+
+    # Then the latest backup is restored (blank treated as "no point in time requested")
+    assert result is True
+    assert spy.call_args.kwargs["backup"].name == "test-20250103T090000.tgz"
