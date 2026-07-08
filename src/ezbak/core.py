@@ -6,7 +6,7 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
 from loguru import logger
 from nclutils.fs import clean_directory
@@ -42,6 +42,8 @@ from ezbak.storage.aws import AWSService
 
 if TYPE_CHECKING:
     from ezbak.backup import Backup, StorageLocation
+
+PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
 
 
 def ezbak(**kwargs: object) -> EZBak:
@@ -477,7 +479,7 @@ class EZBak:
         return [x for y in self.storage_locations for x in y.backups]
 
     @staticmethod
-    def _add_one_unit(period_start: PlainDateTime, unit: str) -> PlainDateTime:
+    def _add_one_unit(period_start: PlainDateTime, unit: PeriodUnit) -> PlainDateTime:
         """Advance a plain date/time by one calendar or exact unit.
 
         Dispatched on the literal ``unit`` string (rather than **kwargs-unpacked) so
@@ -486,7 +488,7 @@ class EZBak:
 
         Args:
             period_start (PlainDateTime): The start-of-period instant to advance.
-            unit (str): One of "years", "months", "days", "hours", "minutes", "seconds".
+            unit (PeriodUnit): One of "years", "months", "days", "hours", "minutes", "seconds".
 
         Returns:
             PlainDateTime: `period_start` advanced by one unit.
@@ -505,8 +507,10 @@ class EZBak:
                 return period_start.add(hours=1, naive_arithmetic_ok=True)
             case "minutes":
                 return period_start.add(minutes=1, naive_arithmetic_ok=True)
-            case _:
+            case "seconds":
                 return period_start.add(seconds=1, naive_arithmetic_ok=True)
+            case _:
+                assert_never(unit)
 
     def _resolve_upper_boundary(self, point_in_time: str) -> float:
         """Convert a partial date/time to an exclusive upper-boundary timestamp.
@@ -524,6 +528,7 @@ class EZBak:
 
         Raises:
             ConfigurationError: If the value is not a recognized date/time shape or has an out-of-range field.
+            AssertionError: If the value's length doesn't match one of the six recognized shapes (unreachable given the regex check above).
         """
         if not RESTORE_DATE_REGEX.match(point_in_time):
             msg = f"Invalid restore date: {point_in_time!r} (expected YYYY[MM[DD[THH[MM[SS]]]]])"
@@ -531,6 +536,8 @@ class EZBak:
 
         # Single source of truth: shape length determines both the start-of-period
         # padding and the unit to advance by one for the exclusive boundary.
+        suffix: str
+        unit: PeriodUnit
         match len(point_in_time):
             case 4:
                 suffix, unit = "0101T000000", "years"
@@ -542,8 +549,15 @@ class EZBak:
                 suffix, unit = "0000", "hours"
             case 13:
                 suffix, unit = "00", "minutes"
-            case _:
+            case 15:
                 suffix, unit = "", "seconds"
+            case _:
+                # Unreachable: RESTORE_DATE_REGEX above only matches these six
+                # lengths, so no other length can reach this branch. `len()`
+                # returns plain `int`, not a Literal, so mypy can't prove this
+                # via `assert_never`; fail loudly instead of a silent fallback.
+                msg = f"Unhandled restore date length: {len(point_in_time)}"
+                raise AssertionError(msg)
 
         try:
             period_start = PlainDateTime.parse(point_in_time + suffix, format=DEFAULT_DATE_PATTERN)
