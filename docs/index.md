@@ -1,10 +1,12 @@
 # ezbak
 
-ezbak moves shared state between jobs and hosts in an orchestrated environment
-like Nomad or Kubernetes. It creates, prunes, and restores compressed archives on
-the local filesystem, in AWS S3, or both. The Docker container is the main way to
-run it, with a Python package and a command-line tool for scripting and one-off
-use.
+ezbak is a backup manager. It creates, prunes, and restores compressed archives of
+files and directories on the local filesystem, in AWS S3, or both, with regex file
+filtering, count-based and time-based retention, and point-in-time restore. It was
+written primarily to move shared state between jobs and hosts in an orchestrated
+environment like Nomad or Kubernetes. In that setting the Docker container is the
+main way to run it; a Python package and a command-line tool run the same backups
+from your own code or a shell.
 
 ezbak is a small, focused backup manager. It does not aim to replace restic, borg,
 or a full backup system.
