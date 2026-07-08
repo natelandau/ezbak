@@ -12,7 +12,7 @@ from loguru import logger
 from ezbak.constants import Action, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
-from ezbak.exceptions import EZBakError
+from ezbak.exceptions import EZBakError, RestoreFailedError
 
 
 def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
@@ -59,8 +59,15 @@ def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None
     """Restore a backup of the service data directory from the specified path.
 
     Restores data from a previously created backup to recover from data loss or system failures. Requires RESTORE_DIR environment variable to be set.
+
+    Raises:
+        RestoreFailedError: No backup matched the restore criteria.
     """
-    app.restore_backup()
+    if not app.restore_backup():
+        # restore_backup() returns False (rather than raising) when no backup matches,
+        # so raise here to keep a failed restore from looking like a success.
+        msg = "Restore failed: no backup matched the restore criteria"
+        raise RestoreFailedError(msg)
 
     if scheduler:  # pragma: no cover
         job = scheduler.get_job(job_id="restore")
