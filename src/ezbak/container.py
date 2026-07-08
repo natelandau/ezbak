@@ -8,11 +8,13 @@ from collections.abc import Callable
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
+from pydantic import ValidationError
 
 from ezbak.constants import Action, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
 from ezbak.exceptions import EZBakError, RestoreFailedError
+from ezbak.logging import log_validation_errors
 
 
 def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
@@ -110,6 +112,22 @@ def log_debug_info(app: EZBak) -> None:
     logger.trace(f"retention_policy: {retention_policy}")
 
 
+def _load_config() -> EnvConfig:
+    """Load the container config from the environment, exiting cleanly on a bad config.
+
+    A misconfigured container (missing name or storage) must log a clean message and
+    exit non-zero, not dump a raw pydantic traceback to the container logs.
+
+    Returns:
+        EnvConfig: The validated container configuration.
+    """
+    try:
+        return EnvConfig()
+    except ValidationError as e:
+        log_validation_errors(e)
+        sys.exit(1)
+
+
 def main() -> None:
     """Initialize and run the ezbak backup system with configuration validation.
 
@@ -117,7 +135,7 @@ def main() -> None:
     """
     # Hold the EnvConfig directly: container-only settings (entrypoint_action,
     # healthcheck_url) live here, not on the library-facing BackupConfig that app.settings exposes.
-    config = EnvConfig()
+    config = _load_config()
     app = EZBak(config)
 
     log_debug_info(app)

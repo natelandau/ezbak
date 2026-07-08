@@ -364,6 +364,22 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     assert config.aws_s3_bucket_name == "my-bucket"
 
 
+def test_cli_invalid_config_exits_cleanly(monkeypatch, capsys):
+    """Verify a config with no storage location exits non-zero with a logged message."""
+    # Given a logger bound to this test's stderr and no storage configured
+    instantiate_logger(LogLevel.INFO)
+    for var in ("EZBAK_STORAGE_PATHS", "EZBAK_AWS_S3_BUCKET_NAME"):
+        monkeypatch.delenv(var, raising=False)
+
+    # When invoking a command with a name but no storage destination
+    with pytest.raises(cappa.Exit) as exc:
+        cappa.invoke(obj=EZBakCLI, argv=["list", "--name", "test"])
+
+    # Then it exits non-zero with a helpful message instead of a raw pydantic traceback
+    assert exc.value.code == 1
+    assert "No storage configured" in capsys.readouterr().err
+
+
 def test_build_config_maps_restore_date():
     """Verify --restore-date is mapped onto restore_date in the built config."""
     # Given a restore command carrying a date

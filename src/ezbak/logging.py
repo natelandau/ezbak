@@ -5,8 +5,22 @@ from functools import partial
 from pathlib import Path
 
 from loguru import logger
+from pydantic import ValidationError
 
 from ezbak.constants import LogLevel
+
+
+def log_validation_errors(error: ValidationError) -> None:
+    """Log each config validation message so a bad config reads cleanly at the entry points.
+
+    The CLI builder and the container entry point call this to turn a raw pydantic
+    traceback into readable, actionable log lines before exiting non-zero.
+
+    Args:
+        error (ValidationError): The validation error raised while building the config.
+    """
+    for err in error.errors():
+        logger.error(err["msg"])
 
 
 def _stderr_log_formatter(record: dict, prefix: str | None = None) -> str:

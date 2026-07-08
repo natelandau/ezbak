@@ -13,10 +13,11 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel
 from ezbak.container import _ping_healthcheck, _run_scheduled, do_backup
 from ezbak.container import main as entrypoint
 from ezbak.exceptions import BackupFailedError
+from ezbak.logging import instantiate_logger
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
@@ -181,6 +182,23 @@ def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
 
     # Then pruning still ran despite the failed backup
     prune_spy.assert_called_once()
+
+
+def test_entrypoint_invalid_config_exits_cleanly(capsys):
+    """Verify the container exits non-zero with a logged message when the config is invalid."""
+    # Given a logger bound to this test's stderr and no backup name configured
+    instantiate_logger(LogLevel.INFO)
+    os.environ["EZBAK_NAME"] = ""
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When running the entrypoint, then it exits non-zero
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+    assert exc_info.value.code == 1
+
+    # Then a clean validation message is logged instead of a raw pydantic traceback
+    assert "No backup name provided" in capsys.readouterr().err
 
 
 def test_ping_healthcheck_success_pings_base_url(mocker):

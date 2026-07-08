@@ -35,7 +35,7 @@ from ezbak.filters import (
     validate_source_paths,
     validate_storage_paths,
 )
-from ezbak.logging import instantiate_logger
+from ezbak.logging import instantiate_logger, log_validation_errors
 from ezbak.naming import new_staging_filename
 from ezbak.storage import LocalBackend, S3Backend, StorageBackend
 from ezbak.storage.aws import AWSService
@@ -60,8 +60,7 @@ def ezbak(**kwargs: object) -> EZBak:
     try:
         config = BackupConfig(**kwargs)  # type: ignore[arg-type]
     except ValidationError as e:
-        for error in e.errors():
-            logger.error(error["msg"])
+        log_validation_errors(e)
         raise
 
     return EZBak(config)

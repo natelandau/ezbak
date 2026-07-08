@@ -9,9 +9,11 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import cappa
 from nclutils import pp
+from pydantic import ValidationError
 
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, CLILogLevel, LogLevel
 from ezbak.env import EnvConfig
+from ezbak.logging import log_validation_errors
 
 if TYPE_CHECKING:
     from ezbak.config import BackupConfig
@@ -311,6 +313,11 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
 
     Returns:
         BackupConfig: The configuration to hand to ``EZBak``.
+
+    Raises:
+        cappa.Exit: If the assembled config is invalid (e.g. no storage location),
+            so the user sees logged messages and a clean non-zero exit instead of a
+            raw pydantic traceback.
     """
     cmd = cli.command
 
@@ -364,7 +371,11 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
     else:  # ListCommand and any other read-only command
         extra = {}
 
-    return EnvConfig(**common, **extra, _env_file=None)  # type: ignore[call-arg]
+    try:
+        return EnvConfig(**common, **extra, _env_file=None)  # type: ignore[call-arg]
+    except ValidationError as e:
+        log_validation_errors(e)
+        raise cappa.Exit(code=1) from e
 
 
 def main() -> None:  # pragma: no cover
