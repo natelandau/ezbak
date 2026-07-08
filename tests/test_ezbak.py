@@ -588,6 +588,32 @@ def test_restore_overlay_reaps_orphaned_staging(tmp_path, filesystem):
     assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
 
 
+def test_restore_preserves_staging_on_commit_failure(tmp_path, filesystem, monkeypatch):
+    """Verify a commit failure keeps the extracted staging tree for manual recovery."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    def boom(*args: object, **kwargs: object):
+        msg = "simulated commit failure"
+        raise OSError(msg)
+
+    # Fail during the swap, after the archive has been extracted into staging.
+    monkeypatch.setattr("ezbak.core._commit_restore", boom)
+
+    with pytest.raises(RestoreFailedError):
+        mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    # Extract-failure staging is thrown away, but a commit failure preserves it:
+    # the destination may be partial, so staging holds the sole clean copy.
+    staging_dirs = [p for p in restore_dir.iterdir() if p.name.startswith(".ezbak-restore-")]
+    assert len(staging_dirs) == 1
+    assert any(staging_dirs[0].iterdir())  # holds the extracted files
+
+
 def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
     """Verify that source paths are deleted after backup."""
     src_dir, dest1, _ = filesystem

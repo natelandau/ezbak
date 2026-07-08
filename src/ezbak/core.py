@@ -46,6 +46,10 @@ if TYPE_CHECKING:
 
 PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
 
+# Prefix for the temporary staging dir created inside a restore target. Shared by
+# the dir creation and the orphan-reaping glob so the two never drift apart.
+_STAGING_PREFIX = ".ezbak-restore-"
+
 
 def ezbak(**kwargs: object) -> EZBak:
     """Build an ``EZBak`` from keyword options without importing ``BackupConfig``.
@@ -67,6 +71,39 @@ def ezbak(**kwargs: object) -> EZBak:
     return EZBak(config)
 
 
+def _remove_path(path: Path) -> None:
+    """Remove `path` if present, whether file, symlink, or directory, without following symlinks.
+
+    A symlink is unlinked rather than followed, so its target is never touched.
+    Absent paths are a no-op.
+    """
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _reap_orphaned_staging(destination: Path) -> None:
+    """Remove staging dirs left inside `destination` by a hard-killed prior restore.
+
+    Only needed before an overlay restore: a clean restore's commit loop removes
+    every destination entry regardless. Translate errors so a failure honors the
+    caller's RestoreFailedError contract.
+
+    Raises:
+        RestoreFailedError: If an orphaned staging dir cannot be removed.
+    """
+    try:
+        for stale in destination.glob(f"{_STAGING_PREFIX}*"):
+            if stale.is_dir() and not stale.is_symlink():
+                logger.debug(f"Removing orphaned restore staging dir: {stale}")
+                shutil.rmtree(stale, ignore_errors=True)
+    except OSError as e:
+        msg = f"Failed to clear orphaned staging dirs in '{destination}': {e}"
+        logger.error(msg)
+        raise RestoreFailedError(msg) from e
+
+
 def _merge_move(src: Path, dst: Path) -> None:
     """Move every entry from `src` into `dst`, overwriting collisions.
 
@@ -83,15 +120,12 @@ def _merge_move(src: Path, dst: Path) -> None:
             and target.is_dir()
             and not target.is_symlink()
         ):
-            _merge_move(entry, target)
+            _merge_move(src=entry, dst=target)
             entry.rmdir()  # emptied by the recursive move above
         else:
             # rename() cannot overwrite a directory or (portably) an existing
             # file, so clear the target first.
-            if target.is_dir() and not target.is_symlink():
-                shutil.rmtree(target)
-            elif target.exists() or target.is_symlink():
-                target.unlink()
+            _remove_path(target)
             entry.rename(target)
 
 
@@ -107,12 +141,10 @@ def _commit_restore(staging: Path, dest: Path, *, clean: bool) -> None:
         for entry in dest.iterdir():
             if entry == staging:
                 continue
-            if entry.is_dir() and not entry.is_symlink():
-                shutil.rmtree(entry)
-            else:
-                entry.unlink()
+            _remove_path(entry)
+        logger.info("Cleaned all files in restore path before restore")
 
-    _merge_move(staging, dest)
+    _merge_move(src=staging, dst=dest)
 
 
 class EZBak:
@@ -347,24 +379,22 @@ class EZBak:
             logger.error(msg)
             raise RestoreFailedError(msg)
 
-        # Reap staging dirs orphaned by a hard kill of a prior restore. A clean
-        # restore's commit loop already removes them, but an overlay restore never
-        # iterates the destination, so they would otherwise accumulate. Restores to
+        # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
         # a given target are not concurrent, so removing our own scratch dirs is safe.
-        for stale in destination.glob(".ezbak-restore-*"):
-            if stale.is_dir() and not stale.is_symlink():
-                shutil.rmtree(stale, ignore_errors=True)
+        if not clean:
+            _reap_orphaned_staging(destination)
 
         # Stage inside the destination (a child, not a sibling) so the commit is a
         # same-filesystem rename even when the destination is itself a mount point.
         try:
-            staging = Path(mkdtemp(dir=destination, prefix=".ezbak-restore-"))
+            staging = Path(mkdtemp(dir=destination, prefix=_STAGING_PREFIX))
         except OSError as e:
             msg = f"Failed to create restore staging directory in '{destination}': {e}"
             logger.error(msg)
             raise RestoreFailedError(msg) from e
 
         logger.trace(f"Attempting to extract backup to staging dir '{staging}'")
+        commit_failed = False
         try:
             # Catch OSError alongside TarError so a missing or unreadable archive
             # fails loudly rather than escaping as a raw error. The extract runs
@@ -390,20 +420,25 @@ class EZBak:
 
             # Commit only after a fully successful extract.
             try:
-                _commit_restore(staging, destination, clean=clean)
+                _commit_restore(staging=staging, dest=destination, clean=clean)
             except OSError as e:
                 # The commit deletes then moves, so a failure here can leave the
-                # destination partial. This window is a handful of fast renames
-                # after a validated extract; make it loud.
+                # destination partial. Keep the extracted staging tree so an operator
+                # can recover the restored files by hand; make the failure loud.
+                commit_failed = True
                 msg = (
                     f"Restore failed while swapping files into '{destination}'; "
-                    f"the directory may be in an inconsistent state: {e}"
+                    f"the directory may be in an inconsistent state. The extracted "
+                    f"files are preserved at '{staging}' for manual recovery: {e}"
                 )
                 logger.error(msg)
                 raise RestoreFailedError(msg) from e
         finally:
-            # Never leak the staging dir inside the mount, on success or failure.
-            shutil.rmtree(staging, ignore_errors=True)
+            # Remove staging on success and on extract failure (throwaway). Only a
+            # commit failure preserves it (see above), because the destination is
+            # then partial and staging holds the sole clean copy of the restore.
+            if not commit_failed:
+                shutil.rmtree(staging, ignore_errors=True)
 
         logger.info(f"Backup restored to '{destination}'")
         return True
