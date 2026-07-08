@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import shutil
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Literal, assert_never
+from tempfile import TemporaryDirectory, mkdtemp
+from typing import TYPE_CHECKING, Literal, NoReturn, assert_never
 
 from loguru import logger
 from nclutils.fs import clean_directory
@@ -45,6 +46,10 @@ if TYPE_CHECKING:
 
 PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
 
+# Prefix for the temporary staging dir created inside a restore target. Shared by
+# the dir creation and the orphan-reaping glob so the two never drift apart.
+_STAGING_PREFIX = ".ezbak-restore-"
+
 
 def ezbak(**kwargs: object) -> EZBak:
     """Build an ``EZBak`` from keyword options without importing ``BackupConfig``.
@@ -64,6 +69,139 @@ def ezbak(**kwargs: object) -> EZBak:
         raise
 
     return EZBak(config)
+
+
+def _remove_path(path: Path) -> None:
+    """Remove `path` if present, whether file, symlink, or directory, without following symlinks.
+
+    A symlink is unlinked rather than followed, so its target is never touched.
+    Absent paths are a no-op.
+    """
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _fail_restore(msg: str, cause: Exception | None = None) -> NoReturn:
+    """Log `msg` at error level and raise RestoreFailedError, chaining `cause` when given.
+
+    Centralizes the log-then-raise the restore flow repeats at each failure point.
+
+    Raises:
+        RestoreFailedError: Always.
+    """
+    logger.error(msg)
+    if cause is None:
+        raise RestoreFailedError(msg)
+    raise RestoreFailedError(msg) from cause
+
+
+def _is_within(inner: Path, outer: Path) -> bool:
+    """Return True if `inner` is `outer` or is nested inside it.
+
+    `resolve()` collapses symlinks and '..' but not bind mounts, so two distinct
+    mount points can alias the same directory (common in containers). Fall back to
+    comparing device+inode of `inner` and each of its ancestors against `outer`, so
+    the aliasing is caught where a pure path comparison misses it. A path that
+    cannot be stat'd is skipped rather than treated as a match, to avoid a false
+    rejection.
+    """
+    if inner.is_relative_to(outer):
+        return True
+    for candidate in (inner, *inner.parents):
+        try:
+            if candidate.samefile(outer):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _assert_restore_path_clear_of_storage(dest: Path, storage_paths: list[Path] | None) -> None:
+    """Reject a clean-restore target that is or contains a local storage location.
+
+    A clean restore empties `dest`, so any backup archives living at or below it
+    would be silently destroyed. Restoring into a subdirectory of a storage dir is
+    fine: only that subdir is emptied and the sibling archives survive. The overlap
+    test is device+inode aware, so two container mounts that alias the same host
+    directory are caught even though their paths differ.
+
+    Raises:
+        ConfigurationError: If `dest` is or contains a storage location.
+    """
+    dest_resolved = dest.resolve()
+    for storage_path in storage_paths or []:
+        storage_resolved = Path(storage_path).expanduser().resolve()
+        if _is_within(storage_resolved, dest_resolved):
+            msg = (
+                f"Restore path '{dest}' is or contains storage location "
+                f"'{storage_resolved}'; a clean restore there would delete the backups. "
+                f"Choose a restore path that does not contain a storage location."
+            )
+            raise ConfigurationError(msg)
+
+
+def _reap_orphaned_staging(destination: Path) -> None:
+    """Remove staging dirs left inside `destination` by a hard-killed prior restore.
+
+    Only needed before an overlay restore: a clean restore's commit loop removes
+    every destination entry regardless. Removing any individual orphan is best
+    effort, but an unreadable destination aborts (via `_fail_restore`) so the
+    failure honors the caller's RestoreFailedError contract.
+    """
+    try:
+        stale_dirs = list(destination.glob(f"{_STAGING_PREFIX}*"))
+    except OSError as e:
+        _fail_restore(f"Failed to list orphaned staging dirs in '{destination}': {e}", e)
+
+    for stale in stale_dirs:
+        if stale.is_dir() and not stale.is_symlink():
+            logger.debug(f"Removing orphaned restore staging dir: {stale}")
+            try:
+                shutil.rmtree(stale)
+            except OSError as e:
+                logger.warning(f"Failed to remove orphaned staging dir '{stale}': {e}")
+
+
+def _merge_move(src: Path, dst: Path) -> None:
+    """Move every entry from `src` into `dst`, overwriting collisions.
+
+    Recurse into directories that exist on both sides so an overlay restore keeps
+    non-colliding files already in `dst`. Both paths must be on the same
+    filesystem, so each move is a metadata-only rename and stays cheap even for
+    multi-gigabyte restores.
+    """
+    for entry in src.iterdir():
+        target = dst / entry.name
+        entry_is_dir = entry.is_dir() and not entry.is_symlink()
+        target_is_dir = target.is_dir() and not target.is_symlink()
+        if entry_is_dir and target_is_dir:
+            _merge_move(src=entry, dst=target)
+            entry.rmdir()  # emptied by the recursive move above
+        else:
+            # rename() cannot overwrite a directory or (portably) an existing
+            # file, so clear the target first.
+            _remove_path(target)
+            entry.rename(target)
+
+
+def _commit_restore(staging: Path, dest: Path, *, clean: bool) -> None:
+    """Swap the extracted staging tree into the live destination.
+
+    In clean mode, remove every existing entry in `dest` except `staging` itself,
+    then move the staged contents in. This runs only after a fully successful
+    extract, so the destination is emptied at the last possible moment. The
+    caller removes `staging` afterward.
+    """
+    if clean:
+        for entry in dest.iterdir():
+            if entry == staging:
+                continue
+            _remove_path(entry)
+        logger.info("Cleaned all files in restore path before restore")
+
+    _merge_move(src=staging, dst=dest)
 
 
 class EZBak:
@@ -269,46 +407,87 @@ class EZBak:
         """
         self._backend_for(backup).delete(backup)
 
-    def _do_restore(self, backup: Backup, destination: Path) -> bool:
-        """Restore a backup file to the storage locations.
+    def _do_restore(self, backup: Backup, destination: Path, *, clean: bool) -> bool:
+        """Restore a backup archive into the destination directory.
 
-        Extract and decompress a backup archive to a specified destination directory, optionally changing file ownership. Use this to recover files from a backup archive for disaster recovery or data migration.
+        Extract the archive into a staging directory created inside `destination`,
+        change ownership of the staged files if configured, then swap the staged
+        contents into `destination`. Staging inside `destination` keeps the swap a
+        same-filesystem rename even when `destination` is a mount point, and means
+        the live directory is not touched until the extract fully succeeds.
 
         Args:
             backup (Backup): The backup to restore.
             destination (Path): The destination path to restore the backup to.
+            clean (bool): Remove existing contents of `destination` during the
+                commit before moving the restored files in.
 
         Returns:
             bool: True if the backup was successfully restored.
-
-        Raises:
-            RestoreFailedError: If the archive is missing from storage or cannot be extracted.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
         tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
         if tarfile_path is None:
-            msg = f"Backup archive is missing from storage: {backup.name}"
-            logger.error(msg)
-            raise RestoreFailedError(msg)
+            _fail_restore(f"Backup archive is missing from storage: {backup.name}")
 
-        logger.trace(f"Attempting to extract backup to '{destination}'")
-        # Catch OSError alongside TarError so a missing or unreadable local archive
-        # fails loudly instead of escaping as a raw error, which matters most after a
-        # clean-before-restore has already emptied the destination.
+        # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
+        # a given target are not concurrent, so removing our own scratch dirs is safe.
+        if not clean:
+            _reap_orphaned_staging(destination)
+
+        # Stage inside the destination (a child, not a sibling) so the commit is a
+        # same-filesystem rename even when the destination is itself a mount point.
         try:
-            with tarfile.open(tarfile_path) as archive:
-                archive.extractall(path=destination, filter="data")
-        except (tarfile.TarError, OSError) as e:
-            msg = f"Failed to extract backup archive: {tarfile_path}: {e}"
-            logger.error(msg)
-            raise RestoreFailedError(msg) from e
+            staging = Path(mkdtemp(dir=destination, prefix=_STAGING_PREFIX))
+        except OSError as e:
+            _fail_restore(f"Failed to create restore staging directory in '{destination}': {e}", e)
 
-        # Compare against None, not truthiness: uid/gid 0 (root) is a valid target
-        # and must not be treated as "unset".
-        if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
-            chown_files(
-                directory=destination, uid=self.settings.chown_uid, gid=self.settings.chown_gid
-            )
+        logger.trace(f"Attempting to extract backup to staging dir '{staging}'")
+        commit_failed = False
+        try:
+            # Catch OSError alongside TarError so a missing or unreadable archive
+            # fails loudly rather than escaping as a raw error. The extract runs
+            # entirely in staging, so a failure here never touches the live data.
+            try:
+                with tarfile.open(tarfile_path) as archive:
+                    archive.extractall(path=staging, filter="data")
+            except (tarfile.TarError, OSError) as e:
+                _fail_restore(f"Failed to extract backup archive: {tarfile_path}: {e}", e)
+
+            # chown the staging tree, not the destination: in overlay mode only the
+            # restored files change ownership; in clean mode staging becomes the
+            # whole destination. Compare against None, not truthiness: uid/gid 0
+            # (root) is a valid target and must not be treated as "unset".
+            if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
+                chown_files(
+                    directory=staging,
+                    uid=self.settings.chown_uid,
+                    gid=self.settings.chown_gid,
+                )
+
+            # Commit only after a fully successful extract.
+            try:
+                _commit_restore(staging=staging, dest=destination, clean=clean)
+            except OSError as e:
+                # The commit deletes then moves, so a failure here can leave the
+                # destination partial. Keep the extracted staging tree so an operator
+                # can recover the restored files by hand; make the failure loud.
+                commit_failed = True
+                _fail_restore(
+                    f"Restore failed while swapping files into '{destination}'; "
+                    f"the directory may be in an inconsistent state. The extracted "
+                    f"files are preserved at '{staging}' for manual recovery: {e}",
+                    e,
+                )
+        finally:
+            # Remove staging on success and on extract failure (throwaway). Only a
+            # commit failure preserves it (see above), because the destination is
+            # then partial and staging holds the sole clean copy of the restore.
+            if not commit_failed:
+                try:
+                    shutil.rmtree(staging)
+                except OSError as e:
+                    logger.warning(f"Failed to remove restore staging dir '{staging}': {e}")
 
         logger.info(f"Backup restored to '{destination}'")
         return True
@@ -692,7 +871,7 @@ class EZBak:
                 backup to restore.
 
         Raises:
-            ConfigurationError: If no restore path is provided and none is configured, or the restore path does not exist or is not a directory.
+            ConfigurationError: If no restore path is provided and none is configured, the restore path does not exist or is not a directory, or the restore path overlaps a storage location.
         """
         target_path = restore_path or self.settings.restore_path
 
@@ -712,6 +891,15 @@ class EZBak:
         if not dest.exists() or not dest.is_dir():
             msg = f"Restore path does not exist: {dest}"
             raise ConfigurationError(msg)
+
+        # Clean happens inside the commit now, after a successful extract, so a
+        # failed restore never empties the destination.
+        effective_clean = clean_before_restore or self.settings.clean_before_restore
+
+        # Only a clean restore deletes existing entries, so an overlay restore is left
+        # alone; a clean one must not target a storage location.
+        if effective_clean:
+            _assert_restore_path_clear_of_storage(dest, self.settings.storage_paths)
 
         # A blank restore_date (empty or whitespace, e.g. an unset EZBAK_RESTORE_DATE
         # templated to "") means no point in time was requested: fall through to the
@@ -738,8 +926,4 @@ class EZBak:
                 self._log_no_backup("No backup found to restore")
                 return False
 
-        if clean_before_restore or self.settings.clean_before_restore:
-            clean_directory(dest)
-            logger.info("Cleaned all files in restore path before restore")
-
-        return self._do_restore(backup=target, destination=dest)
+        return self._do_restore(backup=target, destination=dest, clean=effective_clean)

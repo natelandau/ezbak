@@ -3,12 +3,16 @@
 import shutil
 from datetime import datetime
 from pathlib import Path
+from tempfile import mkdtemp
 from zoneinfo import ZoneInfo
 
+import pytest
 import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_DATE_FORMAT
+from ezbak.core import _commit_restore, _is_within, _merge_move
+from ezbak.exceptions import ConfigurationError, RestoreFailedError
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -489,6 +493,176 @@ def test_restore_with_clean(debug, tmp_path, capsys, filesystem):
     assert not (restore_dir / test_file.name).exists()
 
 
+def test_restore_clean_is_atomic(tmp_path, filesystem):
+    """Verify a clean restore replaces contents and leaves no staging dir behind."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "stale.txt").write_text("stale")
+
+    assert mgr.restore_backup(restore_dir, clean_before_restore=True) is True
+
+    for file in src_dir.rglob("*"):
+        assert (restore_dir / src_dir.name / file.name).exists()
+    assert not (restore_dir / "stale.txt").exists()
+    assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
+
+
+def test_restore_extract_failure_leaves_dest_intact(tmp_path, filesystem, monkeypatch):
+    """Verify a mid-extract failure leaves the destination untouched."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "keep.txt").write_text("keep")
+
+    def boom(self, *args: object, **kwargs: object):
+        msg = "simulated disk full during extract"
+        raise OSError(msg)
+
+    monkeypatch.setattr("tarfile.TarFile.extractall", boom)
+
+    with pytest.raises(RestoreFailedError):
+        mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    # Destination is untouched: pre-existing file survives, nothing extracted,
+    # no staging directory left behind.
+    assert (restore_dir / "keep.txt").read_text() == "keep"
+    assert not (restore_dir / src_dir.name).exists()
+    assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
+
+
+def test_restore_chowns_staging_tree(tmp_path, filesystem, monkeypatch):
+    """Verify chown targets the staging tree (a child of the restore path)."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        chown_uid=0,
+        chown_gid=0,
+        log_level="error",
+    )
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    called = {}
+
+    def fake_chown(directory, uid, gid):
+        called["directory"] = Path(directory)
+
+    monkeypatch.setattr("ezbak.core.chown_files", fake_chown)
+
+    mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    assert called["directory"].name.startswith(".ezbak-restore-")
+    assert called["directory"].parent.resolve() == restore_dir.resolve()
+
+
+def test_restore_overlay_reaps_orphaned_staging(tmp_path, filesystem):
+    """Verify an overlay restore removes staging dirs orphaned by a prior crash."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "keep.txt").write_text("keep")
+    # Simulate a staging dir orphaned by a hard kill of a prior restore.
+    orphan = restore_dir / ".ezbak-restore-deadbeef"
+    orphan.mkdir()
+    (orphan / "leftover.txt").write_text("leftover")
+
+    # Overlay restore (no clean): must still reap the orphan.
+    assert mgr.restore_backup(restore_dir) is True
+
+    assert (restore_dir / "keep.txt").read_text() == "keep"  # overlay preserved existing file
+    assert not orphan.exists()  # orphaned staging reaped
+    assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
+
+
+def test_restore_preserves_staging_on_commit_failure(tmp_path, filesystem, monkeypatch):
+    """Verify a commit failure keeps the extracted staging tree for manual recovery."""
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    def boom(*args: object, **kwargs: object):
+        msg = "simulated commit failure"
+        raise OSError(msg)
+
+    # Fail during the swap, after the archive has been extracted into staging.
+    monkeypatch.setattr("ezbak.core._commit_restore", boom)
+
+    with pytest.raises(RestoreFailedError):
+        mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    # Extract-failure staging is thrown away, but a commit failure preserves it:
+    # the destination may be partial, so staging holds the sole clean copy.
+    staging_dirs = [p for p in restore_dir.iterdir() if p.name.startswith(".ezbak-restore-")]
+    assert len(staging_dirs) == 1
+    assert any(staging_dirs[0].iterdir())  # holds the extracted files
+
+
+def test_is_within_matches_nested_and_equal_paths(tmp_path):
+    """Verify the lexical overlap cases of _is_within."""
+    outer = tmp_path / "outer"
+    (outer / "inner").mkdir(parents=True)
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+
+    assert _is_within(outer, outer)  # equal
+    assert _is_within(outer / "inner", outer)  # nested
+    assert not _is_within(outer, outer / "inner")  # outer is not within inner
+    assert not _is_within(sibling, outer)  # unrelated
+
+
+def test_is_within_detects_aliased_directory(tmp_path):
+    """Verify _is_within catches two paths that alias one directory (as a bind mount does)."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)  # same directory, two different paths (device+inode identical)
+
+    # A pure path comparison would miss the overlap; the device+inode check catches it.
+    assert not link.is_relative_to(real)
+    assert _is_within(link, real)
+
+
+def test_restore_into_storage_path_is_rejected(tmp_path, filesystem):
+    """Verify restoring into or above a storage location is refused before any deletion."""
+    src_dir = filesystem[0]
+    storage = tmp_path / "store"
+    storage.mkdir()
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[storage], log_level="error")
+    mgr.create_backup()
+
+    archives_before = {p.name for p in storage.iterdir() if p.is_file()}
+    assert archives_before  # the backup archive lives in the storage dir
+
+    # Restoring into the storage dir itself is rejected...
+    with pytest.raises(ConfigurationError):
+        mgr.restore_backup(storage, clean_before_restore=True)
+
+    # ...and into a parent that contains the storage dir (a clean restore there
+    # would empty the storage subtree).
+    with pytest.raises(ConfigurationError):
+        mgr.restore_backup(tmp_path, clean_before_restore=True)
+
+    # No archive was deleted by either rejected restore.
+    assert {p.name for p in storage.iterdir() if p.is_file()} == archives_before
+
+
 def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
     """Verify that source paths are deleted after backup."""
     src_dir, dest1, _ = filesystem
@@ -514,3 +688,100 @@ def test_delete_source_after_backup(debug, capsys, tmp_path, filesystem):
     assert len(list(src_dir.iterdir())) == 0
     assert "Deleted source: " in output
     assert not test_file.exists()
+
+
+def test_merge_move_overlays_and_overwrites(tmp_path):
+    """Verify _merge_move keeps non-colliding files, overwrites collisions, merges nested dirs."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    # Existing destination tree
+    (dst / "keep.txt").write_text("old-keep")
+    (dst / "shared.txt").write_text("old-shared")
+    (dst / "sub").mkdir()
+    (dst / "sub" / "existing.txt").write_text("old-existing")
+
+    # Staged tree to move in
+    (src / "new.txt").write_text("new")
+    (src / "shared.txt").write_text("new-shared")
+    (src / "sub").mkdir()
+    (src / "sub" / "added.txt").write_text("added")
+
+    _merge_move(src, dst)
+
+    assert (dst / "keep.txt").read_text() == "old-keep"  # non-colliding survives
+    assert (dst / "shared.txt").read_text() == "new-shared"  # collision overwritten
+    assert (dst / "new.txt").read_text() == "new"  # new moved in
+    assert (dst / "sub" / "existing.txt").read_text() == "old-existing"  # nested survives
+    assert (dst / "sub" / "added.txt").read_text() == "added"  # nested merged
+    assert not any(src.iterdir())  # staging emptied
+
+
+def test_merge_move_handles_type_collisions(tmp_path):
+    """Verify _merge_move replaces across type mismatches without following symlinks."""
+    src = tmp_path / "src"
+    dst = tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+
+    # dir in src replaces a file in dst
+    (dst / "a").write_text("old-file")
+    (src / "a").mkdir()
+    (src / "a" / "inner.txt").write_text("inner")
+
+    # file in src replaces a dir in dst
+    (dst / "b").mkdir()
+    (dst / "b" / "leftover.txt").write_text("leftover")
+    (src / "b").write_text("new-file")
+
+    # file in src replaces a symlink in dst (symlink must be unlinked, not followed)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    (dst / "c").symlink_to(outside)
+    (src / "c").write_text("replacement")
+
+    _merge_move(src, dst)
+
+    assert (dst / "a").is_dir()
+    assert (dst / "a" / "inner.txt").read_text() == "inner"
+    assert (dst / "b").is_file()
+    assert (dst / "b").read_text() == "new-file"
+    assert (dst / "c").is_file()
+    assert not (dst / "c").is_symlink()
+    assert (dst / "c").read_text() == "replacement"
+    assert outside.read_text() == "outside"  # symlink target untouched (not followed)
+    assert not any(src.iterdir())
+
+
+def test_commit_restore_clean_replaces_contents(tmp_path):
+    """Verify clean commit removes existing dest entries but not the staging dir."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "old.txt").write_text("old")
+    staging = Path(mkdtemp(dir=dest, prefix=".ezbak-restore-"))
+    (staging / "new.txt").write_text("new")
+
+    _commit_restore(staging, dest, clean=True)
+
+    remaining = {p.name for p in dest.iterdir() if p != staging}
+    assert remaining == {"new.txt"}
+    assert not (dest / "old.txt").exists()
+    assert staging.exists()  # staging survives the clean loop
+    assert not any(staging.iterdir())  # emptied; caller removes it
+
+
+def test_commit_restore_overlay_keeps_existing(tmp_path):
+    """Verify overlay commit keeps non-colliding existing files."""
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "keep.txt").write_text("keep")
+    staging = Path(mkdtemp(dir=dest, prefix=".ezbak-restore-"))
+    (staging / "new.txt").write_text("new")
+
+    _commit_restore(staging, dest, clean=False)
+
+    assert (dest / "keep.txt").read_text() == "keep"
+    assert (dest / "new.txt").read_text() == "new"
+    assert staging.exists()

@@ -332,7 +332,7 @@ def test_restore_backup_raises_when_archive_corrupt(filesystem, tmp_path):
 
 
 def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, tmp_path):
-    """Verify a failed restore after clean-before-restore fails loudly, never a silent success."""
+    """Verify a failed restore with clean-before-restore fails loudly and leaves the destination untouched."""
     # Given a valid backup corrupted on disk and a restore target that was pre-populated
     src_dir, dest1, _ = filesystem
     app = ezbak(
@@ -347,10 +347,11 @@ def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, tmp_
     existing_file = restore_dir / "existing.txt"
     existing_file.write_text("pre-existing")
 
-    # When restoring, then it raises loudly even though the destination was already wiped
+    # When restoring, then it raises loudly, and the destination is never touched:
+    # the corrupt archive fails to extract into staging before any clean/commit happens.
     with pytest.raises(RestoreFailedError):
         app.restore_backup(restore_dir)
-    assert not existing_file.exists()
+    assert existing_file.exists()
 
 
 def test_restore_backup_raises_when_archive_missing_from_storage(filesystem, tmp_path, mocker):
