@@ -38,6 +38,7 @@
         "commitizen>=4.16.4",
         "coverage>=7.15.0",
         "duty>=1.9.0",
+        "moto[s3]>=5.2.2",
         "mypy>=2.1.0",
         "prek>=0.4.8",
         "pytest-clarity>=1.0.1",

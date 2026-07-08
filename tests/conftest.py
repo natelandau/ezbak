@@ -4,8 +4,10 @@ import os
 from collections.abc import Generator
 from pathlib import Path
 
+import boto3
 import pytest
 from loguru import logger
+from moto import mock_aws
 
 
 @pytest.fixture
@@ -34,6 +36,24 @@ def filesystem(tmp_path: Path) -> tuple[Path, Path, Path]:
     dest2.mkdir(parents=True, exist_ok=True)
 
     return src_dir, dest1, dest2
+
+
+@pytest.fixture
+def s3_bucket(monkeypatch: pytest.MonkeyPatch) -> Generator[str, None, None]:
+    """Provide a live in-memory S3 bucket via moto and yield its name.
+
+    moto intercepts every boto3 S3 call made while the context is open, so an
+    AWSService or EZBak built inside a test that uses this fixture talks to a real,
+    empty, in-memory bucket instead of AWS. AWSService builds its boto3 client
+    without an explicit region, so AWS_DEFAULT_REGION is set for botocore.
+
+    Yields:
+        str: The name of the created in-memory bucket, `"test-bucket"`.
+    """
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    with mock_aws():
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-bucket")
+        yield "test-bucket"
 
 
 @pytest.fixture(autouse=True)
