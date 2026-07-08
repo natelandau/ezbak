@@ -91,6 +91,17 @@ backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_p
 
 An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, and `get_latest_backup()`.
 
+`create_backup()` raises `BackupFailedError` when a configured destination can't be used, so a failed backup never looks like a success. It still writes to every destination that works, so a partial failure keeps the copies that succeeded. Catch the error to handle a failed run:
+
+```python
+from ezbak.exceptions import BackupFailedError
+
+try:
+    backups.create_backup()
+except BackupFailedError as error:
+    print(f"Backup failed for: {error.failed_destinations}")
+```
+
 ### Command line
 
 The `name` and `storage` options are global and come before the subcommand. Run `ezbak --help` or `ezbak create --help` to see every option.
@@ -186,6 +197,8 @@ ezbak sends each backup to whatever destinations you configure. There is no sepa
 - Set both to write every backup to local storage and S3 at the same time.
 
 At least one destination is required.
+
+If a configured destination can't be used, whether from bad S3 credentials, an unreachable bucket, or a local directory ezbak can't create, the run fails instead of reporting success. The library raises `BackupFailedError`, and the `ezbak create` command and the one-shot container exit with a non-zero status. A scheduled container (`EZBAK_CRON`) logs the error and keeps running, so the next scheduled run retries. Any backups that reached a working destination are kept.
 
 ### Retention policies
 

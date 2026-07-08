@@ -7,6 +7,7 @@ from nclutils.fs import copy_file, find_files
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.constants import BACKUP_EXTENSION, StorageType
+from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
 from ezbak.storage.base import StorageBackend
 
@@ -59,11 +60,19 @@ class LocalBackend(StorageBackend):
 
         Returns:
             Backup: The created backup.
+
+        Raises:
+            StorageWriteError: If the copy fails.
         """
         backup_name = storage_location.generate_new_backup_name()
         backup_path = Path(storage_location.storage_path) / backup_name
         logger.debug(f"Copy tmp backup to local: {backup_path}")
-        copy_file(src=tmp_backup, dst=backup_path)
+        try:
+            copy_file(src=tmp_backup, dst=backup_path)
+        except OSError as e:
+            msg = f"Local write failed for '{backup_path}': {e}"
+            logger.error(msg)
+            raise StorageWriteError(msg) from e
         logger.info(f"Created: {backup_path}")
         return Backup(
             storage_type=StorageType.LOCAL,

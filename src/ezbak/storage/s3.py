@@ -2,11 +2,13 @@
 
 from pathlib import Path
 
+from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
+from ezbak.exceptions import StorageWriteError
 from ezbak.naming import new_staging_filename
 from ezbak.storage.aws import AWSService
 from ezbak.storage.base import StorageBackend
@@ -71,10 +73,18 @@ class S3Backend(StorageBackend):
 
         Returns:
             Backup: The created backup.
+
+        Raises:
+            StorageWriteError: If the upload fails.
         """
         backup_name = storage_location.generate_new_backup_name()
         logger.debug(f"Upload tmp backup to S3: {backup_name}")
-        self.aws_service.upload_object(file=tmp_backup, name=backup_name)
+        try:
+            self.aws_service.upload_object(file=tmp_backup, name=backup_name)
+        except (BotoCoreError, ClientError) as e:
+            msg = f"S3 upload failed for '{backup_name}': {e}"
+            logger.error(msg)
+            raise StorageWriteError(msg) from e
         logger.info(f"S3 created: {backup_name}")
         return Backup(
             storage_type=StorageType.AWS,

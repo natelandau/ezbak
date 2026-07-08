@@ -1,9 +1,11 @@
 """Tests for BackupConfig and EnvConfig."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from ezbak.config import BackupConfig
+from ezbak.config import BackupConfig, coerce_path_list
 from ezbak.constants import RetentionPolicyType
 from ezbak.env import EnvConfig
 
@@ -47,6 +49,31 @@ def test_envconfig_is_a_backupconfig():
     # Given/When an EnvConfig type
     # Then it is a subclass of BackupConfig (so EZBak(EnvConfig()) works)
     assert issubclass(EnvConfig, BackupConfig)
+
+
+def test_coerce_path_list_empty_string_returns_empty():
+    """Verify an empty string yields no paths instead of a phantom cwd entry."""
+    # Given an empty string (e.g. an unset EZBAK_STORAGE_PATHS env var)
+    # When coercing, then no paths are produced
+    assert coerce_path_list("") == []
+
+
+def test_coerce_path_list_skips_blank_segments():
+    """Verify blank comma segments do not inject a phantom cwd path."""
+    # Given a comma list with an empty middle segment
+    result = coerce_path_list("/tmp/a,,/tmp/b")  # noqa: S108
+
+    # Then only the two real paths are returned, no cwd entry
+    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # noqa: S108
+
+
+def test_coerce_path_list_strips_whitespace_around_entries():
+    """Verify padded comma entries resolve to the real path, not a cwd-relative one."""
+    # Given a comma list with spaces around each entry (e.g. "/tmp/a, /tmp/b")
+    result = coerce_path_list("/tmp/a, /tmp/b")  # noqa: S108
+
+    # Then each entry is stripped to an absolute path, not Path(" /tmp/b") under cwd
+    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # noqa: S108
 
 
 def test_retention_policy_derivation_count_based():

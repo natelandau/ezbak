@@ -1,5 +1,6 @@
 """Entrypoint for ezbak from docker. Relies entirely on environment variables for configuration."""
 
+import sys
 import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -9,6 +10,7 @@ from loguru import logger
 from ezbak.constants import Action, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
+from ezbak.exceptions import BackupFailedError
 
 
 def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
@@ -16,13 +18,29 @@ def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
 
     Performs a complete backup operation including creating the backup and pruning old backups based on retention policy.
     """
-    app.create_backup()
-    app.prune_backups()
+    try:
+        app.create_backup()
+    finally:
+        # Prune even when a destination failed so retention keeps running and the
+        # backups that did succeed do not accumulate unbounded on repeated cron runs.
+        app.prune_backups()
 
     if scheduler:  # pragma: no cover
         job = scheduler.get_job(job_id="backup")
         if job and job.next_run_time:
             logger.info(f"Next scheduled run: {job.next_run_time}")
+
+
+def _run_scheduled_backup(app: EZBak, scheduler: BackgroundScheduler) -> None:  # pragma: no cover
+    """Run a scheduled backup, logging a destination failure without stopping the scheduler.
+
+    APScheduler routes a job exception through the stdlib logging system, which bypasses
+    the loguru sink this app configures, so catch it here and log it via loguru instead.
+    """
+    try:
+        do_backup(app, scheduler)
+    except BackupFailedError as e:
+        logger.error(e)
 
 
 def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
@@ -65,7 +83,9 @@ def main() -> None:
         scheduler = BackgroundScheduler()
 
         job = scheduler.add_job(
-            func=do_backup if app.settings.entrypoint_action == Action.BACKUP else do_restore,
+            func=_run_scheduled_backup
+            if app.settings.entrypoint_action == Action.BACKUP
+            else do_restore,
             args=[app, scheduler],
             trigger=CronTrigger.from_crontab(app.settings.cron),
             jitter=600,
@@ -90,7 +110,11 @@ def main() -> None:
             scheduler.shutdown()
 
     elif app.settings.entrypoint_action == Action.BACKUP:
-        do_backup(app)
+        try:
+            do_backup(app)
+        except BackupFailedError as e:
+            logger.error(e)
+            sys.exit(1)
         time.sleep(1)
         logger.info("Backup complete. Exiting.")
 

@@ -7,10 +7,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import time_machine
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from ezbak import ezbak
 from ezbak.backup import Backup
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
+from ezbak.exceptions import BackupFailedError, StorageInitError, StorageWriteError
 from ezbak.logging import instantiate_logger
 from ezbak.storage.aws import AWSService
 
@@ -156,3 +158,167 @@ def test_both_backends_configured(filesystem):
 
     # Then both a local and an S3 backend exist
     assert types == {StorageType.LOCAL, StorageType.AWS}
+
+
+def test_aws_service_missing_credentials():
+    """Verify AWSService raises StorageInitError when credentials are missing."""
+    # Given empty credentials
+    # When constructing the service, then a StorageInitError is raised
+    with pytest.raises(StorageInitError, match="AWS credentials are not set"):
+        AWSService(
+            aws_access_key="",
+            aws_secret_key="",
+            bucket_name="test-bucket",
+        )
+
+
+def test_aws_service_unreachable_bucket(mocker):
+    """Verify AWSService raises StorageInitError when the bucket is unreachable."""
+    # Given an S3 client whose bucket lookup fails
+    mock_client = mocker.MagicMock()
+    mock_client.get_bucket_location.side_effect = ClientError(
+        error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
+        operation_name="GetBucketLocation",
+    )
+    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_client)
+
+    # When constructing the service, then a StorageInitError is raised (not SystemExit)
+    with pytest.raises(StorageInitError, match="Cannot access S3 bucket"):
+        AWSService(
+            aws_access_key="key",
+            aws_secret_key="secret",
+            bucket_name="test-bucket",
+        )
+
+
+def test_aws_service_network_error_raises_storage_init_error(mocker):
+    """Verify a network-level failure at init becomes a StorageInitError, not a raw crash."""
+    # Given an S3 client whose bucket lookup hits a connectivity error (a BotoCoreError, not ClientError)
+    mock_client = mocker.MagicMock()
+    mock_client.get_bucket_location.side_effect = EndpointConnectionError(
+        endpoint_url="https://s3.amazonaws.com"
+    )
+    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_client)
+
+    # When constructing the service, then it degrades to a StorageInitError
+    with pytest.raises(StorageInitError, match="Cannot access S3 bucket"):
+        AWSService(
+            aws_access_key="key",
+            aws_secret_key="secret",
+            bucket_name="test-bucket",
+        )
+
+
+def test_s3_backend_write_network_error_raises_storage_write_error(filesystem, mocker):
+    """Verify a network-level failure during upload becomes a StorageWriteError, not a raw crash."""
+    # Given an ezbak app whose only destination is S3
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="key",
+        aws_secret_key="secret",
+        tz="Etc/UTC",
+    )
+    backend = app.backends[0]
+    location = app.storage_locations[0]
+    tmp_backup = app.tmp_dir / "staged.tgz"
+    tmp_backup.write_bytes(b"data")
+
+    # Given the upload hits a connectivity error (a BotoCoreError, not ClientError)
+    mocker.patch.object(
+        backend.aws_service,
+        "upload_object",
+        side_effect=EndpointConnectionError(endpoint_url="https://s3.amazonaws.com"),
+    )
+
+    # When writing, then a StorageWriteError is raised
+    with pytest.raises(StorageWriteError, match="S3 upload failed"):
+        backend.write(tmp_backup=tmp_backup, storage_location=location)
+
+
+def test_ezbak_init_local_backend_survives_bad_s3_credentials(filesystem):
+    """Verify EZBak construction falls back to the local backend when S3 credentials are missing."""
+    # Given a config with a local destination and unusable S3 credentials
+    src_dir, dest1, _ = filesystem
+
+    # When constructing EZBak, then it does not raise and keeps the local backend
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="",
+        aws_secret_key="",
+    )
+
+    # Then no S3 service was created but the local backend is present
+    assert app.aws_service is None
+    assert any(b.storage_type.value == "local" for b in app.backends)
+    assert len(app.backends) == 1
+
+
+def test_s3_backend_write_raises_storage_write_error(filesystem, mocker):
+    """Verify S3Backend.write raises StorageWriteError when the upload fails."""
+    # Given an ezbak app whose only destination is S3
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="key",
+        aws_secret_key="secret",
+        tz="Etc/UTC",
+    )
+    backend = app.backends[0]
+    location = app.storage_locations[0]
+    tmp_backup = app.tmp_dir / "staged.tgz"
+    tmp_backup.write_bytes(b"data")
+
+    # Given the S3 upload fails
+    mocker.patch.object(
+        backend.aws_service,
+        "upload_object",
+        side_effect=ClientError(
+            error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
+            operation_name="PutObject",
+        ),
+    )
+
+    # When writing, then a StorageWriteError is raised
+    with pytest.raises(StorageWriteError, match="S3 upload failed"):
+        backend.write(tmp_backup=tmp_backup, storage_location=location)
+
+
+def test_create_backup_local_written_when_s3_fails(filesystem, mocker):
+    """Verify the local backup is written even when the S3 upload fails, then the run fails."""
+    # Given a config with both local and S3 destinations
+    src_dir, dest1, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        aws_s3_bucket_name="test-bucket",
+        aws_access_key="key",
+        aws_secret_key="secret",
+        tz="Etc/UTC",
+    )
+
+    # Given the S3 upload fails
+    mocker.patch.object(
+        app.aws_service,
+        "upload_object",
+        side_effect=ClientError(
+            error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
+            operation_name="PutObject",
+        ),
+    )
+
+    # When creating a backup, then it fails loudly
+    with pytest.raises(BackupFailedError) as exc_info:
+        app.create_backup()
+
+    # Then the local backup was still written and S3 was recorded as failed
+    assert exc_info.value.failed_destinations
+    assert list(dest1.glob("test-*.tgz"))
