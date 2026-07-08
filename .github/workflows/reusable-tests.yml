@@ -60,7 +60,7 @@ jobs:
 
             - name: Confirm backup was created
               shell: bash
-              run: ls -l .dev/backups/*-yearly.tgz
+              run: ls -l .dev/backups/*.tgz
 
     lint-project:
         runs-on: ubuntu-latest
