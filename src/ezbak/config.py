@@ -68,6 +68,8 @@ coerce_action = _make_enum_coercer(Action, error_label="action")
 def coerce_path_list(value: list[str] | str | None) -> list[Path]:
     """Coerce the path list to a list of Path objects.
 
+    Blank or whitespace-only entries are skipped rather than resolved to the current working directory.
+
     Args:
         value (list[str] | str | None): The path list to validate.
 
@@ -78,9 +80,9 @@ def coerce_path_list(value: list[str] | str | None) -> list[Path]:
         return []
 
     if isinstance(value, str):
-        return [Path(x).expanduser().absolute() for x in value.split(",")]
+        return [Path(x.strip()).expanduser().absolute() for x in value.split(",") if x.strip()]
 
-    return [Path(path).expanduser().absolute() for path in value]
+    return [Path(str(path).strip()).expanduser().absolute() for path in value if str(path).strip()]
 
 
 class BackupConfig(BaseModel):
