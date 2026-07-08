@@ -151,3 +151,63 @@ def test_get_backup_as_of_out_of_range_raises(tmp_path):
     # Then a ConfigurationError is raised
     with pytest.raises(ConfigurationError):
         app.get_backup_as_of("202513")
+
+
+def test_restore_backup_explicit_backup_arg(tmp_path, mocker):
+    """Verify an explicit backup arg is restored instead of the latest."""
+    # Given three backups and a restore destination
+    _seed_backups(tmp_path, ["20250101T120000", "20250102T090000", "20250103T090000"])
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    app = ezbak(name="test", source_paths=[tmp_path], storage_paths=[tmp_path])
+    older = next(b for b in app.list_backups() if b.name == "test-20250101T120000.tgz")
+    spy = mocker.spy(app, "_do_restore")
+
+    # When restoring that explicit (older) backup
+    app.restore_backup(restore_dir, backup=older)
+
+    # Then _do_restore received the older backup, not the latest
+    assert spy.call_args.kwargs["backup"].name == "test-20250101T120000.tgz"
+
+
+def test_restore_backup_uses_restore_date(tmp_path, mocker):
+    """Verify a configured restore_date selects the point-in-time backup."""
+    # Given backups and a config carrying a restore_date
+    _seed_backups(tmp_path, ["20250101T120000", "20250102T090000", "20250103T090000"])
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    app = ezbak(
+        name="test",
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
+        restore_date="20250102",
+    )
+    spy = mocker.spy(app, "_do_restore")
+
+    # When restoring with no explicit backup
+    app.restore_backup(restore_dir)
+
+    # Then the restore_date point-in-time backup is used
+    assert spy.call_args.kwargs["backup"].name == "test-20250102T090000.tgz"
+
+
+def test_restore_backup_restore_date_unresolvable_returns_false(tmp_path, mocker):
+    """Verify an unresolvable restore_date fails instead of restoring the latest."""
+    # Given a backup and a restore_date before it
+    _seed_backups(tmp_path, ["20250102T090000"])
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    app = ezbak(
+        name="test",
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
+        restore_date="2024",
+    )
+    spy = mocker.spy(app, "_do_restore")
+
+    # When restoring
+    result = app.restore_backup(restore_dir)
+
+    # Then it fails and never restores the newest backup
+    assert result is False
+    spy.assert_not_called()

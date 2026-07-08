@@ -118,6 +118,7 @@ class BackupConfig(BaseModel):
     log_prefix: str | None = None
 
     restore_path: str | Path | None = None
+    restore_date: str | None = None
     clean_before_restore: bool = False
     chown_uid: int | None = None
     chown_gid: int | None = None

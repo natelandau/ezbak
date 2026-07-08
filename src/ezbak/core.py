@@ -645,7 +645,11 @@ class EZBak:
         return backups_to_delete
 
     def restore_backup(
-        self, restore_path: Path | str | None = None, *, clean_before_restore: bool = False
+        self,
+        restore_path: Path | str | None = None,
+        *,
+        clean_before_restore: bool = False,
+        backup: Backup | None = None,
     ) -> bool:
         """Restore the latest or specified backup to `restore_path`.
 
@@ -654,6 +658,7 @@ class EZBak:
         Args:
             restore_path (Path | str | None): Target directory to restore into. When None, restore the latest backup to its original path or default target. Defaults to None.
             clean_before_restore (bool): Remove existing contents at the target before restoring. Defaults to False.
+            backup (Backup | None): Restore this specific backup instead of selecting one. When None, use the configured restore_date if set, else the latest backup. Defaults to None.
 
         Returns:
             bool: True when a backup is successfully restored; False when there is no
@@ -681,15 +686,25 @@ class EZBak:
             msg = f"Restore destination does not exist: {dest}"
             raise ConfigurationError(msg)
 
-        # Confirm there is a backup to restore before cleaning, so clean_before_restore
-        # never empties the destination when there is nothing to restore into it.
-        most_recent_backup = self.get_latest_backup()
-        if not most_recent_backup:
-            logger.error("No backup found to restore")
-            return False
+        # Precedence: an explicit Backup wins; else a configured restore_date selects a
+        # point in time; else the latest. Confirm a target before cleaning, so
+        # clean_before_restore never empties the destination with nothing to restore.
+        if backup is not None:
+            target = backup
+        elif self.settings.restore_date:
+            target = self.get_backup_as_of(self.settings.restore_date)
+            # get_backup_as_of already logged the miss. Fail rather than silently
+            # falling back to the newest backup, which would restore the wrong data.
+            if target is None:
+                return False
+        else:
+            target = self.get_latest_backup()
+            if target is None:
+                logger.error("No backup found to restore")
+                return False
 
         if clean_before_restore or self.settings.clean_before_restore:
             clean_directory(dest)
             logger.info("Cleaned all files in backup destination before restore")
 
-        return self._do_restore(backup=most_recent_backup, destination=dest)
+        return self._do_restore(backup=target, destination=dest)

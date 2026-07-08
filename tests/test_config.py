@@ -58,6 +58,20 @@ def test_coerce_path_list_empty_string_returns_empty():
     assert coerce_path_list("") == []
 
 
+def test_envconfig_reads_restore_date(monkeypatch):
+    """Verify EnvConfig loads EZBAK_RESTORE_DATE into restore_date."""
+    # Given the env var set alongside the required fields
+    monkeypatch.setenv("EZBAK_NAME", "from-env")
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # noqa: S108
+    monkeypatch.setenv("EZBAK_RESTORE_DATE", "20250102")
+
+    # When building an EnvConfig
+    config = EnvConfig()
+
+    # Then restore_date is populated from the environment
+    assert config.restore_date == "20250102"
+
+
 def test_coerce_path_list_skips_blank_segments():
     """Verify blank comma segments do not inject a phantom cwd path."""
     # Given a comma list with an empty middle segment
