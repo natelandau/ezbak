@@ -470,10 +470,13 @@ class EZBak:
         """
         return [x for y in self.storage_locations for x in y.backups]
 
-    def prune_backups(self) -> list[Backup]:
+    def prune_backups(self, *, dry_run: bool = False) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.
 
         Delete excess backup files while preserving the most important backups based on the retention policy configuration. Use this to automatically clean up old backups and prevent unlimited storage growth while maintaining appropriate historical coverage.
+
+        Args:
+            dry_run (bool): Report the backups that would be deleted without removing anything. Use this to preview the impact of a prune before running it for real. Defaults to False.
 
         Returns:
             list[Backup]: A list of backup objects targeted for deletion by the retention policy.
@@ -483,6 +486,14 @@ class EZBak:
         logger.debug(
             f"Prune targets ({len(backups_to_delete)}): {[x.name for x in backups_to_delete]}"
         )
+
+        # Dry run stops here: the caller inspects the returned targets (the CLI lists
+        # them per-file) and nothing is deleted.
+        if dry_run:
+            logger.info(
+                f"Dry run: would prune {len(backups_to_delete)} backups across {len(self.storage_locations)} storage locations"
+            )
+            return backups_to_delete
 
         total_deleted = 0
         for backend in self.backends:

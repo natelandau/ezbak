@@ -89,7 +89,7 @@ backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backu
 backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_paths=["/backups"]))
 ```
 
-An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, and `get_latest_backup()`.
+An `EZBak` instance exposes `create_backup()`, `list_backups()`, `prune_backups()`, `restore_backup()`, and `get_latest_backup()`. Call `prune_backups(dry_run=True)` to get back the list of backups the retention policy would delete without removing any of them.
 
 `create_backup()` raises `BackupFailedError` when a configured destination can't be used, so a failed backup never looks like a success. It still writes to every destination that works, so a partial failure keeps the copies that succeeded. Catch the error to handle a failed run:
 
@@ -128,6 +128,9 @@ ezbak --name my-documents --storage ~/Backups list
 
 # Prune old backups, keeping the 10 most recent
 ezbak --name my-documents --storage ~/Backups prune --max-backups 10
+
+# Preview a prune without deleting anything
+ezbak --name my-documents --storage ~/Backups prune --max-backups 10 --dry-run
 
 # Restore the latest backup
 ezbak --name my-documents --storage ~/Backups restore --destination ~/restore

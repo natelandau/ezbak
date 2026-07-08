@@ -275,6 +275,16 @@ class PruneCommand:
         ),
     ] = None
 
+    dry_run: Annotated[
+        bool,
+        cappa.Arg(
+            long="dry-run",
+            help="Preview the backups that would be deleted without removing anything.",
+            group=(3, "Optional"),
+            show_default=False,
+        ),
+    ] = False
+
 
 @cappa.command(name="list", invoke="ezbak.cli_commands.list.main")
 class ListCommand:

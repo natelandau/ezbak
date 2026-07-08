@@ -159,6 +159,87 @@ def test_cli_prune_backups_with_policy(mocker, debug, capsys, tmp_path):
         assert not Path(tmp_path / filename).exists()
 
 
+def test_cli_prune_backups_dry_run(mocker, debug, capsys, tmp_path):
+    """Verify a dry-run prune previews targets without prompting or deleting."""
+    # Given: a confirmation spy that must never be reached in dry-run mode
+    confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
+
+    # Given: 13 backup files on disk
+    filenames = [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095745-minutely.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T095730-weekly-k6lop.tgz",
+        "test-20250609T095730-daily.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T095749-minutely.tgz",
+        "test-20250609T090932-yearly.tgz",
+        "test-20250609T095737-minutely.tgz",
+        "test-20250609T095804-minutely-p2we3r.tgz",
+        "test-20240609T090932-yearly.tgz",
+        "test-20250609T095625-monthly.tgz",
+        "test-20250609T095737-minutely-6klf7.tgz",
+    ]
+    for filename in filenames:
+        Path(tmp_path / filename).touch()
+
+    # When: pruning runs with --dry-run
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "prune",
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "--max-backups",
+            "3",
+            "--dry-run",
+        ],
+    )
+    output = capsys.readouterr().err
+
+    # Then: no confirmation is requested, targets are previewed, and all files remain
+    confirm.assert_not_called()
+    assert "Would delete 10 backups" in output
+    assert "Pruned" not in output
+    assert len(list(tmp_path.iterdir())) == 13
+
+
+def test_cli_prune_backups_dry_run_no_targets(mocker, debug, capsys, tmp_path):
+    """Verify a dry run that targets nothing never claims a deletion happened."""
+    # Given: a confirmation spy that must never be reached in dry-run mode
+    confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
+
+    # Given: fewer backups than the retention policy keeps, so nothing would be pruned
+    for filename in [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095745-minutely.tgz",
+    ]:
+        Path(tmp_path / filename).touch()
+
+    # When: pruning runs with --dry-run and a policy that keeps more than exist
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "prune",
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "--max-backups",
+            "100",
+            "--dry-run",
+        ],
+    )
+    output = capsys.readouterr().err
+
+    # Then: no prompt fires and the output never uses the past-tense "No backups deleted"
+    confirm.assert_not_called()
+    assert "No backups would be deleted" in output
+    assert "No backups deleted" not in output
+
+
 def test_cli_list_backups(debug, capsys, tmp_path):
     """Verify listing backups."""
     # Given: A backup manager configured with test parameters

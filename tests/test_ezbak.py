@@ -256,6 +256,51 @@ def test_prune_max_backups(debug, capsys, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
+def test_prune_dry_run(debug, capsys, tmp_path):
+    """Verify a dry run reports prune targets without deleting anything."""
+    # Backwards-compat guard: seeds legacy period-labeled filenames on purpose; do not modernize.
+    # Given: 13 backup files on disk
+    filenames = [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095745-minutely.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T095730-weekly-k6lop.tgz",
+        "test-20250609T095730-daily.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T095749-minutely.tgz",
+        "test-20250609T090932-yearly.tgz",
+        "test-20250609T095737-minutely.tgz",
+        "test-20250609T095804-minutely-p2we3r.tgz",
+        "test-20240609T090932-yearly.tgz",
+        "test-20250609T095625-monthly.tgz",
+        "test-20250609T095737-minutely-6klf7.tgz",
+    ]
+    for filename in filenames:
+        Path(tmp_path / filename).touch()
+
+    # Given: A backup manager with a count-based retention policy
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[tmp_path],
+        storage_paths=[tmp_path],
+        log_level="debug",
+        max_backups=3,
+    )
+
+    # When: pruning runs in dry-run mode
+    targets = backup_manager.prune_backups(dry_run=True)
+    output = capsys.readouterr().err
+
+    # Then: the targets are reported but every file remains on disk
+    assert len(targets) == 10
+    assert "Dry run" in output
+    assert "Pruned" not in output
+    existing_files = list(tmp_path.iterdir())
+    assert len(existing_files) == 13
+    for filename in filenames:
+        assert Path(tmp_path / filename).exists()
+
+
 def test_prune_policy(debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Backwards-compat guard: seeds legacy period-labeled filenames on purpose; do not modernize.
