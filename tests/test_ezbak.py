@@ -10,8 +10,9 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
+from ezbak.backup import Backup
 from ezbak.checksums import sha256_file
-from ezbak.constants import DEFAULT_DATE_FORMAT
+from ezbak.constants import DEFAULT_DATE_FORMAT, StorageType
 from ezbak.core import _commit_restore, _is_within, _merge_move
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
 
@@ -885,3 +886,23 @@ def test_local_prune_deletes_sidecar(filesystem) -> None:
 
     assert len(list(dest1.glob("*.tgz"))) == 1
     assert len(list(dest1.glob("*.sha256"))) == 1
+
+
+def test_backup_period_keys_unique_across_years(tmp_path):
+    """Verify same month in different years yields distinct period keys."""
+    # Given two backups in June of consecutive years
+    older = tmp_path / "test-20250609T090000-monthly.tgz"
+    newer = tmp_path / "test-20260609T090000-monthly.tgz"
+    older.touch()
+    newer.touch()
+    b_old = Backup(path=older, name=older.name, storage_type=StorageType.LOCAL)
+    b_new = Backup(path=newer, name=newer.name, storage_type=StorageType.LOCAL)
+
+    # When comparing their monthly, weekly, daily, hourly, minutely keys
+    # Then none collide across the two years
+    assert b_old.month != b_new.month
+    assert b_old.week != b_new.week
+    assert b_old.day != b_new.day
+    assert b_old.hour != b_new.hour
+    assert b_old.minute != b_new.minute
+    assert b_old.year != b_new.year

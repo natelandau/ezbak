@@ -54,12 +54,16 @@ class Backup:
             logger.error(e)
             raise
 
-        self.year = str(self.zoned_datetime.year)
-        self.month = str(self.zoned_datetime.month)
-        self.week = str(self.zoned_datetime.to_stdlib().strftime("%W"))
-        self.day = str(self.zoned_datetime.day)
-        self.hour = str(self.zoned_datetime.hour)
-        self.minute = str(self.zoned_datetime.minute)
+        # Period keys must be globally unique so retention bucketing never conflates
+        # the same sub-field across different periods (e.g. July 2025 vs July 2026).
+        dt = self.zoned_datetime
+        self.year = str(dt.year)
+        self.month = f"{dt.year}-{dt.month}"
+        # %W stays within dt.year, so pairing it with the calendar year is consistent.
+        self.week = f"{dt.year}-{dt.to_stdlib().strftime('%W')}"
+        self.day = f"{dt.year}-{dt.month}-{dt.day}"
+        self.hour = f"{dt.year}-{dt.month}-{dt.day}-{dt.hour}"
+        self.minute = f"{dt.year}-{dt.month}-{dt.day}-{dt.hour}-{dt.minute}"
 
     def __repr__(self) -> str:
         """Return a string representation of the backup."""
