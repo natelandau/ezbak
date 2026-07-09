@@ -19,7 +19,6 @@ from ezbak.config import BackupConfig
 from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
     RESTORE_DATE_REGEX,
-    RetentionPolicyType,
     StorageType,
 )
 from ezbak.exceptions import (
@@ -531,34 +530,36 @@ class EZBak:
         """
         logger.trace("Identifying backups to delete")
         backups_to_delete: list[Backup] = []
+        policy = self.settings.retention_policy
+
+        if not policy.is_active:
+            logger.info("Will not delete backups because no retention policy is set")
+            return backups_to_delete
 
         for storage_location in self.storage_locations:
-            match self.settings.retention_policy.policy_type:
-                case RetentionPolicyType.KEEP_ALL:
-                    logger.info("Will not delete backups because no retention policy is set")
-                    return backups_to_delete
+            location_backups = storage_location.backups
+            if not location_backups:
+                continue
 
-                case RetentionPolicyType.COUNT_BASED:
-                    max_keep = self.settings.retention_policy.get_retention()
-                    if len(storage_location.backups) > max_keep:
-                        logger.trace(
-                            f"Found {len(storage_location.backups) - max_keep} backups to prune from '{storage_location.logging_name}'"
-                        )
-                        backups_to_delete.extend(
-                            list(reversed(storage_location.backups))[max_keep:]
-                        )
+            to_keep = policy.backups_to_keep(location_backups)
+            if not to_keep:
+                # Refuse loudly: an active policy that keeps zero would empty the
+                # location and break pre-start restore. Log and skip, never raise.
+                logger.error(
+                    f"retention policy would delete every backup in "
+                    f"'{storage_location.logging_name}'; keeping all backups and "
+                    f"skipping prune. Set a keep rule to a positive value, or leave "
+                    f"all keep rules unset to keep everything."
+                )
+                continue
 
-                case RetentionPolicyType.TIME_BASED:
-                    for backup_type, backups in storage_location.backups_by_time_unit.items():
-                        max_keep = self.settings.retention_policy.get_retention(backup_type)
-                        if len(backups) > max_keep:
-                            logger.trace(
-                                f"Found {len(backups) - max_keep} {backup_type.value} backups to prune from '{storage_location.logging_name}'"
-                            )
-                            backups_to_delete.extend(list(reversed(backups))[max_keep:])
-
-                case _:
-                    assert_never(self.settings.retention_policy.policy_type)
+            to_delete = [b for b in location_backups if b not in to_keep]
+            if to_delete:
+                logger.trace(
+                    f"Found {len(to_delete)} backups to prune from "
+                    f"'{storage_location.logging_name}'"
+                )
+                backups_to_delete.extend(to_delete)
 
         logger.trace(
             f"Identified {len(backups_to_delete)} backups to delete across {len(self.storage_locations)} storage locations"

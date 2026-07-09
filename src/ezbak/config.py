@@ -15,7 +15,6 @@ from ezbak.constants import (
     DEFAULT_COMPRESSION_LEVEL,
     BackupType,
     LogLevel,
-    RetentionPolicyType,
 )
 from ezbak.retention import RetentionPolicyManager
 
@@ -106,13 +105,13 @@ class BackupConfig(BaseModel):
     # verified on restore regardless of this setting; this only gates generation.
     write_checksums: bool = True
 
-    max_backups: int | None = None
-    retention_yearly: int | None = None
-    retention_monthly: int | None = None
-    retention_weekly: int | None = None
-    retention_daily: int | None = None
-    retention_hourly: int | None = None
-    retention_minutely: int | None = None
+    keep_last: int | None = None
+    keep_minutely: int | None = None
+    keep_hourly: int | None = None
+    keep_daily: int | None = None
+    keep_weekly: int | None = None
+    keep_monthly: int | None = None
+    keep_yearly: int | None = None
 
     cron: str | None = None
     tz: str | None = None
@@ -144,38 +143,17 @@ class BackupConfig(BaseModel):
         if self._cached_retention_policy:
             return self._cached_retention_policy
 
-        if self.max_backups is not None:
-            policy_type = RetentionPolicyType.COUNT_BASED
-            self._cached_retention_policy = RetentionPolicyManager(
-                policy_type=policy_type, count_based_policy=self.max_backups
-            )
-        elif any(
-            [
-                self.retention_yearly,
-                self.retention_monthly,
-                self.retention_weekly,
-                self.retention_daily,
-                self.retention_hourly,
-                self.retention_minutely,
-            ]
-        ):
-            policy_type = RetentionPolicyType.TIME_BASED
-            time_policy = {
-                BackupType.MINUTELY: self.retention_minutely,
-                BackupType.HOURLY: self.retention_hourly,
-                BackupType.DAILY: self.retention_daily,
-                BackupType.WEEKLY: self.retention_weekly,
-                BackupType.MONTHLY: self.retention_monthly,
-                BackupType.YEARLY: self.retention_yearly,
-            }
-            self._cached_retention_policy = RetentionPolicyManager(
-                policy_type=policy_type, time_based_policy=time_policy
-            )
-        else:
-            self._cached_retention_policy = RetentionPolicyManager(
-                policy_type=RetentionPolicyType.KEEP_ALL
-            )
-
+        self._cached_retention_policy = RetentionPolicyManager(
+            keep_last=self.keep_last,
+            calendar={
+                BackupType.MINUTELY: self.keep_minutely,
+                BackupType.HOURLY: self.keep_hourly,
+                BackupType.DAILY: self.keep_daily,
+                BackupType.WEEKLY: self.keep_weekly,
+                BackupType.MONTHLY: self.keep_monthly,
+                BackupType.YEARLY: self.keep_yearly,
+            },
+        )
         return self._cached_retention_policy
 
     @model_validator(mode="after")

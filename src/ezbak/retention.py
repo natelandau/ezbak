@@ -1,79 +1,101 @@
-"""Retention policy manager for controlling backup lifecycle and storage management."""
+"""Retention policy manager for the union-based backup lifecycle."""
 
-from typing import assert_never
+from __future__ import annotations
 
-from ezbak.constants import DEFAULT_RETENTION, BackupType, RetentionPolicyType
+from typing import TYPE_CHECKING
+
+from ezbak.constants import BackupType
+
+if TYPE_CHECKING:
+    from ezbak.backup import Backup
+
+# Backup attribute holding each period type's globally-unique key.
+_PERIOD_ATTR: dict[BackupType, str] = {
+    BackupType.YEARLY: "year",
+    BackupType.MONTHLY: "month",
+    BackupType.WEEKLY: "week",
+    BackupType.DAILY: "day",
+    BackupType.HOURLY: "hour",
+    BackupType.MINUTELY: "minute",
+}
 
 
 class RetentionPolicyManager:
-    """Manage backup retention policies for automated storage cleanup and lifecycle management.
+    """Compute which backups to keep under a union of independent keep rules.
 
-    Handles different types of retention policies including count-based limits, time-based categorization (yearly, monthly, weekly, daily, hourly, minutely), and keep-all policies. Provides methods to determine retention limits for backup types and generate policy summaries for configuration and logging purposes.
+    A backup survives if any rule marks it. ``keep_last`` marks the N most recent
+    backups overall; each calendar rule marks the newest backup in each of the N
+    most recent periods that actually contain a backup. Unset (``None``) or ``0``
+    means a rule marks nothing. This mirrors restic/borg semantics.
     """
 
     def __init__(
         self,
         *,
-        policy_type: RetentionPolicyType,
-        time_based_policy: dict[BackupType, int] | None = None,
-        count_based_policy: int | None = None,
-    ):
-        """Initialize retention policy manager with specified policy configuration.
+        keep_last: int | None = None,
+        calendar: dict[BackupType, int | None] | None = None,
+    ) -> None:
+        """Initialize the manager with a count rule and per-period calendar rules.
 
         Args:
-            policy_type (RetentionPolicyType): Type of retention policy to enforce.
-            time_based_policy (dict[BackupType, int] | None, optional): Time-based retention limits for each backup type. Defaults to None.
-            count_based_policy (int | None, optional): Maximum number of backups to retain. Defaults to None.
+            keep_last: Number of most-recent backups to keep, or None to disable.
+            calendar: Per-period keep counts keyed by BackupType. Defaults to empty.
         """
-        self.policy_type = policy_type
-        self._time_based_policy = time_based_policy or {}
-        self._count_based_policy = count_based_policy
+        self.keep_last = keep_last
+        self._calendar: dict[BackupType, int | None] = calendar or {}
 
-    def __str__(self) -> str:
-        """Return a string representation of the retention policy."""
-        return f"RetentionPolicyManager(policy_type={self.policy_type}, time_based_policy={self._time_based_policy}, count_based_policy={self._count_based_policy})"
+    @property
+    def is_active(self) -> bool:
+        """Whether any rule is set, including an explicit zero.
 
-    def get_retention(self, backup_type: BackupType | None = None) -> int:
-        """Get retention limit for a specific backup type based on current policy.
+        An all-unset policy keeps everything; an all-zero policy is active but
+        keeps nothing, which the prune path treats as a refuse-loudly condition.
+        """
+        return self.keep_last is not None or any(v is not None for v in self._calendar.values())
 
-        Determines how many backups of the specified type should be retained according to the configured policy. Returns None for keep-all policies, count-based limits for count-based policies, or time-based limits for time-based policies.
+    def backups_to_keep(self, backups: list[Backup]) -> set[Backup]:
+        """Return the set of backups any rule marks to keep.
 
         Args:
-            backup_type (BackupType): Backup type to get retention limit for.
-
-        Returns:
-            int | None: Number of backups to retain for the specified type, or None for keep-all policies.
-
-        Raises:
-            ValueError: If backup type is required for time-based policies and not provided.
+            backups: All backups in one storage location.
         """
-        match self.policy_type:
-            case RetentionPolicyType.KEEP_ALL:
-                return None
-            case RetentionPolicyType.COUNT_BASED:
-                return self._count_based_policy or DEFAULT_RETENTION
-            case RetentionPolicyType.TIME_BASED:
-                if backup_type is None:
-                    msg = "Backup type is required for time-based policies"
-                    raise ValueError(msg)
-                return self._time_based_policy.get(backup_type) or DEFAULT_RETENTION
-            case _:
-                assert_never(self.policy_type)
+        ordered = sorted(backups, key=lambda b: (b.timestamp, b.name), reverse=True)
+        keep: set[Backup] = set()
 
-    def get_full_policy(self) -> dict[str, int]:
-        """Generate complete policy configuration as a dictionary.
+        if self.keep_last:
+            keep.update(ordered[: self.keep_last])
 
-        Creates a dictionary representation of the current retention policy for configuration export, logging, or policy validation. Returns count-based policy as max_backups key or time-based policy as individual backup type keys.
+        for backup_type, count in self._calendar.items():
+            if not count:
+                continue
+            attr = _PERIOD_ATTR[backup_type]
+            seen: set[str] = set()
+            for backup in ordered:
+                key = getattr(backup, attr)
+                if key in seen:
+                    continue
+                seen.add(key)
+                keep.add(backup)
+                if len(seen) >= count:
+                    break
 
-        Returns:
-            dict[str, int]: Dictionary representation of the retention policy configuration.
+        return keep
+
+    def backups_to_delete(self, backups: list[Backup]) -> list[Backup]:
+        """Return the backups no rule marks, preserving input order.
+
+        Args:
+            backups: All backups in one storage location.
         """
-        if self.policy_type == RetentionPolicyType.KEEP_ALL:
-            return {}
+        keep = self.backups_to_keep(backups)
+        return [b for b in backups if b not in keep]
 
-        if self.policy_type == RetentionPolicyType.COUNT_BASED:
-            return {"max_backups": self._count_based_policy or 10}
-        return {
-            backup_type.value: retention or DEFAULT_RETENTION
-            for backup_type, retention in self._time_based_policy.items()
-        }
+    def summary(self) -> dict[str, int]:
+        """Return the set rules as a display dict, omitting unset ones."""
+        out: dict[str, int] = {}
+        if self.keep_last is not None:
+            out["keep_last"] = self.keep_last
+        for backup_type, count in self._calendar.items():
+            if count is not None:
+                out[backup_type.value] = count
+        return out

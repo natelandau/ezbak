@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from ezbak.config import BackupConfig, coerce_path_list
-from ezbak.constants import RetentionPolicyType
 from ezbak.env import EnvConfig
 
 
@@ -90,16 +89,17 @@ def test_coerce_path_list_strips_whitespace_around_entries():
     assert result == [Path("/tmp/a"), Path("/tmp/b")]  # noqa: S108
 
 
-def test_retention_policy_derivation_count_based():
-    """Verify max_backups yields a count-based retention policy."""
-    # Given a config with max_backups
-    config = BackupConfig(name="x", storage_paths=["/tmp"], max_backups=5)  # noqa: S108
+def test_retention_policy_derivation_keep_last():
+    """Verify keep_last yields an active retention policy."""
+    # Given a config with keep_last
+    config = BackupConfig(name="x", storage_paths=["/tmp"], keep_last=5)  # noqa: S108
 
     # When reading the derived policy
     policy = config.retention_policy
 
-    # Then it is count-based
-    assert policy.policy_type == RetentionPolicyType.COUNT_BASED
+    # Then it is active with the configured keep_last
+    assert policy.is_active
+    assert policy.keep_last == 5
 
 
 def test_write_checksums_defaults_true():

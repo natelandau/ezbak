@@ -149,13 +149,25 @@ def test_cli_prune_backups_with_policy(mocker, debug, capsys, tmp_path):
     output = capsys.readouterr().err
     # debug(output)
 
-    assert "Pruned 3 backups" in output
+    assert "Pruned 8 backups" in output
     existing_files = list(tmp_path.iterdir())
-    assert len(existing_files) == 10
+    assert len(existing_files) == 5
     for filename in [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T095625-monthly.tgz",
         "test-20240609T090932-yearly.tgz",
+    ]:
+        assert Path(tmp_path / filename).exists()
+    for filename in [
         "test-20250609T095745-minutely.tgz",
         "test-20250609T095737-minutely.tgz",
+        "test-20250609T095737-minutely-6klf7.tgz",
+        "test-20250609T095804-minutely-p2we3r.tgz",
+        "test-20250609T095730-weekly-k6lop.tgz",
+        "test-20250609T095730-daily.tgz",
+        "test-20250609T090932-yearly.tgz",
     ]:
         assert not Path(tmp_path / filename).exists()
 

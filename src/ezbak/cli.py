@@ -381,13 +381,13 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         }
     elif isinstance(cmd, PruneCommand):
         extra = {
-            "max_backups": cmd.max_backups,
-            "retention_yearly": cmd.yearly,
-            "retention_monthly": cmd.monthly,
-            "retention_weekly": cmd.weekly,
-            "retention_daily": cmd.daily,
-            "retention_hourly": cmd.hourly,
-            "retention_minutely": cmd.minutely,
+            "keep_last": cmd.max_backups,
+            "keep_yearly": cmd.yearly,
+            "keep_monthly": cmd.monthly,
+            "keep_weekly": cmd.weekly,
+            "keep_daily": cmd.daily,
+            "keep_hourly": cmd.hourly,
+            "keep_minutely": cmd.minutely,
         }
     else:  # ListCommand and any other read-only command
         extra = {}

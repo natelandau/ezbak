@@ -216,7 +216,7 @@ def test_create_backup_strip_path(filesystem, debug, capsys, tmp_path):
         assert (restore_dir / file.name).exists()
 
 
-def test_prune_max_backups(debug, capsys, tmp_path):
+def test_prune_keep_last(debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Backwards-compat guard: seeds legacy period-labeled filenames on purpose; do not modernize.
     # Given: A backup manager configured with test parameters
@@ -244,7 +244,7 @@ def test_prune_max_backups(debug, capsys, tmp_path):
         source_paths=[tmp_path],
         storage_paths=[tmp_path],
         log_level="debug",
-        max_backups=3,
+        keep_last=3,
     )
     backup_manager.prune_backups()
     output = capsys.readouterr().err
@@ -275,7 +275,7 @@ def test_prune_returns_confirmed_deletions(tmp_path):
     for filename in filenames:
         Path(tmp_path / filename).touch()
     backup_manager = ezbak(
-        name="test", source_paths=[tmp_path], storage_paths=[tmp_path], max_backups=2
+        name="test", source_paths=[tmp_path], storage_paths=[tmp_path], keep_last=2
     )
 
     # When pruning
@@ -315,7 +315,7 @@ def test_prune_dry_run(debug, capsys, tmp_path):
         source_paths=[tmp_path],
         storage_paths=[tmp_path],
         log_level="debug",
-        max_backups=3,
+        keep_last=3,
     )
 
     # When: pruning runs in dry-run mode
@@ -332,55 +332,35 @@ def test_prune_dry_run(debug, capsys, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
-def test_prune_policy(debug, capsys, tmp_path):
-    """Verify that backups are pruned correctly."""
-    # Backwards-compat guard: seeds legacy period-labeled filenames on purpose; do not modernize.
-    # Given: A backup manager configured with test parameters
-    filenames = [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095730-weekly-k6lop.tgz",
-        "test-20250609T095730-daily.tgz",
-        "test-20250609T095751-minutely.tgz",
-        "test-20250609T095749-minutely.tgz",
-        "test-20250609T090932-yearly.tgz",
-        "test-20250609T095737-minutely.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-        "test-20240609T090932-yearly.tgz",
-        "test-20250609T095625-monthly.tgz",
-        "test-20250609T095737-minutely-6klf7.tgz",
-    ]
-    for filename in filenames:
-        Path(tmp_path / filename).touch()
+def test_prune_union_policy(debug, capsys, tmp_path):
+    """Verify union rules keep the newest per period plus the recent N."""
+    # Given daily backups over four days
+    for stamp in ("20250104T090000", "20250103T090000", "20250102T090000", "20250101T090000"):
+        (tmp_path / f"test-{stamp}-daily.tgz").touch()
 
-    # Given: A backup manager configured with test parameters
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[tmp_path],
-        storage_paths=[tmp_path],
-        log_level="debug",
-        retention_yearly=1,
-        retention_monthly=4,
-        retention_weekly=4,
-        retention_daily=4,
-        retention_hourly=4,
-        retention_minutely=4,
-    )
-    backup_manager.prune_backups()
-    output = capsys.readouterr().err
-    # debug(output)
-    # debug(tmp_path)
+    # When pruning with keep_daily=2
+    app = ezbak(name="test", source_paths=[tmp_path], storage_paths=[tmp_path], keep_daily=2)
+    app.prune_backups()
 
-    assert "Pruned 3 backups" in output
-    existing_files = list(tmp_path.iterdir())
-    assert len(existing_files) == 10
-    for filename in [
-        "test-20240609T090932-yearly.tgz",
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095737-minutely.tgz",
-    ]:
-        assert not Path(tmp_path / filename).exists()
+    # Then only the two most recent days survive
+    remaining = sorted(p.name for p in tmp_path.iterdir())
+    assert remaining == ["test-20250103T090000-daily.tgz", "test-20250104T090000-daily.tgz"]
+
+
+def test_prune_all_zero_policy_refuses(debug, capsys, tmp_path):
+    """Verify an all-zero policy logs an error and deletes nothing."""
+    # Given two backups and a policy that would keep zero
+    for stamp in ("20250102T090000", "20250101T090000"):
+        (tmp_path / f"test-{stamp}-daily.tgz").touch()
+    app = ezbak(name="test", source_paths=[tmp_path], storage_paths=[tmp_path], keep_last=0)
+
+    # When pruning (must not raise)
+    deleted = app.prune_backups()
+
+    # Then nothing is deleted and an error is logged
+    assert deleted == []
+    assert len(list(tmp_path.iterdir())) == 2
+    assert "would delete every backup" in capsys.readouterr().err
 
 
 def test_prune_no_policy(debug, capsys, tmp_path):
@@ -450,7 +430,7 @@ def test_prune_missing_file(debug, capsys, tmp_path, mocker):
         source_paths=[tmp_path],
         storage_paths=[tmp_path],
         log_level="debug",
-        max_backups=2,
+        keep_last=2,
     )
 
     # When: pruning runs with the phantom (oldest) targeted for deletion
@@ -879,7 +859,7 @@ def test_restore_verifies_good_archive(filesystem, tmp_path) -> None:
 def test_local_prune_deletes_sidecar(filesystem) -> None:
     """Verify prune removes a pruned archive's sidecar, leaving none orphaned."""
     src_dir, dest1, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], max_backups=1)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], keep_last=1)
     app.create_backup()
     app.create_backup()
     app.prune_backups()
