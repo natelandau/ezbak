@@ -1,24 +1,56 @@
-## Unreleased
+## v1.0.0 (2026-07-09)
 
-### BREAKING CHANGES
+### BREAKING CHANGE
 
-- The primary library API is now `EZBak(BackupConfig(...))`. Build a typed `BackupConfig` and pass it to `EZBak`. The `ezbak(**kwargs)` factory still works as a shortcut for quick scripts.
-- The `storage_type` option is removed. Destinations now decide where backups go: set `storage_paths` for local storage, `aws_s3_bucket_name` for S3, or both for both.
-- The `EZBakApp` class and the `ezbak.entrypoint` module are gone. Import `EZBak` from `ezbak`, and run the container with `python -m ezbak.container`.
+- The retention configuration surface is renamed and
+restructured across the library, CLI, and container. The three
+mutually-exclusive policies (count-based max_backups, time-based
+retention_*, and keep-all) are removed in favor of a union of
+independent keep rules; a backup is retained if any rule keeps it.
+Configuration using the old options must be migrated to the new keep
+rules.
+- renamed public options across the CLI, environment
+variables, library config, and one exception attribute:
+- restore --destination -> --restore-path
+- restore --date -> --restore-date
+- restore --clean -> --clean-before-restore
+- --s3-bucket-path -> --s3-bucket-prefix
+- aws_s3_bucket_path -> aws_s3_bucket_prefix (EZBAK_AWS_S3_BUCKET_PREFIX)
+- delete_src_after_backup -> delete_source_after_backup
+- BackupFailedError.failed_destinations -> failed_storage_locations
 
 ### Feat
 
-- **cli**: back up to S3 with the `--s3-bucket` flag (credentials come from `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY`)
-
-### Refactor
-
-- restructure the package around one config schema, one core class, and thin CLI and container adapters
-- flatten the package layout and move the container entrypoint to `ezbak.container`
+- **s3**: add region and endpoint settings (#62)
+- **container**: make cron jitter configurable (#61)
+- **retention**: replace policies with union keep rules (#59)
+- **container**: opt-in backup on shutdown
+- add archive integrity checksum sidecars (#58)
+- **restore**: skip cleanly when no backup exists
+- **restore**: add point-in-time restore by date (#55)
+- **cli**: add --dry-run to preview prune
+- **container**: ping healthcheck on scheduled runs
 
 ### Fix
 
-- **config**: apply the default storage backend when no storage type is set
-- **storage**: count only confirmed deletions when pruning, and raise a clear error for an unconfigured backend
+- **restore**: make restore atomic and guard storage overlap (#57)
+- **prune**: report backups actually deleted, not targeted
+- expose successful backups on partial failure
+- exit cleanly on invalid configuration
+- fail loudly when a restore fails (#54)
+- fail loudly when a backup destination is unusable (#53)
+- remove cosmetic filename time-unit labels (#52)
+- **backup**: handle missing temp archive
+
+### Refactor
+
+- **config**: clarify option naming
+- restructure into one config schema, core, and adapters (#51)
+- **storage**: add backend abstraction
+- **backups**: de-duplicate index and rename logic
+- **naming**: centralize backup filename grammar
+- **cli**: move app factory out of package init
+- move RetentionPolicyManager into models layer
 
 ## v0.12.4 (2026-06-24)
 
