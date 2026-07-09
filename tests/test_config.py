@@ -102,6 +102,27 @@ def test_retention_policy_derivation_keep_last():
     assert policy.keep_last == 5
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "keep_last",
+        "keep_minutely",
+        "keep_hourly",
+        "keep_daily",
+        "keep_weekly",
+        "keep_monthly",
+        "keep_yearly",
+    ],
+)
+def test_negative_keep_rule_rejected(field):
+    """Verify a negative keep rule is rejected instead of pruning the wrong backups."""
+    # Given an otherwise valid config with one negative keep rule
+    # When constructing it
+    # Then validation fails rather than accepting the negative count
+    with pytest.raises(ValidationError):
+        BackupConfig(name="x", storage_paths=["/tmp"], **{field: -1})  # noqa: S108
+
+
 def test_write_checksums_defaults_true():
     """Verify write_checksums defaults to True."""
     # Given a minimal config with no explicit write_checksums

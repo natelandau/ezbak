@@ -105,13 +105,17 @@ class BackupConfig(BaseModel):
     # verified on restore regardless of this setting; this only gates generation.
     write_checksums: bool = True
 
-    keep_last: int | None = None
-    keep_minutely: int | None = None
-    keep_hourly: int | None = None
-    keep_daily: int | None = None
-    keep_weekly: int | None = None
-    keep_monthly: int | None = None
-    keep_yearly: int | None = None
+    # A keep rule is a non-negative count; 0 keeps nothing, None disables the rule.
+    # ge=0 rejects a negative value (e.g. a mistyped EZBAK_KEEP_* env var) at
+    # construction rather than letting it silently prune the wrong backups via
+    # slice semantics.
+    keep_last: int | None = Field(default=None, ge=0)
+    keep_minutely: int | None = Field(default=None, ge=0)
+    keep_hourly: int | None = Field(default=None, ge=0)
+    keep_daily: int | None = Field(default=None, ge=0)
+    keep_weekly: int | None = Field(default=None, ge=0)
+    keep_monthly: int | None = Field(default=None, ge=0)
+    keep_yearly: int | None = Field(default=None, ge=0)
 
     cron: str | None = None
     tz: str | None = None

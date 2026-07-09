@@ -521,9 +521,9 @@ class EZBak:
         return True
 
     def _identify_backups_to_delete(self) -> list[Backup]:
-        """Identify backups to delete based on retention policy configuration.
+        """Identify backups to delete under the union retention policy.
 
-        Analyze all storage locations and determine which backup files should be removed according to the configured retention policy. For count-based policies, identify excess backups beyond the maximum count. For time-based policies, identify excess backups within each time unit category (hourly, daily, weekly, monthly) beyond their respective retention limits.
+        Analyze each storage location and return the backups that no keep rule marks. A backup survives if any rule keeps it; everything else is a deletion candidate. When an active policy would delete every backup in a location, log an error and skip that location rather than emptying it.
 
         Returns:
             list[Backup]: A list of Backup objects that should be deleted to comply with retention policy.
