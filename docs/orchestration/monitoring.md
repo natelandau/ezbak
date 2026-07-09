@@ -1,3 +1,7 @@
+---
+icon: lucide/heart-pulse
+---
+
 # Monitoring scheduled runs
 
 A scheduled backup that fails quietly is a backup tool's worst failure mode: you
@@ -46,6 +50,12 @@ docker run -d \
     -e EZBAK_HEALTHCHECK_URL=https://hc-ping.com/your-uuid \
     ghcr.io/natelandau/ezbak:latest
 ```
+
+!!! note "Scheduled runs are jittered by up to 10 minutes"
+
+    ezbak adds a random delay of up to 10 minutes to each scheduled run, so the
+    ping arrives up to 10 minutes after the cron time. Size your monitor's grace
+    period to cover the jitter plus the backup's own runtime.
 
 ## What it does and does not cover
 

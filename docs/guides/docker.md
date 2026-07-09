@@ -1,3 +1,7 @@
+---
+icon: lucide/container
+---
+
 # Running in Docker
 
 The container is the main way to run ezbak. It reads its whole configuration from

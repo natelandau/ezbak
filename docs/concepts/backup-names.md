@@ -1,3 +1,7 @@
+---
+icon: lucide/tag
+---
+
 # Backup names
 
 Every backup set has a name. The name identifies the set in logs and groups its

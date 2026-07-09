@@ -1,3 +1,7 @@
+---
+icon: lucide/database
+---
+
 # Storage locations
 
 ezbak sends each backup to the storage locations you configure. There is no

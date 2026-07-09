@@ -1,3 +1,7 @@
+---
+icon: lucide/code
+---
+
 # Using the Python library
 
 The library lets you drive ezbak from your own code: a management script, a
@@ -65,8 +69,8 @@ of the period you name. An explicit `backup` argument beats a configured
 
 ## Preview a prune
 
-`prune_backups(dry_run=True)` returns the backups the retention policy would
-delete, without removing any:
+`prune_backups(dry_run=True)` returns the backups the keep rules would delete,
+without removing any:
 
 ```python
 would_delete = backups.prune_backups(dry_run=True)

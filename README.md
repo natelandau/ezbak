@@ -29,7 +29,7 @@ ezbak requires Python 3.11 or higher.
 ```python
 from ezbak import ezbak
 
-backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backups"], max_backups=7)
+backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backups"], keep_last=7)
 backups.create_backup()
 backups.restore_backup(restore_path="/restore")
 ```

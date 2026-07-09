@@ -1,3 +1,7 @@
+---
+icon: lucide/ship-wheel
+---
+
 # Kubernetes example
 
 The three-task pattern maps cleanly onto a Kubernetes pod. An init container
@@ -135,9 +139,11 @@ data, and its `preStop` hook captures the final state. All three share the
 
 !!! warning "A shutdown backup runs inside the grace period"
 
-    Set `EZBAK_BACKUP_ON_SHUTDOWN: "true"` on the backup sidecar to back up once
-    more when it receives `SIGTERM`. Kubernetes holds the pod alive only for
-    `terminationGracePeriodSeconds`, which the `preStop` hook above also draws on,
+    The manifest above already takes a final backup with the `preStop` hook.
+    `EZBAK_BACKUP_ON_SHUTDOWN: "true"` on the backup sidecar is an alternative
+    that backs up on `SIGTERM` instead. Use one or the other, not both, or the
+    pod takes two final backups. Either way Kubernetes holds the pod alive only
+    for `terminationGracePeriodSeconds`, which the `preStop` hook also draws on,
     so raise it to cover the backup:
 
     ```yaml

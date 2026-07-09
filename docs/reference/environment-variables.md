@@ -1,3 +1,7 @@
+---
+icon: lucide/variable
+---
+
 # Environment variables
 
 The container reads its whole configuration from the environment. The CLI reads a
@@ -86,6 +90,13 @@ docker run -d \
 A scheduled backup run also prunes afterward using the retention options you set,
 so old backups do not accumulate.
 
+!!! note "Scheduled runs are jittered"
+
+    ezbak adds a random delay of up to 10 minutes to each scheduled run, so a
+    `"0 2 * * *"` job fires at a random moment within 10 minutes after 02:00.
+    Account for this when sizing a healthcheck grace period. See
+    [Monitoring](../orchestration/monitoring.md).
+
 ## A final backup on shutdown
 
 A scheduled backup container backs up on its cron interval, so a shutdown between
@@ -133,7 +144,8 @@ places:
 
 - `TZ` sets the container's system timezone. ezbak uses it when no explicit
   timezone is configured. This is the usual way to set the timezone in a
-  container.
+  container. The image ships with `TZ=Etc/UTC`, so an unconfigured container
+  stamps timestamps in UTC.
 - `EZBAK_TZ` sets ezbak's `tz` field directly and overrides the system
   timezone.
 

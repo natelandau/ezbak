@@ -1,3 +1,7 @@
+---
+icon: lucide/braces
+---
+
 # Python API reference
 
 The package exposes three names: `BackupConfig`, `EZBak`, and `ezbak`. Build a
@@ -58,7 +62,7 @@ object. Reach for `ezbak(**kwargs)` in quick scripts.
 | --- | --- | --- |
 | `create_backup()` | `list[Backup]` | Archive the sources and write to every storage location. |
 | `list_backups()` | `list[Backup]` | Every backup, oldest to newest. |
-| `prune_backups(dry_run=False)` | `list[Backup]` | Delete backups the retention policy no longer keeps. |
+| `prune_backups(dry_run=False)` | `list[Backup]` | Delete backups the keep rules no longer keep. |
 | `restore_backup(restore_path=None, *, clean_before_restore=False, backup=None)` | `bool` | Restore a backup into a directory. |
 | `get_latest_backup()` | `Backup \| None` | The newest backup, or `None` if there are none. |
 | `get_backup_as_of(point_in_time)` | `Backup \| None` | The newest backup at or before a point in time. |

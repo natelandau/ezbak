@@ -1,3 +1,7 @@
+---
+icon: lucide/server
+---
+
 # Nomad example
 
 This jobspec runs a service alongside the three ezbak tasks. The pre-start task

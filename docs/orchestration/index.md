@@ -1,3 +1,7 @@
+---
+icon: lucide/workflow
+---
+
 # The orchestration pattern
 
 ezbak exists to move shared state between hosts. A job owns some state, a database
