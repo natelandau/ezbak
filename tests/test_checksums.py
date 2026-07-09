@@ -32,7 +32,15 @@ def test_format_and_parse_round_trip() -> None:
     assert parse_sidecar(content) == digest
 
 
-@pytest.mark.parametrize("bad", ["", "   ", "nothex " * 8, "abc  file", "z" * 64])
+@pytest.mark.parametrize("bad", ["", "   ", "nothex " * 8, "abc  file", "z" * 64, "a" * 63])
 def test_parse_sidecar_rejects_malformed(bad: str) -> None:
     """Verify parse_sidecar rejects malformed input and returns None."""
     assert parse_sidecar(bad) is None
+
+
+def test_parse_sidecar_normalizes_uppercase_digest() -> None:
+    """Verify parse_sidecar accepts an uppercase digest and lowercases it."""
+    # Given: a sha256sum-style line with an uppercase hex digest
+    content = format_sidecar("A" * 64, "x.tgz")
+    # When/Then: the parsed digest is normalized to lowercase
+    assert parse_sidecar(content) == "a" * 64

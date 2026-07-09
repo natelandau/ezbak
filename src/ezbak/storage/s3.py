@@ -132,6 +132,9 @@ class S3Backend(StorageBackend):
     def delete(self, backup: Backup) -> bool:
         """Delete a single object from the bucket.
 
+        Also removes the archive's .sha256 sidecar object, best-effort and
+        idempotent for a backup with no sidecar.
+
         Args:
             backup (Backup): The backup whose object should be removed.
 
@@ -160,6 +163,9 @@ class S3Backend(StorageBackend):
 
     def delete_many(self, backups: list[Backup]) -> list[Backup]:
         """Batch-delete objects from the bucket.
+
+        Also removes each archive's .sha256 sidecar object in the same
+        batches, best-effort and idempotent for a backup with no sidecar.
 
         Args:
             backups (list[Backup]): The backups to remove.
@@ -243,14 +249,21 @@ class S3Backend(StorageBackend):
             str | None: The stored digest, or None if the sidecar is absent or unreadable.
         """
         sidecar = sidecar_name(backup.name)
+        tmp_sidecar: Path | None = None
         try:
             if not self.aws_service.object_exists(sidecar):
                 return None
             tmp_sidecar = self.tmp_dir / new_staging_filename()
             self.aws_service.get_object(key=sidecar, destination=tmp_sidecar)
             content = tmp_sidecar.read_text()
-            tmp_sidecar.unlink(missing_ok=True)
-        except (OSError, BotoCoreError, ClientError) as e:
+        except (OSError, UnicodeDecodeError, BotoCoreError, ClientError) as e:
+            # UnicodeDecodeError is a ValueError subclass, not an OSError, so it
+            # needs its own clause: a bit-rotted sidecar must warn and proceed,
+            # not crash the restore.
             logger.warning(f"Could not read checksum sidecar for '{backup.name}': {e}")
             return None
+        finally:
+            # Guard for the case the download failed before tmp_sidecar was assigned.
+            if tmp_sidecar is not None:
+                tmp_sidecar.unlink(missing_ok=True)
         return parse_sidecar(content)

@@ -116,6 +116,7 @@ def test_delete_object(s3_bucket, mocker, debug, capsys, tmp_path):
     output = capsys.readouterr().err
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
+    assert backup_manager.aws_service is not None
     assert backup_manager.aws_service.object_exists("test-20240609T000000-yearly.tgz") is False
 
 

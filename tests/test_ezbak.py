@@ -846,6 +846,21 @@ def test_restore_missing_sidecar_warns_and_succeeds(filesystem, tmp_path, capsys
     assert "without integrity verification" in capsys.readouterr().err
 
 
+def test_restore_non_utf8_sidecar_warns_and_succeeds(filesystem, tmp_path, capsys) -> None:
+    """Verify a non-UTF-8 sidecar degrades to warn-and-proceed instead of crashing."""
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backup = app.create_backup()[0]
+
+    sidecar = backup.path.parent / (backup.path.name + ".sha256")
+    sidecar.write_bytes(b"\xff\xfe\x00\x01garbage")
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    assert app.restore_backup(restore_path=restore_dir) is True
+    assert "without integrity verification" in capsys.readouterr().err
+
+
 def test_restore_verifies_good_archive(filesystem, tmp_path) -> None:
     """Verify a restore succeeds when the archive matches its checksum sidecar."""
     src_dir, dest1, _ = filesystem

@@ -99,6 +99,9 @@ class LocalBackend(StorageBackend):
     def delete(self, backup: Backup) -> bool:
         """Unlink a local backup file, tolerating one already removed elsewhere.
 
+        Also removes the archive's .sha256 sidecar, best-effort and idempotent
+        for a backup with no sidecar.
+
         Args:
             backup (Backup): The backup whose file should be removed.
 
@@ -182,7 +185,10 @@ class LocalBackend(StorageBackend):
             content = sidecar_path.read_text()
         except FileNotFoundError:
             return None
-        except OSError as e:
+        except (OSError, UnicodeDecodeError) as e:
+            # UnicodeDecodeError is a ValueError subclass, not an OSError, so it
+            # needs its own clause: a bit-rotted sidecar must warn and proceed,
+            # not crash the restore.
             logger.warning(f"Could not read checksum sidecar '{sidecar_path}': {e}")
             return None
         return parse_sidecar(content)
