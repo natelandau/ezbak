@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import time_machine
+from pydantic import ValidationError
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel
@@ -330,6 +331,54 @@ def test_backup_on_shutdown_parses_true(filesystem):
     # When loading the container config, then the flag is enabled
     config = EnvConfig(_env_file=None)
     assert config.backup_on_shutdown is True
+
+
+def test_cron_jitter_defaults_to_60(filesystem):
+    """Verify cron_jitter defaults to 60 seconds when EZBAK_CRON_JITTER is unset."""
+    # Given no jitter env var
+    src_dir, dest1, _ = filesystem
+    os.environ.pop("EZBAK_CRON_JITTER", None)
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then jitter defaults to 60
+    config = EnvConfig(_env_file=None)
+    assert config.cron_jitter == 60
+
+
+def test_cron_jitter_parses_override(filesystem):
+    """Verify EZBAK_CRON_JITTER overrides the default jitter."""
+    # Given an explicit jitter value
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_CRON_JITTER"] = "120"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then the override is used
+    config = EnvConfig(_env_file=None)
+    assert config.cron_jitter == 120
+
+
+def test_cron_jitter_rejects_negative(filesystem):
+    """Verify a negative EZBAK_CRON_JITTER is rejected at load time."""
+    # Given a mistyped negative jitter value
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_CRON_JITTER"] = "-1"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then validation fails
+    with pytest.raises(ValidationError):
+        EnvConfig(_env_file=None)
 
 
 def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
