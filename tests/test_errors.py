@@ -219,7 +219,7 @@ def test_local_backend_write_raises_storage_write_error(filesystem, mocker):
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="Local write failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location)
+        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
 
 
 def test_create_backup_s3_only_bad_credentials_raises(filesystem):
@@ -324,10 +324,13 @@ def test_restore_backup_raises_when_archive_corrupt(filesystem, tmp_path):
     for archive in dest1.glob("test-*.tgz"):
         archive.write_bytes(b"not a tarball")
 
-    # When restoring, then it raises rather than returning a silent failure
+    # When restoring, then it raises rather than returning a silent failure. The
+    # checksum sidecar written at backup time no longer matches the corrupted
+    # bytes, so checksum verification now catches this before extraction is
+    # ever attempted.
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    with pytest.raises(RestoreFailedError, match="Failed to extract"):
+    with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
         app.restore_backup(restore_dir)
 
 

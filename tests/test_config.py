@@ -100,3 +100,12 @@ def test_retention_policy_derivation_count_based():
 
     # Then it is count-based
     assert policy.policy_type == RetentionPolicyType.COUNT_BASED
+
+
+def test_write_checksums_defaults_true():
+    """Verify write_checksums defaults to True."""
+    # Given a minimal config with no explicit write_checksums
+    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # noqa: S108
+
+    # Then it defaults to writing checksum sidecars
+    assert config.write_checksums is True

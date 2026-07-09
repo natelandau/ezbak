@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import boto3
 import pytest
 import time_machine
 from botocore.exceptions import ClientError, EndpointConnectionError
@@ -29,29 +30,9 @@ frozen_time_str = frozen_time.strftime(DEFAULT_DATE_FORMAT)
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
-@pytest.fixture(autouse=True)
-def mock_aws_client(mocker) -> None:
-    """Mock AWS credentials."""
-    mock_paginator = mocker.MagicMock()
-    mock_paginator.paginate.return_value = [
-        {"Contents": [{"Key": "test-20240609T000000-yearly.tgz"}]}
-    ]
-
-    mock_s3_client = mocker.MagicMock()
-    mock_s3_client.get_bucket_location.return_value = {"LocationConstraint": "us-east-1"}
-    mock_s3_client.get_paginator.return_value = mock_paginator
-    mock_s3_client.delete_objects.return_value = {
-        "Deleted": [{"Key": "test-20240609T000000-yearly.tgz"}],
-        "Errors": [
-            {"Key": "test-20240609T000000-yearly.tgz", "Code": "404", "Message": "Not Found"}
-        ],
-    }
-
-    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_s3_client)
-
-
 @time_machine.travel(frozen_time, tick=False)
 def test_aws_create_backup(
+    s3_bucket: str,
     filesystem: tuple[Path, Path, Path],
     debug: Callable[[str], None],
     capsys: pytest.CaptureFixture[str],
@@ -65,7 +46,7 @@ def test_aws_create_backup(
         source_paths=[src_dir],
         log_level="trace",
         tz="Etc/UTC",
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
     )
@@ -77,27 +58,33 @@ def test_aws_create_backup(
     assert "test-20250609T000000.tgz" in output
 
 
-def test_get_latest_backup(filesystem, debug, capsys, tmp_path):
+def test_get_latest_backup(s3_bucket, filesystem, debug, capsys, tmp_path):
     """Test AWS get latest backup."""
-    # Given: Source and destination directories from fixture
+    # Given: Source and destination directories from fixture, and a backup object
+    # already sitting in the bucket whose content is not a valid tarball
     src_dir, _, _ = filesystem
-    tmp_dst = tmp_path / "dst"
-    tmp_dst.mkdir()
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
+
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=s3_bucket,
+        Key="test-20240609T000000-yearly.tgz",
+        Body=b"not a valid tarball",
+    )
 
     backup_manager = ezbak(
         name="test",
         source_paths=[src_dir],
         log_level="TRACE",
         tz="Etc/UTC",
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
     )
 
     # When: Restoring the latest backup
-    # The aws service returns a file, but the restore fails loudly because the downloaded archive is not a valid tarball.
+    # The aws service downloads the real object, but the restore fails loudly because
+    # the downloaded archive is not a valid tarball.
     with pytest.raises(RestoreFailedError, match="Failed to extract backup archive"):
         backup_manager.restore_backup(restore_dir)
     output = capsys.readouterr().err
@@ -106,14 +93,20 @@ def test_get_latest_backup(filesystem, debug, capsys, tmp_path):
     assert "S3 file exists: 'test-20240609T000000-yearly.tgz'" in output
 
 
-def test_delete_object(mocker, debug, capsys, tmp_path):
+def test_delete_object(s3_bucket, mocker, debug, capsys, tmp_path):
     """Verify the aws service deletes an object."""
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=s3_bucket,
+        Key="test-20240609T000000-yearly.tgz",
+        Body=b"some backup content",
+    )
+
     backup_manager = ezbak(
         name="test",
         source_paths=[tmp_path],
         log_level="TRACE",
         tz="Etc/UTC",
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
     )
@@ -123,12 +116,27 @@ def test_delete_object(mocker, debug, capsys, tmp_path):
     output = capsys.readouterr().err
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
+    assert backup_manager.aws_service is not None
+    assert backup_manager.aws_service.object_exists("test-20240609T000000-yearly.tgz") is False
 
 
-def test_delete_objects(mocker, debug, capsys, tmp_path):
-    """Verify the aws service deletes multiple objects."""
-    # Given: A backup manager configured with test parameters
+def test_delete_objects(mocker, debug, capsys):
+    """Verify the aws service reports per-key errors from a batch delete response."""
+    # Given: A backup manager configured with test parameters, with the underlying
+    # boto3 client's delete_objects response crafted to return one confirmed
+    # deletion and one error. moto's happy path always confirms every delete, so
+    # this partial-failure response is only reachable with a targeted patch.
     instantiate_logger(LogLevel.TRACE)
+
+    mock_client = mocker.MagicMock()
+    mock_client.get_bucket_location.return_value = {"LocationConstraint": "us-east-1"}
+    mock_client.delete_objects.return_value = {
+        "Deleted": [{"Key": "test-20240609T000000-yearly.tgz"}],
+        "Errors": [
+            {"Key": "test-20240609T000000-yearly.tgz", "Code": "404", "Message": "Not Found"}
+        ],
+    }
+    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_client)
 
     aws_service = AWSService(
         bucket_name="test-bucket",
@@ -147,7 +155,7 @@ def test_delete_objects(mocker, debug, capsys, tmp_path):
     assert "S3: Failed to delete 'test-20240609T000000-yearly.tgz': 404 - Not Found" in output
 
 
-def test_both_backends_configured(filesystem):
+def test_both_backends_configured(s3_bucket, filesystem):
     """Verify an app with both local and S3 destinations builds one backend per type."""
     # Given source and local destination directories plus S3 bucket settings
     src_dir, dest1, _ = filesystem
@@ -156,7 +164,7 @@ def test_both_backends_configured(filesystem):
         name="test",
         source_paths=[src_dir],
         storage_paths=[dest1],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="test-access-key-id",
         aws_secret_key="test-secret-access-key",
     )
@@ -217,14 +225,14 @@ def test_aws_service_network_error_raises_storage_init_error(mocker):
         )
 
 
-def test_s3_backend_write_network_error_raises_storage_write_error(filesystem, mocker):
+def test_s3_backend_write_network_error_raises_storage_write_error(s3_bucket, filesystem, mocker):
     """Verify a network-level failure during upload becomes a StorageWriteError, not a raw crash."""
     # Given an ezbak app whose only destination is S3
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -243,7 +251,7 @@ def test_s3_backend_write_network_error_raises_storage_write_error(filesystem, m
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="S3 upload failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location)
+        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
 
 
 def test_ezbak_init_local_backend_survives_bad_s3_credentials(filesystem):
@@ -267,14 +275,14 @@ def test_ezbak_init_local_backend_survives_bad_s3_credentials(filesystem):
     assert len(app.backends) == 1
 
 
-def test_s3_backend_write_raises_storage_write_error(filesystem, mocker):
+def test_s3_backend_write_raises_storage_write_error(s3_bucket, filesystem, mocker):
     """Verify S3Backend.write raises StorageWriteError when the upload fails."""
     # Given an ezbak app whose only destination is S3
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -296,10 +304,10 @@ def test_s3_backend_write_raises_storage_write_error(filesystem, mocker):
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="S3 upload failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location)
+        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
 
 
-def test_create_backup_local_written_when_s3_fails(filesystem, mocker):
+def test_create_backup_local_written_when_s3_fails(s3_bucket, filesystem, mocker):
     """Verify the local backup is written even when the S3 upload fails, then the run fails."""
     # Given a config with both local and S3 destinations
     src_dir, dest1, _ = filesystem
@@ -307,7 +315,7 @@ def test_create_backup_local_written_when_s3_fails(filesystem, mocker):
         name="test",
         source_paths=[src_dir],
         storage_paths=[dest1],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -332,20 +340,27 @@ def test_create_backup_local_written_when_s3_fails(filesystem, mocker):
     assert list(dest1.glob("test-*.tgz"))
 
 
-def test_s3_prepare_for_restore_network_error_raises_storage_read_error(filesystem, mocker):
+def test_s3_prepare_for_restore_network_error_raises_storage_read_error(
+    s3_bucket, filesystem, mocker
+):
     """Verify a network-level failure during download becomes a StorageReadError, not a raw crash."""
     # Given an S3-only app whose download hits a connectivity error (a BotoCoreError)
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
     backend = app.backends[0]
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
+    # The download path checks object_exists before calling get_object, so a real
+    # object must be present for that check to reach the patched get_object call.
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=s3_bucket, Key="test-20240609T000000-yearly.tgz", Body=b"data"
+    )
     mocker.patch.object(
         backend.aws_service,
         "get_object",
@@ -357,20 +372,27 @@ def test_s3_prepare_for_restore_network_error_raises_storage_read_error(filesyst
         backend.prepare_for_restore(backup)
 
 
-def test_s3_prepare_for_restore_client_error_raises_storage_read_error(filesystem, mocker):
+def test_s3_prepare_for_restore_client_error_raises_storage_read_error(
+    s3_bucket, filesystem, mocker
+):
     """Verify a download ClientError becomes a StorageReadError instead of leaking botocore."""
     # Given an S3-only app whose download is denied
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
     backend = app.backends[0]
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
+    # The download path checks object_exists before calling get_object, so a real
+    # object must be present for that check to reach the patched get_object call.
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=s3_bucket, Key="test-20240609T000000-yearly.tgz", Body=b"data"
+    )
     mocker.patch.object(
         backend.aws_service,
         "get_object",
@@ -385,14 +407,14 @@ def test_s3_prepare_for_restore_client_error_raises_storage_read_error(filesyste
         backend.prepare_for_restore(backup)
 
 
-def test_s3_delete_client_error_raises_storage_delete_error(filesystem, mocker):
+def test_s3_delete_client_error_raises_storage_delete_error(s3_bucket, filesystem, mocker):
     """Verify a delete ClientError becomes a StorageDeleteError instead of leaking botocore."""
     # Given an S3-only app whose single-object delete is denied
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -413,14 +435,14 @@ def test_s3_delete_client_error_raises_storage_delete_error(filesystem, mocker):
         backend.delete(backup)
 
 
-def test_s3_delete_many_network_error_raises_storage_delete_error(filesystem, mocker):
+def test_s3_delete_many_network_error_raises_storage_delete_error(s3_bucket, filesystem, mocker):
     """Verify a batch-delete connectivity failure becomes a StorageDeleteError, not a raw crash."""
     # Given an S3-only app whose batch delete hits a connectivity error (a BotoCoreError)
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -438,14 +460,14 @@ def test_s3_delete_many_network_error_raises_storage_delete_error(filesystem, mo
         backend.delete_many([backup])
 
 
-def test_prune_backups_tolerates_s3_delete_failure(filesystem, mocker):
+def test_prune_backups_tolerates_s3_delete_failure(s3_bucket, filesystem, mocker):
     """Verify pruning tolerates a failing S3 backend instead of crashing the whole run."""
     # Given an S3-only app with a backup targeted for deletion
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -468,14 +490,14 @@ def test_prune_backups_tolerates_s3_delete_failure(filesystem, mocker):
     assert app.prune_backups() == []
 
 
-def test_s3_delete_many_chunks_large_batches(filesystem, mocker):
+def test_s3_delete_many_chunks_large_batches(s3_bucket, filesystem, mocker):
     """Verify deleting more than 1000 backups is chunked instead of exceeding the S3 limit."""
     # Given an S3-only app and more than 1000 backups to delete
     src_dir, _, _ = filesystem
     app = ezbak(
         name="test",
         source_paths=[src_dir],
-        aws_s3_bucket_name="test-bucket",
+        aws_s3_bucket_name=s3_bucket,
         aws_access_key="key",
         aws_secret_key="secret",
         tz="Etc/UTC",
@@ -491,10 +513,13 @@ def test_s3_delete_many_chunks_large_batches(filesystem, mocker):
         backend.aws_service, "delete_objects", side_effect=lambda keys: keys
     )
 
-    # When deleting, then it issues two chunked requests (1000 + 500) and returns all deleted
+    # When deleting, then each archive's sidecar key rides along in the same batches,
+    # doubling the key count to 3000 (1500 archives + 1500 sidecars), chunked into
+    # three requests of 1000 keys each. Only archives count as confirmed deleted.
     deleted = backend.delete_many(backups)
     assert len(deleted) == 1500
     assert deleted == backups
-    assert delete_spy.call_count == 2
+    assert delete_spy.call_count == 3
     assert len(delete_spy.call_args_list[0].kwargs["keys"]) == 1000
-    assert len(delete_spy.call_args_list[1].kwargs["keys"]) == 500
+    assert len(delete_spy.call_args_list[1].kwargs["keys"]) == 1000
+    assert len(delete_spy.call_args_list[2].kwargs["keys"]) == 1000

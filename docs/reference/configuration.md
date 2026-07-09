@@ -66,12 +66,21 @@ for the model and [Back up to S3](../guides/s3.md) for the S3 setup.
 | `delete_source_after_backup` | `EZBAK_DELETE_SOURCE_AFTER_BACKUP` | environment only | `False` |
 | `include_regex` | `EZBAK_INCLUDE_REGEX` | `create -i`, `--include-regex` | `None` |
 | `exclude_regex` | `EZBAK_EXCLUDE_REGEX` | `create -e`, `--exclude-regex` | `None` |
+| `write_checksums` | `EZBAK_WRITE_CHECKSUMS` | `create --write-checksums/--no-write-checksums` | `True` |
 
 `compression_level` is the gzip level from 1 to 9. `strip_source_paths` flattens
 a directory source so `/source/foo.txt` archives as `foo.txt` instead of
 `source/foo.txt`. `delete_source_after_backup` removes the sources after a fully
 successful backup, and never when any storage location failed. See
 [Including and excluding files](../concepts/filtering.md) for the regex options.
+
+`write_checksums` writes a `.sha256` sidecar next to each new backup archive, for
+example `my-documents-20241215T143022.tgz.sha256` alongside
+`my-documents-20241215T143022.tgz`. The sidecar uses the same text format as
+`sha256sum`, so `sha256sum -c` verifies it too. Setting `write_checksums` to
+`false` only stops ezbak from generating new sidecars: a restore always
+verifies a sidecar that is already present, no matter how this option is set.
+See [Restore backups](../guides/restore.md).
 
 !!! warning "delete_source_after_backup removes your source data"
 

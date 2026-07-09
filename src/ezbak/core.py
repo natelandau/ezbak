@@ -14,6 +14,7 @@ from nclutils.fs import clean_directory
 from pydantic import ValidationError
 from whenever import PlainDateTime
 
+from ezbak.checksums import sha256_file
 from ezbak.config import BackupConfig
 from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
@@ -95,6 +96,31 @@ def _fail_restore(msg: str, cause: Exception | None = None) -> NoReturn:
     if cause is None:
         raise RestoreFailedError(msg)
     raise RestoreFailedError(msg) from cause
+
+
+def _verify_checksum(backend: StorageBackend, backup: Backup, tarfile_path: Path) -> None:
+    """Reject a restore whose archive bytes no longer match its checksum sidecar.
+
+    Runs before staging or the destination are touched, so a corrupt archive is
+    rejected up front. A missing or unreadable sidecar degrades to a warning
+    rather than aborting, since checksums are an added safeguard, not a hard
+    requirement for restoring an existing backup. A digest mismatch aborts via
+    `_fail_restore`, which logs and raises `RestoreFailedError`.
+    """
+    expected = backend.get_checksum(backup)
+    if expected is None:
+        logger.warning(
+            f"No checksum sidecar for '{backup.name}'; restoring without integrity verification"
+        )
+        return
+
+    actual = sha256_file(tarfile_path)
+    if actual != expected:
+        _fail_restore(
+            f"Checksum mismatch for '{backup.name}': archive is corrupt, refusing to "
+            f"extract (expected {expected}, got {actual})"
+        )
+    logger.debug(f"Checksum verified for '{backup.name}'")
 
 
 def _is_within(inner: Path, outer: Path) -> bool:
@@ -426,9 +452,12 @@ class EZBak:
             bool: True if the backup was successfully restored.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
-        tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
+        backend = self._backend_for(backup)
+        tarfile_path = backend.prepare_for_restore(backup)
         if tarfile_path is None:
             _fail_restore(f"Backup archive is missing from storage: {backup.name}")
+
+        _verify_checksum(backend=backend, backup=backup, tarfile_path=tarfile_path)
 
         # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
         # a given target are not concurrent, so removing our own scratch dirs is safe.
@@ -555,7 +584,8 @@ class EZBak:
             logger.error("Backup creation aborted: temporary archive was not created")
             raise BackupFailedError(["backup archive could not be created"])
 
-        created_backups, write_failures = self._write_to_backends(tmp_backup)
+        checksum = sha256_file(tmp_backup) if self.settings.write_checksums else None
+        created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)
 
         try:
             tmp_backup.unlink()
@@ -583,7 +613,9 @@ class EZBak:
 
         return created_backups
 
-    def _write_to_backends(self, tmp_backup: Path) -> tuple[list[Backup], list[str]]:
+    def _write_to_backends(
+        self, tmp_backup: Path, checksum: str | None
+    ) -> tuple[list[Backup], list[str]]:
         """Write the staged archive to every configured destination, tolerating per-backend failures.
 
         Use this to attempt every destination independently so one unhealthy backend
@@ -591,6 +623,8 @@ class EZBak:
 
         Args:
             tmp_backup (Path): The staged tar.gz archive to distribute.
+            checksum (str | None): Precomputed hex SHA-256 of `tmp_backup` to store as
+                a sidecar on each backend, or None to skip sidecar creation.
 
         Returns:
             tuple[list[Backup], list[str]]: The backups successfully written, and the
@@ -603,7 +637,11 @@ class EZBak:
             backend = self._backend_for_type(storage_location.storage_type)
             try:
                 created_backups.append(
-                    backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
+                    backend.write(
+                        tmp_backup=tmp_backup,
+                        storage_location=storage_location,
+                        checksum=checksum,
+                    )
                 )
             except StorageWriteError:
                 # The backend already logged the failure with its destination context;

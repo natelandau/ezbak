@@ -102,6 +102,9 @@ class BackupConfig(BaseModel):
     exclude_regex: str | None = None
     include_regex: str | None = None
     compression_level: int = DEFAULT_COMPRESSION_LEVEL
+    # Write a .sha256 sidecar next to each new backup. Existing sidecars are always
+    # verified on restore regardless of this setting; this only gates generation.
+    write_checksums: bool = True
 
     max_backups: int | None = None
     retention_yearly: int | None = None
