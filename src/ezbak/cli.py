@@ -315,6 +315,16 @@ class PruneCommand:
         ),
     ] = False
 
+    force: Annotated[
+        bool,
+        cappa.Arg(
+            long="force",
+            help="Skip the confirmation prompt and prune immediately.",
+            group=(3, "Optional"),
+            show_default=False,
+        ),
+    ] = False
+
 
 @cappa.command(name="list", invoke="ezbak.cli_commands.list.main")
 class ListCommand:

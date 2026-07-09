@@ -22,9 +22,12 @@ def main(cmd: EZBakCLI) -> None:
     logger.info(f"Retention Policy:\n   - {policy_str}")
 
     dry_run = isinstance(cmd.command, PruneCommand) and cmd.command.dry_run
+    force = isinstance(cmd.command, PruneCommand) and cmd.command.force
 
-    # A dry run makes no destructive change, so skip the confirmation prompt.
-    if not dry_run and not Confirm.ask("Purge backups using the above policy?"):
+    # A dry run changes nothing, and --force opts out of the prompt explicitly, so
+    # skip the confirmation in both cases. --force makes prune scriptable in a
+    # non-interactive context where Confirm.ask would otherwise block on stdin.
+    if not dry_run and not force and not Confirm.ask("Purge backups using the above policy?"):
         logger.info("Aborting...")
         return
 

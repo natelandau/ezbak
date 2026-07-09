@@ -583,3 +583,48 @@ def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
             ],
         )
     assert exc.value.code == 1
+
+
+def test_cli_prune_backups_force_skips_confirmation(mocker, debug, capsys, tmp_path):
+    """Verify --force prunes without asking for confirmation."""
+    # Given: a confirmation that would decline if it were ever reached
+    confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=False)
+
+    # Given: more backups than the retention policy keeps
+    for filename in [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095745-minutely.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T095730-weekly-k6lop.tgz",
+        "test-20250609T095730-daily.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T095749-minutely.tgz",
+        "test-20250609T090932-yearly.tgz",
+        "test-20250609T095737-minutely.tgz",
+        "test-20250609T095804-minutely-p2we3r.tgz",
+        "test-20240609T090932-yearly.tgz",
+        "test-20250609T095625-monthly.tgz",
+        "test-20250609T095737-minutely-6klf7.tgz",
+    ]:
+        Path(tmp_path / filename).touch()
+
+    # When: pruning runs with --force
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "prune",
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "--keep-last",
+            "3",
+            "--force",
+        ],
+    )
+    output = capsys.readouterr().err
+
+    # Then: no confirmation is requested and the excess backups are deleted
+    confirm.assert_not_called()
+    assert "Deleted 10 backups" in output
+    assert len(list(tmp_path.iterdir())) == 3
