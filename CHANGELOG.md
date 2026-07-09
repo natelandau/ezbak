@@ -1,3 +1,11 @@
+## v1.0.1 (2026-07-09)
+
+### Fix
+
+- **logging**: trace retention keep/purge decisions
+- **logging**: trace checksum and restore steps
+- **container**: log ezbak version on startup
+
 ## v1.0.0 (2026-07-09)
 
 ### BREAKING CHANGE
