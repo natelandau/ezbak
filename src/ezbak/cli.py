@@ -236,72 +236,71 @@ class RestoreCommand:
 class PruneCommand:
     """Prune backups."""
 
-    max_backups: Annotated[
+    keep_last: Annotated[
         int,
         cappa.Arg(
-            long="max-backups",
-            short="x",
-            help="The maximum number of backups to prune.",
+            long="keep-last",
+            help="Number of most recent backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
 
-    yearly: Annotated[
+    keep_yearly: Annotated[
         int,
         cappa.Arg(
-            long="yearly",
+            long="keep-yearly",
             short="Y",
-            help="The number of yearly backups to keep.",
+            help="Number of yearly backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
 
-    monthly: Annotated[
+    keep_monthly: Annotated[
         int,
         cappa.Arg(
-            long="monthly",
+            long="keep-monthly",
             short="M",
-            help="The number of monthly backups to keep.",
+            help="Number of monthly backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
 
-    weekly: Annotated[
+    keep_weekly: Annotated[
         int,
         cappa.Arg(
-            long="weekly",
+            long="keep-weekly",
             short="W",
-            help="The number of weekly backups to keep.",
+            help="Number of weekly backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
 
-    daily: Annotated[
+    keep_daily: Annotated[
         int,
         cappa.Arg(
-            long="daily",
+            long="keep-daily",
             short="D",
-            help="The number of daily backups to keep.",
+            help="Number of daily backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
 
-    hourly: Annotated[
+    keep_hourly: Annotated[
         int,
         cappa.Arg(
-            long="hourly",
+            long="keep-hourly",
             short="H",
-            help="The number of hourly backups to keep.",
+            help="Number of hourly backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
 
-    minutely: Annotated[
+    keep_minutely: Annotated[
         int,
         cappa.Arg(
-            long="minutely",
+            long="keep-minutely",
             short="S",
-            help="The number of minutely backups to keep.",
+            help="Number of minutely backups to keep.",
             group=(2, "Retention"),
         ),
     ] = None
@@ -381,13 +380,13 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         }
     elif isinstance(cmd, PruneCommand):
         extra = {
-            "keep_last": cmd.max_backups,
-            "keep_yearly": cmd.yearly,
-            "keep_monthly": cmd.monthly,
-            "keep_weekly": cmd.weekly,
-            "keep_daily": cmd.daily,
-            "keep_hourly": cmd.hourly,
-            "keep_minutely": cmd.minutely,
+            "keep_last": cmd.keep_last,
+            "keep_yearly": cmd.keep_yearly,
+            "keep_monthly": cmd.keep_monthly,
+            "keep_weekly": cmd.keep_weekly,
+            "keep_daily": cmd.keep_daily,
+            "keep_hourly": cmd.keep_hourly,
+            "keep_minutely": cmd.keep_minutely,
         }
     else:  # ListCommand and any other read-only command
         extra = {}
