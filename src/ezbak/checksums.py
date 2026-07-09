@@ -45,6 +45,22 @@ def sidecar_name(archive_name: str) -> str:
     return f"{archive_name}.{CHECKSUM_EXTENSION}"
 
 
+def is_sidecar(name: str) -> bool:
+    """Report whether a filename or object key is a checksum sidecar.
+
+    Use so backends that discover objects by listing (rather than by a typed
+    glob) share one definition of "this is a sidecar, not a backup" instead of
+    re-encoding the extension check.
+
+    Args:
+        name (str): The filename or object key to test.
+
+    Returns:
+        bool: True if the name is a checksum sidecar.
+    """
+    return name.endswith(f".{CHECKSUM_EXTENSION}")
+
+
 def format_sidecar(digest: str, archive_name: str) -> str:
     """Return sha256sum-compatible sidecar content for an archive.
 

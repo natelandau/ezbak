@@ -6,9 +6,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 
 from ezbak.backup import Backup, StorageLocation
-from ezbak.checksums import format_sidecar, parse_sidecar, sidecar_name
+from ezbak.checksums import format_sidecar, is_sidecar, parse_sidecar, sidecar_name
 from ezbak.config import BackupConfig
-from ezbak.constants import CHECKSUM_EXTENSION, StorageType
+from ezbak.constants import StorageType
 from ezbak.exceptions import StorageDeleteError, StorageReadError, StorageWriteError
 from ezbak.naming import new_staging_filename
 from ezbak.storage.aws import AWSService
@@ -46,7 +46,7 @@ class S3Backend(StorageBackend):
 
         # The prefix listing returns sidecars too; drop them so a .sha256 is never
         # parsed as a spurious Backup and counted against retention.
-        found_backups = [key for key in found_backups if not key.endswith(f".{CHECKSUM_EXTENSION}")]
+        found_backups = [key for key in found_backups if not is_sidecar(key)]
 
         if self.settings.aws_s3_bucket_prefix:
             found_backups = [
@@ -122,7 +122,7 @@ class S3Backend(StorageBackend):
         sidecar = sidecar_name(archive_name)
         tmp_sidecar = self.tmp_dir / sidecar
         try:
-            tmp_sidecar.write_text(format_sidecar(checksum, archive_name))
+            tmp_sidecar.write_text(format_sidecar(digest=checksum, archive_name=archive_name))
             self.aws_service.upload_object(file=tmp_sidecar, name=sidecar)
         except (OSError, BotoCoreError, ClientError) as e:
             logger.warning(f"Failed to write checksum sidecar for '{archive_name}': {e}")

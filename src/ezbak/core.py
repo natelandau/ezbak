@@ -457,7 +457,7 @@ class EZBak:
         if tarfile_path is None:
             _fail_restore(f"Backup archive is missing from storage: {backup.name}")
 
-        _verify_checksum(backend, backup, tarfile_path)
+        _verify_checksum(backend=backend, backup=backup, tarfile_path=tarfile_path)
 
         # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
         # a given target are not concurrent, so removing our own scratch dirs is safe.

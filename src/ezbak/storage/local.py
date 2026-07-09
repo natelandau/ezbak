@@ -83,7 +83,9 @@ class LocalBackend(StorageBackend):
         if checksum is not None:
             sidecar_path = backup_path.parent / sidecar_name(backup_path.name)
             try:
-                sidecar_path.write_text(format_sidecar(checksum, backup_path.name))
+                sidecar_path.write_text(
+                    format_sidecar(digest=checksum, archive_name=backup_path.name)
+                )
             except OSError as e:
                 # Best-effort: the archive is intact, just unverifiable later.
                 logger.warning(f"Failed to write checksum sidecar '{sidecar_path}': {e}")
