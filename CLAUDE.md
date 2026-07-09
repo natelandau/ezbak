@@ -10,7 +10,7 @@ ezbak exists to move shared state between jobs and hosts in an orchestrated sett
 - a **post-stop** task taking a final backup before the orchestrator clears the job, and
 - a **pre-start** task that fetches the most recent backup and stages it on the target host before the job starts.
 
-The CLI and Python library are conveniences: ezbak happens to be an extensible backup manager, so they are exposed, but they are not the design center. ezbak is **not** trying to compete with restic/borg/etc. Weigh design and feature decisions against the orchestrated container workflow first.
+The CLI and Python library are conveniences: ezbak happens to be an extensible backup manager, so they are exposed, but they are not the design center. ezbak is **not** trying to compete with a feature-complete backup tool. Weigh design and feature decisions against the orchestrated container workflow first.
 
 ## Architecture
 
