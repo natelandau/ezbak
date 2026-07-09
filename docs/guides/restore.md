@@ -31,6 +31,13 @@ time, empty the target first, and set ownership on the restored files.
     backups.restore_backup(restore_path="/restore")
     ```
 
+!!! note "Restores verify a checksum sidecar when one exists"
+
+    If the backup has a `.sha256` sidecar, ezbak checks the archive against it
+    before extracting anything. A mismatch fails the restore; a missing or
+    unreadable sidecar logs a warning and restores anyway. See [Failure
+    behavior](../concepts/failure-behavior.md).
+
 ## Restore a backup from a point in time
 
 Set a restore date to recover the state as of an earlier moment. ezbak restores

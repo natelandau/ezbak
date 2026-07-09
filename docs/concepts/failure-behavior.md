@@ -78,6 +78,23 @@ a download, read, or extract failure leaves the existing contents in place.
     extracted files in a `.ezbak-restore-*` directory inside the target so you can
     recover them by hand, and it still raises `RestoreFailedError`.
 
+## Checksum verification on restore
+
+Every new backup can carry a `.sha256` sidecar next to its archive, written when
+`write_checksums` is enabled (the default). A restore checks for that sidecar
+whenever one exists, regardless of how `write_checksums` is set on the run doing
+the restoring: verification depends on what is already in storage, not on the
+current setting.
+
+- A **mismatch** aborts the restore before the restore path is touched, raising
+  `RestoreFailedError`. The corrupt archive is never extracted.
+- A **missing or unreadable** sidecar logs a warning and restores without
+  verification, since a checksum is an added safeguard, not a requirement for
+  restoring an existing backup.
+
+See [Configuration reference](../reference/configuration.md) for `write_checksums`
+and [Restore backups](../guides/restore.md) for the restore workflow.
+
 ## The "nothing to restore" case
 
 A missing backup is different from a failed restore. When there is no backup to
