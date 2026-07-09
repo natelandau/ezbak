@@ -10,6 +10,7 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
+from ezbak.checksums import sha256_file
 from ezbak.constants import DEFAULT_DATE_FORMAT
 from ezbak.core import _commit_restore, _is_within, _merge_move
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
@@ -785,3 +786,32 @@ def test_commit_restore_overlay_keeps_existing(tmp_path):
     assert (dest / "keep.txt").read_text() == "keep"
     assert (dest / "new.txt").read_text() == "new"
     assert staging.exists()
+
+
+def test_create_writes_local_sidecar(filesystem) -> None:
+    """Verify create_backup writes a .sha256 sidecar next to the local archive."""
+    # Given: A backup manager configured with a single local destination
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # When: Creating a backup
+    backups = app.create_backup()
+
+    # Then: A sidecar file exists next to the archive and matches its digest
+    archive = backups[0].path
+    sidecar = archive.parent / (archive.name + ".sha256")
+    assert sidecar.exists()
+    assert sha256_file(archive) in sidecar.read_text()
+
+
+def test_create_no_checksum_when_disabled(filesystem) -> None:
+    """Verify no sidecar is written when write_checksums is disabled."""
+    # Given: A backup manager with checksum writing disabled
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], write_checksums=False)
+
+    # When: Creating a backup
+    app.create_backup()
+
+    # Then: No sidecar file is created
+    assert not list(dest1.glob("*.sha256"))

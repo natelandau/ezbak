@@ -47,8 +47,17 @@ class StorageBackend(ABC):
         """Discover existing backups and organize them into storage locations."""
 
     @abstractmethod
-    def write(self, *, tmp_backup: Path, storage_location: StorageLocation) -> Backup:
-        """Store the staged archive under a freshly generated name and return its Backup."""
+    def write(
+        self, *, tmp_backup: Path, storage_location: StorageLocation, checksum: str | None
+    ) -> Backup:
+        """Store the staged archive under a freshly generated name and return its Backup.
+
+        Args:
+            tmp_backup (Path): The staged archive to store.
+            storage_location (StorageLocation): The destination and naming context.
+            checksum (str | None): Precomputed hex SHA-256 to store as a sidecar, or
+                None to skip sidecar creation.
+        """
 
     @abstractmethod
     def delete(self, backup: Backup) -> bool:

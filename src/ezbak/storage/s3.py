@@ -6,6 +6,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 
 from ezbak.backup import Backup, StorageLocation
+from ezbak.checksums import format_sidecar, sidecar_name
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
 from ezbak.exceptions import StorageDeleteError, StorageReadError, StorageWriteError
@@ -67,12 +68,16 @@ class S3Backend(StorageBackend):
 
         return [location]
 
-    def write(self, *, tmp_backup: Path, storage_location: StorageLocation) -> Backup:
+    def write(
+        self, *, tmp_backup: Path, storage_location: StorageLocation, checksum: str | None
+    ) -> Backup:
         """Upload the staged archive to the bucket.
 
         Args:
             tmp_backup (Path): The staged archive to upload.
             storage_location (StorageLocation): The naming context for the new object.
+            checksum (str | None): Precomputed hex SHA-256 to store as a sidecar, or
+                None to skip sidecar creation.
 
         Returns:
             Backup: The created backup.
@@ -89,12 +94,36 @@ class S3Backend(StorageBackend):
             logger.error(msg)
             raise StorageWriteError(msg) from e
         logger.info(f"S3 created: {backup_name}")
+
+        if checksum is not None:
+            self._write_sidecar(archive_name=backup_name, checksum=checksum)
+
         return Backup(
             storage_type=StorageType.AWS,
             name=backup_name,
             tz=self.settings.tz,
             storage_path=self.settings.aws_s3_bucket_prefix,
         )
+
+    def _write_sidecar(self, *, archive_name: str, checksum: str) -> None:
+        """Upload the .sha256 sidecar for an archive; a failure warns and is tolerated.
+
+        Stage the tiny sidecar in the backend's temp dir and reuse the same
+        upload path as the archive, so the sidecar has no special S3 code path.
+
+        Args:
+            archive_name (str): The archive's final object name.
+            checksum (str): The precomputed hex SHA-256 of the archive.
+        """
+        sidecar = sidecar_name(archive_name)
+        tmp_sidecar = self.tmp_dir / sidecar
+        try:
+            tmp_sidecar.write_text(format_sidecar(checksum, archive_name))
+            self.aws_service.upload_object(file=tmp_sidecar, name=sidecar)
+        except (OSError, BotoCoreError, ClientError) as e:
+            logger.warning(f"Failed to write checksum sidecar for '{archive_name}': {e}")
+        finally:
+            tmp_sidecar.unlink(missing_ok=True)
 
     def delete(self, backup: Backup) -> bool:
         """Delete a single object from the bucket.

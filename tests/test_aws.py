@@ -250,7 +250,7 @@ def test_s3_backend_write_network_error_raises_storage_write_error(s3_bucket, fi
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="S3 upload failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location)
+        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
 
 
 def test_ezbak_init_local_backend_survives_bad_s3_credentials(filesystem):
@@ -303,7 +303,7 @@ def test_s3_backend_write_raises_storage_write_error(s3_bucket, filesystem, mock
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="S3 upload failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location)
+        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
 
 
 def test_create_backup_local_written_when_s3_fails(s3_bucket, filesystem, mocker):

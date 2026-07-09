@@ -219,7 +219,7 @@ def test_local_backend_write_raises_storage_write_error(filesystem, mocker):
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="Local write failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location)
+        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
 
 
 def test_create_backup_s3_only_bad_credentials_raises(filesystem):

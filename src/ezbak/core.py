@@ -14,6 +14,7 @@ from nclutils.fs import clean_directory
 from pydantic import ValidationError
 from whenever import PlainDateTime
 
+from ezbak.checksums import sha256_file
 from ezbak.config import BackupConfig
 from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
@@ -555,7 +556,8 @@ class EZBak:
             logger.error("Backup creation aborted: temporary archive was not created")
             raise BackupFailedError(["backup archive could not be created"])
 
-        created_backups, write_failures = self._write_to_backends(tmp_backup)
+        checksum = sha256_file(tmp_backup) if self.settings.write_checksums else None
+        created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)
 
         try:
             tmp_backup.unlink()
@@ -583,7 +585,9 @@ class EZBak:
 
         return created_backups
 
-    def _write_to_backends(self, tmp_backup: Path) -> tuple[list[Backup], list[str]]:
+    def _write_to_backends(
+        self, tmp_backup: Path, checksum: str | None
+    ) -> tuple[list[Backup], list[str]]:
         """Write the staged archive to every configured destination, tolerating per-backend failures.
 
         Use this to attempt every destination independently so one unhealthy backend
@@ -591,6 +595,8 @@ class EZBak:
 
         Args:
             tmp_backup (Path): The staged tar.gz archive to distribute.
+            checksum (str | None): Precomputed hex SHA-256 of `tmp_backup` to store as
+                a sidecar on each backend, or None to skip sidecar creation.
 
         Returns:
             tuple[list[Backup], list[str]]: The backups successfully written, and the
@@ -603,7 +609,11 @@ class EZBak:
             backend = self._backend_for_type(storage_location.storage_type)
             try:
                 created_backups.append(
-                    backend.write(tmp_backup=tmp_backup, storage_location=storage_location)
+                    backend.write(
+                        tmp_backup=tmp_backup,
+                        storage_location=storage_location,
+                        checksum=checksum,
+                    )
                 )
             except StorageWriteError:
                 # The backend already logged the failure with its destination context;

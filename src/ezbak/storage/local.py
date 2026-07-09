@@ -6,6 +6,7 @@ from loguru import logger
 from nclutils.fs import copy_file, find_files
 
 from ezbak.backup import Backup, StorageLocation
+from ezbak.checksums import format_sidecar, sidecar_name
 from ezbak.constants import BACKUP_EXTENSION, StorageType
 from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
@@ -51,12 +52,16 @@ class LocalBackend(StorageBackend):
 
         return locations
 
-    def write(self, *, tmp_backup: Path, storage_location: StorageLocation) -> Backup:
+    def write(
+        self, *, tmp_backup: Path, storage_location: StorageLocation, checksum: str | None
+    ) -> Backup:
         """Copy the staged archive into the storage directory.
 
         Args:
             tmp_backup (Path): The staged archive to copy.
             storage_location (StorageLocation): The destination directory and naming context.
+            checksum (str | None): Precomputed hex SHA-256 to store as a sidecar, or
+                None to skip sidecar creation.
 
         Returns:
             Backup: The created backup.
@@ -74,6 +79,15 @@ class LocalBackend(StorageBackend):
             logger.error(msg)
             raise StorageWriteError(msg) from e
         logger.info(f"Created: {backup_path}")
+
+        if checksum is not None:
+            sidecar_path = backup_path.parent / sidecar_name(backup_path.name)
+            try:
+                sidecar_path.write_text(format_sidecar(checksum, backup_path.name))
+            except OSError as e:
+                # Best-effort: the archive is intact, just unverifiable later.
+                logger.warning(f"Failed to write checksum sidecar '{sidecar_path}': {e}")
+
         return Backup(
             storage_type=StorageType.LOCAL,
             name=backup_path.name,
