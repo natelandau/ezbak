@@ -157,6 +157,16 @@ class CreateCommand:
         ),
     ] = DEFAULT_COMPRESSION_LEVEL
 
+    write_checksums: Annotated[
+        bool,
+        cappa.Arg(
+            long="--write-checksums/--no-write-checksums",
+            help="Write a .sha256 sidecar next to each backup, verified on restore.",
+            group=(3, "Optional"),
+            show_default=True,
+        ),
+    ] = True
+
 
 @cappa.command(name="restore", invoke="ezbak.cli_commands.restore.main")
 class RestoreCommand:
@@ -358,6 +368,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "include_regex": cmd.include_regex,
             "exclude_regex": cmd.exclude_regex,
             "compression_level": cmd.compression_level,
+            "write_checksums": cmd.write_checksums,
         }
     elif isinstance(cmd, RestoreCommand):
         extra = {
