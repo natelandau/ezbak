@@ -574,6 +574,8 @@ class EZBak:
                     f"Found {len(to_delete)} backups to prune from "
                     f"'{storage_location.logging_name}'"
                 )
+                for backup in to_delete:
+                    logger.trace(f"Pruning '{backup.name}': kept by no retention rule")
                 backups_to_delete.extend(to_delete)
 
         logger.trace(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from ezbak.constants import BackupType
 
 if TYPE_CHECKING:
@@ -63,7 +65,9 @@ class RetentionPolicyManager:
         keep: set[Backup] = set()
 
         if self.keep_last:
-            keep.update(ordered[: self.keep_last])
+            last = ordered[: self.keep_last]
+            keep.update(last)
+            logger.trace(f"keep_last={self.keep_last} marked: {[b.name for b in last]}")
 
         for backup_type, count in self._calendar.items():
             if not count:
@@ -76,6 +80,9 @@ class RetentionPolicyManager:
                     continue
                 seen.add(key)
                 keep.add(backup)
+                logger.trace(
+                    f"{backup_type.value}={count} marked '{backup.name}' as newest for {attr} {key}"
+                )
                 if len(seen) >= count:
                     break
 
