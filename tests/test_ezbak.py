@@ -906,3 +906,24 @@ def test_backup_period_keys_unique_across_years(tmp_path):
     assert b_old.hour != b_new.hour
     assert b_old.minute != b_new.minute
     assert b_old.year != b_new.year
+
+
+def test_backup_period_keys_unique_across_months(tmp_path):
+    """Verify same day-of-month in different months yields distinct period keys."""
+    # Given two backups on the same day-of-month but in different months of the same year
+    may = tmp_path / "test-20250508T090000-daily.tgz"
+    june = tmp_path / "test-20250608T090000-daily.tgz"
+    may.touch()
+    june.touch()
+    b_may = Backup(path=may, name=may.name, storage_type=StorageType.LOCAL)
+    b_june = Backup(path=june, name=june.name, storage_type=StorageType.LOCAL)
+
+    # When comparing their period keys
+    # Then day, hour, and minute keys differ (month prefix guards uniqueness)
+    # and month keys differ
+    assert b_may.day != b_june.day
+    assert b_may.hour != b_june.hour
+    assert b_may.minute != b_june.minute
+    assert b_may.month != b_june.month
+    # And year remains the same (not the distinguishing factor)
+    assert b_may.year == b_june.year
