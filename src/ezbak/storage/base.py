@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar
 
+from loguru import logger
+
 from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import format_sidecar, is_sidecar, parse_sidecar
 from ezbak.config import BackupConfig
@@ -96,6 +98,7 @@ class StorageBackend(ABC):
         """
         if checksum is None:
             return
+        logger.trace(f"Writing checksum sidecar for '{backup.name}': {checksum}")
         self._write_sidecar(
             backup=backup,
             content=format_sidecar(digest=checksum, archive_name=backup.name),

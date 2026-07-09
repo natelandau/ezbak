@@ -106,6 +106,7 @@ def _verify_checksum(backend: StorageBackend, backup: Backup, tarfile_path: Path
     requirement for restoring an existing backup. A digest mismatch aborts via
     `_fail_restore`, which logs and raises `RestoreFailedError`.
     """
+    logger.trace(f"Verifying checksum for '{backup.name}'")
     expected = backend.get_checksum(backup)
     if expected is None:
         logger.warning(
@@ -113,7 +114,9 @@ def _verify_checksum(backend: StorageBackend, backup: Backup, tarfile_path: Path
         )
         return
 
+    logger.trace(f"Expected checksum for '{backup.name}': {expected}")
     actual = sha256_file(tarfile_path)
+    logger.trace(f"Computed checksum of '{tarfile_path.name}': {actual}")
     if actual != expected:
         _fail_restore(
             f"Checksum mismatch for '{backup.name}': archive is corrupt, refusing to "
@@ -226,6 +229,7 @@ def _commit_restore(staging: Path, dest: Path, *, clean: bool) -> None:
             _remove_path(entry)
         logger.info("Cleaned all files in restore path before restore")
 
+    logger.trace(f"Swapping restored files into '{dest}'")
     _merge_move(src=staging, dst=dest)
 
 
@@ -486,6 +490,10 @@ class EZBak:
             try:
                 with tarfile.open(tarfile_path) as archive:
                     archive.extractall(path=staging, filter="data")
+                    # getmembers() is cached by extractall, so this is not a re-read.
+                    logger.trace(
+                        f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"
+                    )
             except (tarfile.TarError, OSError) as e:
                 _fail_restore(f"Failed to extract backup archive: {tarfile_path}: {e}", e)
 
@@ -593,6 +601,8 @@ class EZBak:
             raise BackupFailedError(["backup archive could not be created"])
 
         checksum = sha256_file(tmp_backup) if self.settings.write_checksums else None
+        if checksum is not None:
+            logger.trace(f"Computed checksum of staged archive: {checksum}")
         created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)
 
         try:

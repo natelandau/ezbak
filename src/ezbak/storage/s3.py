@@ -255,9 +255,11 @@ class S3Backend(StorageBackend):
             str | None: The sidecar content, or None if it is absent or unreadable.
         """
         sidecar = sidecar_name(backup.name)
+        logger.trace(f"Looking up checksum sidecar object '{sidecar}'")
         tmp_sidecar: Path | None = None
         try:
             if not self.aws_service.object_exists(sidecar):
+                logger.trace(f"No checksum sidecar object '{sidecar}'")
                 return None
             tmp_sidecar = self.tmp_dir / new_staging_filename()
             self.aws_service.get_object(key=sidecar, destination=tmp_sidecar)

@@ -197,9 +197,11 @@ class LocalBackend(StorageBackend):
         if backup.path is None:
             return None
         sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
+        logger.trace(f"Reading checksum sidecar '{sidecar_path}'")
         try:
             return sidecar_path.read_text()
         except FileNotFoundError:
+            logger.trace(f"No checksum sidecar at '{sidecar_path}'")
             return None
         except (OSError, UnicodeDecodeError) as e:
             # UnicodeDecodeError is a ValueError subclass, not an OSError, so it
