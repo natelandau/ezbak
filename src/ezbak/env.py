@@ -37,3 +37,8 @@ class EnvConfig(BackupConfig, BaseSettings):
     # Opt-in: take a final backup when the cron BACKUP loop receives SIGTERM/SIGINT,
     # shrinking a sidecar's data-loss window to the orchestrator's kill grace period.
     backup_on_shutdown: bool = False
+
+    # Seconds of random delay added to each scheduled run, spreading a fleet of sidecars
+    # that share one cron so they do not hit a shared destination at the same instant.
+    # ge=0 rejects a mistyped negative EZBAK_CRON_JITTER at load time.
+    cron_jitter: int = Field(default=60, ge=0)

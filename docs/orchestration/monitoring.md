@@ -51,11 +51,12 @@ docker run -d \
     ghcr.io/natelandau/ezbak:latest
 ```
 
-!!! note "Scheduled runs are jittered by up to 10 minutes"
+!!! note "Scheduled runs are jittered"
 
-    ezbak adds a random delay of up to 10 minutes to each scheduled run, so the
-    ping arrives up to 10 minutes after the cron time. Size your monitor's grace
-    period to cover the jitter plus the backup's own runtime.
+    ezbak adds a random delay of up to 60 seconds to each scheduled run, so the
+    ping arrives up to that long after the cron time. Size your monitor's grace
+    period to cover the jitter plus the backup's own runtime. Tune the spread with
+    `EZBAK_CRON_JITTER` (seconds).
 
 ## What it does and does not cover
 
