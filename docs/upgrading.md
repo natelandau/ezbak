@@ -167,7 +167,10 @@ The `ezbak()` factory dropped the `storage_type`, `label_time_units`, and
 
 v0.12.4 retention was pick-one: you set either a count or a set of calendar
 rules, and any period you left unset implicitly kept one backup. v1.0.0
-retention is a union of independent rules, and an unset period keeps none.
+retention is a union of independent rules. Once you set at least one keep
+rule, any period you leave unset keeps none of its own backups. Leave every
+rule unset, though, and ezbak keeps everything: an inactive policy skips
+pruning rather than deleting down to zero.
 
 !!! warning "An unset period no longer keeps one backup"
 
