@@ -363,6 +363,26 @@ def test_prune_all_zero_policy_refuses(debug, capsys, tmp_path):
     assert "would delete every backup" in capsys.readouterr().err
 
 
+def test_prune_mixed_zero_and_positive_policy(debug, capsys, tmp_path):
+    """Verify keep_last=0 paired with a positive calendar rule prunes normally."""
+    # Given daily backups over four days and a policy with keep_last=0
+    for stamp in ("20250104T090000", "20250103T090000", "20250102T090000", "20250101T090000"):
+        (tmp_path / f"test-{stamp}-daily.tgz").touch()
+    app = ezbak(
+        name="test", source_paths=[tmp_path], storage_paths=[tmp_path], keep_last=0, keep_daily=2
+    )
+
+    # When pruning (must not trip the all-zero safety floor)
+    deleted = app.prune_backups()
+    output = capsys.readouterr().err
+
+    # Then the two most-recent daily representatives survive and the rest are gone
+    remaining = sorted(p.name for p in tmp_path.iterdir())
+    assert remaining == ["test-20250103T090000-daily.tgz", "test-20250104T090000-daily.tgz"]
+    assert len(deleted) == 2
+    assert "would delete every backup" not in output
+
+
 def test_prune_no_policy(debug, capsys, tmp_path):
     """Verify that backups are pruned correctly."""
     # Given: Source and destination directories from fixture

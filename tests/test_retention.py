@@ -87,6 +87,25 @@ def test_all_zero_policy_keeps_nothing(tmp_path):
     assert mgr.backups_to_keep(backups) == set()
 
 
+def test_backups_to_delete_is_complement_of_keep(tmp_path):
+    """Verify backups_to_delete returns exactly the non-kept backups."""
+    # Given five backups across five minutes and a keep_last=2 policy
+    backups = [_backup(tmp_path, f"20250101T0900{i:02d}") for i in range(5)]
+    mgr = RetentionPolicyManager(keep_last=2)
+
+    # When computing the keep-set and the delete-list
+    keep = mgr.backups_to_keep(backups)
+    to_delete = mgr.backups_to_delete(backups)
+
+    # Then delete returns the 3 non-kept backups, in input order
+    expected = [b for b in backups if b not in keep]
+    assert to_delete == expected
+    assert len(to_delete) == 3
+
+    # And the two sets never overlap
+    assert set(to_delete).isdisjoint(keep)
+
+
 def test_summary_lists_set_rules_only():
     """Verify summary reports only rules that were set."""
     mgr = RetentionPolicyManager(
