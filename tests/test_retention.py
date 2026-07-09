@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from ezbak.backup import Backup
 from ezbak.constants import BackupType, StorageType
 from ezbak.retention import RetentionPolicyManager
@@ -85,6 +87,110 @@ def test_all_zero_policy_keeps_nothing(tmp_path):
     mgr = RetentionPolicyManager(keep_last=0, calendar={BackupType.DAILY: 0})
     assert mgr.is_active is True
     assert mgr.backups_to_keep(backups) == set()
+
+
+@pytest.mark.parametrize(
+    ("backup_type", "stamps", "expected_kept"),
+    [
+        (
+            BackupType.YEARLY,
+            ("20230101T090000", "20240101T090000", "20250101T090000"),
+            {"20240101T090000", "20250101T090000"},
+        ),
+        (
+            BackupType.MONTHLY,
+            ("20250101T090000", "20250201T090000", "20250301T090000"),
+            {"20250201T090000", "20250301T090000"},
+        ),
+        (
+            BackupType.WEEKLY,
+            ("20250106T090000", "20250113T090000", "20250120T090000"),
+            {"20250113T090000", "20250120T090000"},
+        ),
+        (
+            BackupType.DAILY,
+            ("20250101T090000", "20250102T090000", "20250103T090000"),
+            {"20250102T090000", "20250103T090000"},
+        ),
+        (
+            BackupType.HOURLY,
+            ("20250101T000000", "20250101T010000", "20250101T020000"),
+            {"20250101T010000", "20250101T020000"},
+        ),
+        (
+            BackupType.MINUTELY,
+            ("20250101T000000", "20250101T000100", "20250101T000200"),
+            {"20250101T000100", "20250101T000200"},
+        ),
+    ],
+    ids=["yearly", "monthly", "weekly", "daily", "hourly", "minutely"],
+)
+def test_calendar_rule_keeps_newest_two_periods(tmp_path, backup_type, stamps, expected_kept):
+    """Verify each calendar period type keeps the newest backup of its N most-recent periods."""
+    # Given three backups in three distinct periods of the given type
+    backups = [_backup(tmp_path, s) for s in stamps]
+    mgr = RetentionPolicyManager(calendar={backup_type: 2})
+
+    # When keeping the two most-recent periods
+    keep = mgr.backups_to_keep(backups)
+
+    # Then the two newest periods' representatives survive
+    assert {b.timestamp for b in keep} == expected_kept
+
+
+def test_weekly_key_groups_iso_week_across_year_boundary(tmp_path):
+    """Verify weekly grouping uses the ISO week, so a week spanning a year boundary is one bucket."""
+    # Given two backups in the same ISO week but different calendar years
+    # (2025-12-29 Mon and 2026-01-01 Thu are both in ISO week 2026-W01)
+    backups = [_backup(tmp_path, "20251229T090000"), _backup(tmp_path, "20260101T090000")]
+    mgr = RetentionPolicyManager(calendar={BackupType.WEEKLY: 1})
+
+    # When keeping one weekly representative
+    keep = mgr.backups_to_keep(backups)
+
+    # Then they count as one week and only the newest survives; the old %W key split them in two
+    assert {b.timestamp for b in keep} == {"20260101T090000"}
+
+
+def test_calendar_rule_keeps_one_representative_per_period(tmp_path):
+    """Verify a calendar rule keeps one backup per period, not every backup in the period."""
+    # Given two days that each hold multiple backups
+    day1 = [_backup(tmp_path, s) for s in ("20250101T090000", "20250101T100000", "20250101T110000")]
+    day2 = [_backup(tmp_path, s) for s in ("20250102T090000", "20250102T100000")]
+    mgr = RetentionPolicyManager(calendar={BackupType.DAILY: 2})
+
+    # When keeping two daily periods
+    keep = mgr.backups_to_keep(day1 + day2)
+
+    # Then only the newest representative of each day survives, not all five backups
+    assert {b.timestamp for b in keep} == {"20250101T110000", "20250102T100000"}
+
+
+def test_calendar_rule_counts_only_periods_with_backups(tmp_path):
+    """Verify keep_daily counts days that have a backup, not calendar days, so gaps do not consume slots."""
+    # Given backups on four widely separated days
+    stamps = ("20250101T090000", "20250110T090000", "20250215T090000", "20250620T090000")
+    backups = [_backup(tmp_path, s) for s in stamps]
+    mgr = RetentionPolicyManager(calendar={BackupType.DAILY: 3})
+
+    # When keeping three daily periods
+    keep = mgr.backups_to_keep(backups)
+
+    # Then the three most-recent days-with-a-backup survive regardless of the calendar gaps
+    assert {b.timestamp for b in keep} == {"20250110T090000", "20250215T090000", "20250620T090000"}
+
+
+def test_keep_last_exceeding_backup_count_keeps_all(tmp_path):
+    """Verify keep_last larger than the backup count keeps every backup without over-reaching."""
+    # Given three backups and keep_last greater than three
+    backups = [_backup(tmp_path, f"2025010{d}T090000") for d in (1, 2, 3)]
+    mgr = RetentionPolicyManager(keep_last=10)
+
+    # When computing the keep-set
+    keep = mgr.backups_to_keep(backups)
+
+    # Then all three survive
+    assert len(keep) == 3
 
 
 def test_summary_lists_set_rules_only():
