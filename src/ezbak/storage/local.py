@@ -6,7 +6,7 @@ from loguru import logger
 from nclutils.fs import copy_file, find_files
 
 from ezbak.backup import Backup, StorageLocation
-from ezbak.checksums import format_sidecar, sidecar_name
+from ezbak.checksums import format_sidecar, parse_sidecar, sidecar_name
 from ezbak.constants import BACKUP_EXTENSION, StorageType
 from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
@@ -152,3 +152,24 @@ class LocalBackend(StorageBackend):
         """
         logger.info(f"Restoring backup from local: {backup.name}")
         return backup.path
+
+    def get_checksum(self, backup: Backup) -> str | None:  # noqa: PLR6301
+        """Read the expected digest from the sidecar next to a local archive.
+
+        Args:
+            backup (Backup): The backup to look up.
+
+        Returns:
+            str | None: The stored digest, or None if the sidecar is absent or unusable.
+        """
+        if backup.path is None:
+            return None
+        sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
+        try:
+            content = sidecar_path.read_text()
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            logger.warning(f"Could not read checksum sidecar '{sidecar_path}': {e}")
+            return None
+        return parse_sidecar(content)

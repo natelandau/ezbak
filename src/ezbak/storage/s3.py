@@ -6,7 +6,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 
 from ezbak.backup import Backup, StorageLocation
-from ezbak.checksums import format_sidecar, sidecar_name
+from ezbak.checksums import format_sidecar, parse_sidecar, sidecar_name
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
 from ezbak.exceptions import StorageDeleteError, StorageReadError, StorageWriteError
@@ -212,3 +212,29 @@ class S3Backend(StorageBackend):
             logger.error(msg)
             raise StorageReadError(msg) from e
         return tmp_file
+
+    def get_checksum(self, backup: Backup) -> str | None:
+        """Download and parse the sidecar object for a backup, if one exists.
+
+        A transient S3 error is treated as "no usable checksum" (warn and proceed),
+        consistent with verify-if-present, so a flaky network never masks the
+        archive restore.
+
+        Args:
+            backup (Backup): The backup to look up.
+
+        Returns:
+            str | None: The stored digest, or None if the sidecar is absent or unreadable.
+        """
+        sidecar = sidecar_name(backup.name)
+        try:
+            if not self.aws_service.object_exists(sidecar):
+                return None
+            tmp_sidecar = self.tmp_dir / new_staging_filename()
+            self.aws_service.get_object(key=sidecar, destination=tmp_sidecar)
+            content = tmp_sidecar.read_text()
+            tmp_sidecar.unlink(missing_ok=True)
+        except (OSError, BotoCoreError, ClientError) as e:
+            logger.warning(f"Could not read checksum sidecar for '{backup.name}': {e}")
+            return None
+        return parse_sidecar(content)

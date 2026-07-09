@@ -70,3 +70,7 @@ class StorageBackend(ABC):
     @abstractmethod
     def prepare_for_restore(self, backup: Backup) -> Path | None:
         """Return a local path to the backup archive, or None if it cannot be retrieved."""
+
+    @abstractmethod
+    def get_checksum(self, backup: Backup) -> str | None:
+        """Return the expected hex SHA-256 for a backup, or None when no sidecar exists."""

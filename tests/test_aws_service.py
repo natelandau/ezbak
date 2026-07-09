@@ -1,8 +1,10 @@
 """Direct AWSService tests backed by moto's in-memory S3."""
 
 import boto3
+import pytest
 
 from ezbak import ezbak
+from ezbak.exceptions import RestoreFailedError
 
 
 def test_s3_bucket_fixture_smoke(s3_bucket: str) -> None:
@@ -37,3 +39,25 @@ def test_create_uploads_s3_sidecar(s3_bucket: str, filesystem) -> None:
     assert sidecar_key in keys
     body = client.get_object(Bucket=s3_bucket, Key=sidecar_key)["Body"].read().decode()
     assert len(body.split()[0]) == 64
+
+
+def test_s3_restore_rejects_corrupt_archive(s3_bucket: str, filesystem, tmp_path) -> None:
+    """Verify an S3-stored archive corrupted after upload fails checksum verification."""
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    backup = app.create_backup()[0]
+
+    # Overwrite the stored object with bytes that will not match the sidecar.
+    client = boto3.client("s3", region_name="us-east-1")
+    client.put_object(Bucket=s3_bucket, Key=backup.name, Body=b"corrupted")
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
+        app.restore_backup(restore_path=restore_dir)

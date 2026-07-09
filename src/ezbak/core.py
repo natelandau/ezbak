@@ -98,6 +98,31 @@ def _fail_restore(msg: str, cause: Exception | None = None) -> NoReturn:
     raise RestoreFailedError(msg) from cause
 
 
+def _verify_checksum(backend: StorageBackend, backup: Backup, tarfile_path: Path) -> None:
+    """Reject a restore whose archive bytes no longer match its checksum sidecar.
+
+    Runs before staging or the destination are touched, so a corrupt archive is
+    rejected up front. A missing or unreadable sidecar degrades to a warning
+    rather than aborting, since checksums are an added safeguard, not a hard
+    requirement for restoring an existing backup. A digest mismatch aborts via
+    `_fail_restore`, which logs and raises `RestoreFailedError`.
+    """
+    expected = backend.get_checksum(backup)
+    if expected is None:
+        logger.warning(
+            f"No checksum sidecar for '{backup.name}'; restoring without integrity verification"
+        )
+        return
+
+    actual = sha256_file(tarfile_path)
+    if actual != expected:
+        _fail_restore(
+            f"Checksum mismatch for '{backup.name}': archive is corrupt, refusing to "
+            f"extract (expected {expected}, got {actual})"
+        )
+    logger.debug(f"Checksum verified for '{backup.name}'")
+
+
 def _is_within(inner: Path, outer: Path) -> bool:
     """Return True if `inner` is `outer` or is nested inside it.
 
@@ -427,9 +452,12 @@ class EZBak:
             bool: True if the backup was successfully restored.
         """
         logger.debug(f"Restoring backup: {backup.name} ({backup.storage_type.value})")
-        tarfile_path = self._backend_for(backup).prepare_for_restore(backup)
+        backend = self._backend_for(backup)
+        tarfile_path = backend.prepare_for_restore(backup)
         if tarfile_path is None:
             _fail_restore(f"Backup archive is missing from storage: {backup.name}")
+
+        _verify_checksum(backend, backup, tarfile_path)
 
         # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
         # a given target are not concurrent, so removing our own scratch dirs is safe.

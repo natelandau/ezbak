@@ -815,3 +815,46 @@ def test_create_no_checksum_when_disabled(filesystem) -> None:
 
     # Then: No sidecar file is created
     assert not list(dest1.glob("*.sha256"))
+
+
+def test_restore_rejects_corrupt_archive(filesystem, tmp_path) -> None:
+    """Verify a corrupted archive fails checksum verification before extraction."""
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backup = app.create_backup()[0]
+
+    # Corrupt the archive so its bytes no longer match the sidecar digest.
+    with backup.path.open("r+b") as handle:
+        handle.write(b"\x00\x01\x02\x03")
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
+        app.restore_backup(restore_path=restore_dir)
+
+
+def test_restore_missing_sidecar_warns_and_succeeds(filesystem, tmp_path, capsys) -> None:
+    """Verify a restore proceeds with a warning when no checksum sidecar exists."""
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backup = app.create_backup()[0]
+    (backup.path.parent / (backup.path.name + ".sha256")).unlink()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    assert app.restore_backup(restore_path=restore_dir) is True
+    assert "without integrity verification" in capsys.readouterr().err
+
+
+def test_restore_verifies_good_archive(filesystem, tmp_path) -> None:
+    """Verify a restore succeeds when the archive matches its checksum sidecar."""
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    app.create_backup()
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    assert app.restore_backup(restore_path=restore_dir) is True
+    # strip_source_paths defaults to False, so the archive nests files under the
+    # source directory's own name (matches the convention used by other restore
+    # tests in this file, e.g. test_exclude_regex).
+    assert (restore_dir / src_dir.name / "foo.txt").exists()
