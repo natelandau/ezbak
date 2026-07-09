@@ -207,8 +207,6 @@ def _run_cron(app: EZBak, config: EnvConfig, action: Action) -> None:
 
 def log_debug_info(app: EZBak) -> None:
     """Log debug information about the configuration."""
-    logger.debug(f"ezbak v{__version__}")
-
     for key, value in sorted(app.settings.model_dump().items()):
         if not key.startswith("_") and value is not None:
             if key.endswith("_key"):
@@ -245,6 +243,7 @@ def main() -> None:
     config = _load_config()
     app = EZBak(config)
 
+    logger.info(f"ezbak v{__version__}")
     log_debug_info(app)
 
     if config.entrypoint_action is None:
