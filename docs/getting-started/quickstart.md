@@ -15,7 +15,7 @@ make a backup, and restore it. Each example keeps the most recent seven backups.
         -e EZBAK_NAME=my-backup \
         -e EZBAK_SOURCE_PATHS=/source \
         -e EZBAK_STORAGE_PATHS=/backups \
-        -e EZBAK_MAX_BACKUPS=7 \
+        -e EZBAK_KEEP_LAST=7 \
         ghcr.io/natelandau/ezbak:latest
     ```
 
@@ -34,7 +34,7 @@ make a backup, and restore it. Each example keeps the most recent seven backups.
         name="my-backup",
         source_paths=["/data"],
         storage_paths=["/backups"],
-        max_backups=7,
+        keep_last=7,
     )
     backups.create_backup()
     ```
@@ -102,7 +102,7 @@ That is a full cycle: create, list, restore.
 
     ---
 
-    Keep a fixed count, or different amounts per time period.
+    Combine a fixed count with time-based rules that compose.
 
     [:octicons-arrow-right-24: Retention policies](../guides/retention.md)
 

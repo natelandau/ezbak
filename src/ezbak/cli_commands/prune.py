@@ -10,13 +10,14 @@ from ezbak.core import EZBak
 def main(cmd: EZBakCLI) -> None:
     """The main function for the prune command."""
     app = EZBak(build_config(cmd))
-    policy = app.settings.retention_policy.get_full_policy()
+    policy = app.settings.retention_policy
 
-    if not policy:
+    if not policy.is_active:
         logger.info("No retention policy configured. Skipping...")
         return
 
-    policy_str = "\n   - ".join([f"{key}: {value}" for key, value in policy.items()])
+    summary = policy.summary()
+    policy_str = "\n   - ".join([f"{key}: {value}" for key, value in summary.items()])
 
     logger.info(f"Retention Policy:\n   - {policy_str}")
 

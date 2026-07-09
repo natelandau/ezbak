@@ -37,18 +37,18 @@ Each line shows the full `YYYYMMDDTHHMMSS` timestamp. Copy one into
 
 ## Prune old backups
 
-Set a count-based limit or one or more time-based limits. Preview first with
-`--dry-run`.
+Set one or more keep rules; a backup survives if any rule marks it. Preview
+first with `--dry-run`.
 
 ```bash
 # Keep the 10 most recent
-ezbak --name my-documents --storage ~/Backups prune --max-backups 10
+ezbak --name my-documents --storage ~/Backups prune --keep-last 10
 
 # See what a prune would remove, without removing it
-ezbak --name my-documents --storage ~/Backups prune --max-backups 10 --dry-run
+ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --dry-run
 ```
 
-See [Retention policies](retention.md) for choosing a policy.
+See [Retention policies](retention.md) for how the rules combine.
 
 ## Restore a backup
 

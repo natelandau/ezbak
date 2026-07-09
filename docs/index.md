@@ -16,7 +16,8 @@ or a full backup system.
 - Creates tar-gzipped (`.tgz`) backups of files and directories.
 - Stores backups on the local filesystem, in AWS S3, or both at once.
 - Filters files with include and exclude regex patterns.
-- Prunes old backups with count-based or time-based retention.
+- Prunes old backups with a retention policy that combines count-based and
+  time-based rules.
 - Restores the latest backup, or the newest backup at or before a point in time.
 - Runs scheduled backups in a container with a cron expression.
 - Pings a healthcheck monitor so a silent scheduled failure gets noticed.

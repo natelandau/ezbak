@@ -60,27 +60,27 @@ to `restore --restore-date` to restore that exact backup.
 
 ## prune
 
-Delete old backups according to a retention policy. Set a count with
-`--max-backups`, or set one or more time-based limits. The two policies cannot
-combine: `--max-backups` wins and the time-based options are ignored.
+Delete old backups according to a retention policy. Set one or more keep
+rules; a backup survives if any rule marks it, so the rules compose instead of
+picking one policy.
 
 | Option | Short | Description | Default |
 | --- | --- | --- | --- |
-| `--max-backups` | `-x` | Keep this many of the most recent backups. | |
-| `--yearly` | `-Y` | Yearly backups to keep. | |
-| `--monthly` | `-M` | Monthly backups to keep. | |
-| `--weekly` | `-W` | Weekly backups to keep. | |
-| `--daily` | `-D` | Daily backups to keep. | |
-| `--hourly` | `-H` | Hourly backups to keep. | |
-| `--minutely` | `-S` | Minutely backups to keep. | |
+| `--keep-last` | | Keep this many of the most recent backups. | |
+| `--keep-yearly` | `-Y` | Yearly backups to keep. | |
+| `--keep-monthly` | `-M` | Monthly backups to keep. | |
+| `--keep-weekly` | `-W` | Weekly backups to keep. | |
+| `--keep-daily` | `-D` | Daily backups to keep. | |
+| `--keep-hourly` | `-H` | Hourly backups to keep. | |
+| `--keep-minutely` | `-S` | Minutely backups to keep. | |
 | `--dry-run` | | List what would be deleted without deleting. | `False` |
 
 ```bash
 # Keep the 10 most recent
-ezbak --name my-documents --storage ~/Backups prune --max-backups 10
+ezbak --name my-documents --storage ~/Backups prune --keep-last 10
 
 # Preview only
-ezbak --name my-documents --storage ~/Backups prune --max-backups 10 --dry-run
+ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --dry-run
 ```
 
 ## restore

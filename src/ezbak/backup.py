@@ -1,6 +1,5 @@
 """Backup and storage location models for managing backup archives and restoration operations."""
 
-from collections import defaultdict
 from pathlib import Path
 
 from loguru import logger
@@ -10,7 +9,6 @@ from ezbak.constants import (
     DEFAULT_DATE_FORMAT,
     DEFAULT_DATE_PATTERN,
     TIMESTAMP_REGEX,
-    BackupType,
     StorageType,
 )
 from ezbak.naming import add_uid_suffix, build_backup_name
@@ -54,12 +52,18 @@ class Backup:
             logger.error(e)
             raise
 
-        self.year = str(self.zoned_datetime.year)
-        self.month = str(self.zoned_datetime.month)
-        self.week = str(self.zoned_datetime.to_stdlib().strftime("%W"))
-        self.day = str(self.zoned_datetime.day)
-        self.hour = str(self.zoned_datetime.hour)
-        self.minute = str(self.zoned_datetime.minute)
+        # Period keys must be globally unique so retention bucketing never conflates
+        # the same sub-field across different periods (e.g. July 2025 vs July 2026).
+        dt = self.zoned_datetime
+        self.year = str(dt.year)
+        self.month = f"{dt.year}-{dt.month}"
+        # ISO week (not %W) so a week spanning a year boundary keys to one
+        # bucket instead of splitting across two and consuming two keep_weekly slots.
+        iso = dt.to_stdlib().isocalendar()
+        self.week = f"{iso.year}-{iso.week}"
+        self.day = f"{dt.year}-{dt.month}-{dt.day}"
+        self.hour = f"{dt.year}-{dt.month}-{dt.day}-{dt.hour}"
+        self.minute = f"{dt.year}-{dt.month}-{dt.day}-{dt.hour}-{dt.minute}"
 
     def __repr__(self) -> str:
         """Return a string representation of the backup."""
@@ -86,7 +90,6 @@ class StorageLocation:
         self.storage_type = storage_type
         self.backups = backups
         self.name = name
-        self.backups_by_time_unit = self._categorize_backups_by_time_unit()
         self.tz = tz
 
         # This variable is only used for logging purposes.
@@ -95,43 +98,6 @@ class StorageLocation:
             if self.storage_type == StorageType.AWS
             else self.storage_path or self.storage_type.value
         )
-
-    def _categorize_backups_by_time_unit(
-        self,
-    ) -> dict[BackupType, list[Backup]]:
-        """Categorize backups by time unit for retention policy grouping.
-
-        Returns:
-            dict[BackupType, list[Backup]]: Backups grouped by time unit.
-        """
-        backups_by_type: dict[BackupType, list[Backup]] = defaultdict(list)
-        # A set for O(1) membership: existing_dates drives first-match-wins bucketing
-        # below and is not needed once categorization is complete.
-        existing_dates: dict[BackupType, set[str]] = defaultdict(set)
-
-        period_definitions = [
-            (BackupType.YEARLY, "year"),
-            (BackupType.MONTHLY, "month"),
-            (BackupType.WEEKLY, "week"),
-            (BackupType.DAILY, "day"),
-            (BackupType.HOURLY, "hour"),
-            (BackupType.MINUTELY, "minute"),
-        ]
-        for backup in self.backups:
-            for period_type, date_attr in period_definitions:
-                date_value = getattr(backup, date_attr)
-                if date_value not in existing_dates[period_type]:
-                    existing_dates[period_type].add(date_value)
-                    backups_by_type[period_type].append(backup)
-                    # First-match-wins: assign each backup to the coarsest period whose slot
-                    # for its timestamp is not yet taken, then stop.
-                    break
-
-                if period_type == BackupType.MINUTELY:
-                    backups_by_type[period_type].append(backup)
-                    break
-
-        return backups_by_type
 
     def generate_new_backup_name(self) -> str:
         """Generate a unique, sortable backup filename for the current time.

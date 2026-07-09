@@ -215,7 +215,7 @@ def log_debug_info(app: EZBak) -> None:
                 logger.debug(f"env: {key}: **********")
             else:
                 logger.debug(f"env: {key}: {value}")
-    retention_policy = app.settings.retention_policy.get_full_policy()
+    retention_policy = app.settings.retention_policy.summary()
     logger.trace(f"retention_policy: {retention_policy}")
 
 

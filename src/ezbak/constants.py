@@ -15,7 +15,6 @@ TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
 # just before a final `\n`, which would pass a value like "20250101\n".
 RESTORE_DATE_REGEX = re.compile(r"^\d{4}(\d{2}(\d{2}(T\d{2}(\d{2}(\d{2})?)?)?)?)?\Z")
 DEFAULT_COMPRESSION_LEVEL = 9
-DEFAULT_RETENTION = 1
 ENVAR_PREFIX = "EZBAK_"
 BACKUP_EXTENSION = "tgz"
 CHECKSUM_EXTENSION = "sha256"
@@ -49,14 +48,6 @@ class BackupType(Enum):
     DAILY = "daily"
     HOURLY = "hourly"
     MINUTELY = "minutely"
-
-
-class RetentionPolicyType(Enum):
-    """Retention policy type."""
-
-    TIME_BASED = "time_based"  # Uses yearly/monthly/weekly/etc. retention
-    COUNT_BASED = "count_based"  # Uses simple max_backups count
-    KEEP_ALL = "keep_all"  # Keeps all backups
 
 
 class StorageType(Enum):
