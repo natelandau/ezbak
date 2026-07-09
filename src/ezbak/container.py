@@ -1,9 +1,12 @@
 """Entrypoint for ezbak from docker. Relies entirely on environment variables for configuration."""
 
+import signal
 import sys
+import threading
 import time
 import urllib.request
 from collections.abc import Callable
+from types import FrameType
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -107,6 +110,101 @@ def _run_scheduled(
         _ping_healthcheck(healthcheck_url, failed=False)
 
 
+def _run_shutdown_backup(app: EZBak, scheduler: BackgroundScheduler, config: EnvConfig) -> None:
+    """Take one final backup on shutdown when a cron BACKUP container opted in.
+
+    A no-op unless ``backup_on_shutdown`` is set and the container's action is
+    ``backup``: a final backup only makes sense for a backup sidecar, not for a
+    restore container. Route through ``_run_scheduled`` so the final backup gets the
+    same error handling and healthcheck ping as any scheduled run.
+
+    Args:
+        app (EZBak): The configured backup manager.
+        scheduler (BackgroundScheduler): The scheduler being shut down.
+        config (EnvConfig): The container configuration.
+    """
+    if not config.backup_on_shutdown or config.entrypoint_action != Action.BACKUP:
+        return
+
+    logger.info("Taking a final backup before shutdown")
+    _run_scheduled(app, scheduler, config.healthcheck_url, do_backup)
+
+
+def _run_cron(app: EZBak, config: EnvConfig, action: Action) -> None:
+    """Run the configured action on a cron schedule until a shutdown signal arrives.
+
+    Build the scheduler, register `SIGTERM`/`SIGINT` handlers for a clean shutdown, and
+    block until one arrives. On an opted-in backup container, take one final backup
+    before stopping (see `_run_shutdown_backup` for the gating).
+
+    Args:
+        app (EZBak): The configured backup manager.
+        config (EnvConfig): The container configuration.
+        action (Action): The resolved entrypoint action to schedule.
+    """
+    scheduler = BackgroundScheduler()
+
+    run = do_backup if action == Action.BACKUP else do_restore
+    job = scheduler.add_job(
+        func=_run_scheduled,
+        args=[app, scheduler, config.healthcheck_url, run],
+        trigger=CronTrigger.from_crontab(config.cron),
+        jitter=600,
+        id=action.value,
+    )
+    logger.info(job)
+
+    # An orchestrator tears the container down with SIGTERM, which Python does not
+    # convert to an exception, so without a handler the scheduler thread is killed
+    # abruptly. Handle both signals to shut down cleanly (and, when opted in, take a
+    # final backup). The handler only flags the request; the backup runs back in the
+    # main control flow below, never inside the handler, where a full tar/S3 upload
+    # would be unsafe.
+    shutdown_event = threading.Event()
+
+    def _request_shutdown(_signum: int, _frame: FrameType | None) -> None:
+        # Restore the default handlers so a second signal (operator escalation, or the
+        # orchestrator's SIGKILL precursor) terminates at once instead of being swallowed
+        # while a slow final backup runs. Args are unused but required by signal.signal's
+        # handler signature.
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    signal.signal(signal.SIGINT, _request_shutdown)
+
+    scheduler.start()
+
+    job = scheduler.get_job(job_id=action.value)
+    if job and job.next_run_time:
+        logger.info(f"Next scheduled run: {job.next_run_time}")
+    else:
+        logger.info("No next scheduled run")
+
+    logger.info("Scheduler started")
+
+    while scheduler.running and not shutdown_event.is_set():
+        time.sleep(1)
+
+    logger.info("Exiting...")
+    # Stop firing new scheduled jobs so a cron tick cannot launch a second backup that
+    # races the final one. Pausing (not shutting down) keeps the scheduler alive so the
+    # final backup's job lookup still works.
+    if scheduler.running:
+        scheduler.pause()
+    try:
+        # Only an actual signal is a shutdown request; a loop that ended because the
+        # scheduler stopped on its own must not trigger a surprise final backup.
+        if shutdown_event.is_set():
+            _run_shutdown_backup(app, scheduler, config)
+    finally:
+        # Always stop the scheduler, even if the final backup raised. wait=False: do not
+        # block on an in-flight job, so cleanup cannot overrun the kill grace period.
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
+
 def log_debug_info(app: EZBak) -> None:
     """Log debug information about the configuration."""
     logger.debug(f"ezbak v{__version__}")
@@ -154,33 +252,7 @@ def main() -> None:
         sys.exit(1)
 
     if config.cron:
-        scheduler = BackgroundScheduler()
-
-        run = do_backup if config.entrypoint_action == Action.BACKUP else do_restore
-        job = scheduler.add_job(
-            func=_run_scheduled,
-            args=[app, scheduler, config.healthcheck_url, run],
-            trigger=CronTrigger.from_crontab(config.cron),
-            jitter=600,
-            id=config.entrypoint_action.value,
-        )
-        logger.info(job)
-        scheduler.start()
-
-        job = scheduler.get_job(job_id=config.entrypoint_action.value)
-        if job and job.next_run_time:
-            logger.info(f"Next scheduled run: {job.next_run_time}")
-        else:
-            logger.info("No next scheduled run")
-
-        logger.info("Scheduler started")
-
-        try:
-            while scheduler.running:
-                time.sleep(1)
-        except (KeyboardInterrupt, SystemExit):
-            logger.info("Exiting...")
-            scheduler.shutdown()
+        _run_cron(app, config, config.entrypoint_action)
 
     elif config.entrypoint_action == Action.BACKUP:
         try:

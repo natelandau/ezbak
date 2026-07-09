@@ -33,3 +33,7 @@ class EnvConfig(BackupConfig, BaseSettings):
         default=None, alias="ezbak_action"
     )
     healthcheck_url: str | None = None
+
+    # Opt-in: take a final backup when the cron BACKUP loop receives SIGTERM/SIGINT,
+    # shrinking a sidecar's data-loss window to the orchestrator's kill grace period.
+    backup_on_shutdown: bool = False

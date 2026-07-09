@@ -167,9 +167,12 @@ have no CLI flag.
 | --- | --- | --- |
 | Action | `EZBAK_ACTION` | none |
 | Healthcheck URL | `EZBAK_HEALTHCHECK_URL` | `None` |
+| Backup on shutdown | `EZBAK_BACKUP_ON_SHUTDOWN` | `false` |
 
 `EZBAK_ACTION` is `backup` or `restore` and is required to run the container.
 `EZBAK_HEALTHCHECK_URL` pings a monitor after each scheduled run. See
-[Monitoring](../orchestration/monitoring.md).
+[Monitoring](../orchestration/monitoring.md). `EZBAK_BACKUP_ON_SHUTDOWN` takes
+one final backup when a cron backup container receives `SIGTERM` or `SIGINT`;
+see [Environment variables](environment-variables.md).
 
 *[gzip]: GNU zip compression

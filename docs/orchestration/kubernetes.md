@@ -133,6 +133,21 @@ The backup sidecar mounts `data` read-only, so it never modifies the app's live
 data, and its `preStop` hook captures the final state. All three share the
 `EZBAK_NAME` and bucket, so the backups follow the pod to any node.
 
+!!! warning "A shutdown backup runs inside the grace period"
+
+    Set `EZBAK_BACKUP_ON_SHUTDOWN: "true"` on the backup sidecar to back up once
+    more when it receives `SIGTERM`. Kubernetes holds the pod alive only for
+    `terminationGracePeriodSeconds`, which the `preStop` hook above also draws on,
+    so raise it to cover the backup:
+
+    ```yaml
+    spec:
+      terminationGracePeriodSeconds: 300
+    ```
+
+    If the backup outlasts the grace period, Kubernetes sends `SIGKILL` and the
+    backup is lost.
+
 !!! note "Match the volume to your workload"
 
     The example uses a `PersistentVolumeClaim` for `data`. Use the volume type

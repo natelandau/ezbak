@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import urllib.error
 from datetime import datetime
 from pathlib import Path
@@ -14,8 +15,9 @@ import time_machine
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel
-from ezbak.container import _ping_healthcheck, _run_scheduled, do_backup
+from ezbak.container import _ping_healthcheck, _run_scheduled, _run_shutdown_backup, do_backup
 from ezbak.container import main as entrypoint
+from ezbak.env import EnvConfig
 from ezbak.exceptions import BackupFailedError
 from ezbak.logging import instantiate_logger
 
@@ -49,6 +51,7 @@ def mock_os_environ(mocker):
     os.environ["EZBAK_LOG_LEVEL"] = ""
     os.environ["EZBAK_LOG_PREFIX"] = ""
     os.environ["EZBAK_RESTORE_IF_EXISTS"] = "false"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
     os.environ["EZBAK_TZ"] = "Etc/UTC"
 
 
@@ -95,6 +98,101 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
     # debug(output)
     assert "Scheduler started" in output
     assert "Next scheduled run" in output
+
+
+def _run_entrypoint_with_sigterm(mocker):
+    """Run the cron entrypoint and deliver a SIGTERM once the scheduler loop starts.
+
+    Keep the mocked scheduler reporting as running so only the delivered signal ends
+    the loop, then invoke the handler the entrypoint registered. This exercises the
+    real handler -> event -> loop-exit path without raising an OS signal that could
+    kill the test run if a regression left the handler unregistered.
+    """
+    scheduler = mocker.patch("ezbak.container.BackgroundScheduler").return_value
+    scheduler.running = True
+
+    handlers = {}
+
+    def capture_handler(signum, handler):
+        handlers[signum] = handler
+
+    mocker.patch("ezbak.container.signal.signal", side_effect=capture_handler)
+
+    # Deliver the signal the first time the loop sleeps. A KeyError here would mean the
+    # entrypoint never registered a SIGTERM handler, which fails the test cleanly.
+    def deliver_sigterm(*_args: object, **_kwargs: object) -> None:
+        handlers[signal.SIGTERM](signal.SIGTERM, None)
+
+    mocker.patch("time.sleep", side_effect=deliver_sigterm)
+
+    entrypoint()
+
+
+@time_machine.travel(frozen_time, tick=False)
+def test_entrypoint_cron_backup_on_shutdown_takes_final_backup(filesystem, capsys, mocker):
+    """Verify an opted-in cron backup container takes a final backup on SIGTERM."""
+    # Given a cron backup container that opted into backup-on-shutdown
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "*/1 * * * *"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When a SIGTERM arrives while the scheduler runs
+    _run_entrypoint_with_sigterm(mocker)
+
+    # Then a final backup was written on shutdown
+    output = capsys.readouterr().err
+    assert "Taking a final backup before shutdown" in output
+    assert Path(dest1 / f"test-{frozen_time_str}.tgz").exists()
+
+
+@time_machine.travel(frozen_time, tick=False)
+def test_entrypoint_cron_no_shutdown_backup_when_flag_off(filesystem, capsys, mocker):
+    """Verify a cron backup container takes no final backup on SIGTERM by default."""
+    # Given a cron backup container that did not opt in
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "*/1 * * * *"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    # When a SIGTERM arrives while the scheduler runs
+    _run_entrypoint_with_sigterm(mocker)
+
+    # Then no final backup was written on shutdown
+    output = capsys.readouterr().err
+    assert "Taking a final backup before shutdown" not in output
+    assert not Path(dest1 / f"test-{frozen_time_str}.tgz").exists()
+
+
+@time_machine.travel(frozen_time, tick=False)
+def test_entrypoint_cron_no_shutdown_backup_without_signal(filesystem, capsys):
+    """Verify no final backup runs when the loop ends without a shutdown signal."""
+    # Given an opted-in cron backup container. The autouse mock_run fixture leaves the
+    # scheduler reporting not-running, so the loop exits on its own with no signal
+    # delivered and the shutdown event never set.
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "*/1 * * * *"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    entrypoint()
+
+    # Then the shutdown backup is gated on an actual signal and does not run
+    output = capsys.readouterr().err
+    assert "Taking a final backup before shutdown" not in output
+    assert not Path(dest1 / f"test-{frozen_time_str}.tgz").exists()
 
 
 def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
@@ -200,6 +298,98 @@ def test_entrypoint_invalid_config_exits_cleanly(capsys):
 
     # Then a clean validation message is logged instead of a raw pydantic traceback
     assert "No backup name provided" in capsys.readouterr().err
+
+
+def test_backup_on_shutdown_defaults_off(filesystem):
+    """Verify backup_on_shutdown is off when EZBAK_BACKUP_ON_SHUTDOWN is unset."""
+    # Given no backup-on-shutdown env var
+    src_dir, dest1, _ = filesystem
+    os.environ.pop("EZBAK_BACKUP_ON_SHUTDOWN", None)
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then the flag defaults off
+    config = EnvConfig(_env_file=None)
+    assert config.backup_on_shutdown is False
+
+
+def test_backup_on_shutdown_parses_true(filesystem):
+    """Verify EZBAK_BACKUP_ON_SHUTDOWN=true populates the bool field."""
+    # Given the flag set to a truthy string
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then the flag is enabled
+    config = EnvConfig(_env_file=None)
+    assert config.backup_on_shutdown is True
+
+
+def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
+    """Verify a cron BACKUP container takes a final backup on shutdown when opted in."""
+    # Given a backup container that opted into backup-on-shutdown
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(_env_file=None)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    mock_scheduled = mocker.patch("ezbak.container._run_scheduled", autospec=True)
+    scheduler = mocker.MagicMock()
+
+    # When shutting down
+    _run_shutdown_backup(app, scheduler, config)
+
+    # Then the final backup runs through the same path as a scheduled run
+    mock_scheduled.assert_called_once_with(app, scheduler, config.healthcheck_url, do_backup)
+
+
+def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
+    """Verify no final backup runs on shutdown when the flag is not set."""
+    # Given a backup container that did not opt in
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(_env_file=None)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    mock_scheduled = mocker.patch("ezbak.container._run_scheduled", autospec=True)
+
+    # When shutting down, then no final backup is taken
+    _run_shutdown_backup(app, mocker.MagicMock(), config)
+    mock_scheduled.assert_not_called()
+
+
+def test_run_shutdown_backup_skips_for_restore_action(filesystem, mocker):
+    """Verify a restore container never takes a backup on shutdown, even if opted in."""
+    # Given a restore container with the flag set (a final backup would be meaningless)
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(_env_file=None)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    mock_scheduled = mocker.patch("ezbak.container._run_scheduled", autospec=True)
+
+    # When shutting down, then no backup is taken
+    _run_shutdown_backup(app, mocker.MagicMock(), config)
+    mock_scheduled.assert_not_called()
 
 
 def test_ping_healthcheck_success_pings_base_url(mocker):

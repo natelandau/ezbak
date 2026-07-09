@@ -132,6 +132,20 @@ backups reachable from any host the job lands on.
   never modify the service's live data.
 - All three point at the same `EZBAK_AWS_S3_BUCKET_NAME` and `EZBAK_NAME`.
 
+!!! warning "A shutdown backup races the kill timeout"
+
+    Set `EZBAK_BACKUP_ON_SHUTDOWN = "true"` on the backup sidecar to back up once
+    more when Nomad stops it. Nomad holds the allocation alive only for the task's
+    `kill_timeout`, so raise it to cover the backup:
+
+    ```hcl
+    kill_timeout = "5m"
+    ```
+
+    If the backup outlasts `kill_timeout`, Nomad force-kills the task and the
+    backup is lost. The `poststop` task above runs as its own step with its own
+    window, so it is the more reliable choice for backups that can run long.
+
 !!! tip "Keep credentials out of the jobspec"
 
     The example shows a bucket name inline for clarity. In practice, source

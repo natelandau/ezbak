@@ -37,6 +37,7 @@ CLI flag.
 | `EZBAK_ACTION` | `backup` or `restore` | The action to run. Required. |
 | `EZBAK_CRON` | a cron expression | Run the action on a schedule instead of once. |
 | `EZBAK_HEALTHCHECK_URL` | a URL | Ping a monitor after each scheduled run. |
+| `EZBAK_BACKUP_ON_SHUTDOWN` | `true` or `false` | Take a final backup when a scheduled backup container shuts down. Default `false`. |
 | `TZ` | an IANA timezone | System timezone for backup timestamps. |
 
 Without `EZBAK_ACTION`, the container logs an error and exits non-zero. Without
@@ -84,6 +85,46 @@ docker run -d \
 
 A scheduled backup run also prunes afterward using the retention options you set,
 so old backups do not accumulate.
+
+## A final backup on shutdown
+
+A scheduled backup container backs up on its cron interval, so a shutdown between
+runs loses everything written since the last run. Set
+`EZBAK_BACKUP_ON_SHUTDOWN=true` to take one final backup when the container
+receives `SIGTERM` or `SIGINT`. This caps the loss at a single interval.
+
+```bash
+docker run -d \
+    --name ezbak-scheduled \
+    -v /path/to/source:/source:ro \
+    -v /path/to/backups:/backups \
+    -e EZBAK_ACTION=backup \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_SOURCE_PATHS=/source \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_CRON="0 2 * * *" \
+    -e EZBAK_BACKUP_ON_SHUTDOWN=true \
+    ghcr.io/natelandau/ezbak:latest
+```
+
+The flag applies only to a cron backup container. It does nothing for a restore
+container or a one-shot run, neither of which has a schedule to shut down.
+
+!!! warning "The final backup runs inside the kill grace period"
+
+    An orchestrator sends `SIGTERM`, waits a grace period, then force-kills the
+    container with `SIGKILL`. The final backup must finish within that window, or
+    it is cut off and lost. The orchestrator holds the allocation alive only for
+    that grace period, and the backup extends every shutdown by however long it
+    runs.
+
+    A shutdown backup is therefore riskier than a dedicated post-stop task, such
+    as Nomad's `poststop` lifecycle, which runs as its own step with its own
+    completion window. Prefer that for backups that can run long; reach for
+    `EZBAK_BACKUP_ON_SHUTDOWN` when the backup sidecar needs to stand on its own.
+    Size the grace period to cover a backup of your data: Nomad's `kill_timeout`
+    and Kubernetes' `terminationGracePeriodSeconds`. See the [orchestration
+    examples](../orchestration/index.md).
 
 ## Timezone: TZ and EZBAK_TZ
 
