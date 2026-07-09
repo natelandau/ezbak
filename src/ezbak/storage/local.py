@@ -6,7 +6,7 @@ from loguru import logger
 from nclutils.fs import copy_file, find_files
 
 from ezbak.backup import Backup, StorageLocation
-from ezbak.checksums import format_sidecar, parse_sidecar, sidecar_name
+from ezbak.checksums import is_sidecar, sidecar_name
 from ezbak.constants import BACKUP_EXTENSION, StorageType
 from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
@@ -32,6 +32,10 @@ class LocalBackend(StorageBackend):
             found_files = find_files(
                 path=storage_path, globs=[f"*{self.settings.name}*.{BACKUP_EXTENSION}"]
             )
+            # The `.tgz` glob already excludes `.sha256` sidecars, but filter
+            # explicitly through the shared definition so the exclusion cannot
+            # regress if the glob is ever loosened.
+            found_files = [f for f in found_files if not is_sidecar(f.name)]
             location = self._build_storage_location(
                 storage_path=storage_path,
                 backups=[
@@ -80,23 +84,15 @@ class LocalBackend(StorageBackend):
             raise StorageWriteError(msg) from e
         logger.info(f"Created: {backup_path}")
 
-        if checksum is not None:
-            sidecar_path = backup_path.parent / sidecar_name(backup_path.name)
-            try:
-                sidecar_path.write_text(
-                    format_sidecar(digest=checksum, archive_name=backup_path.name)
-                )
-            except OSError as e:
-                # Best-effort: the archive is intact, just unverifiable later.
-                logger.warning(f"Failed to write checksum sidecar '{sidecar_path}': {e}")
-
-        return Backup(
+        backup = Backup(
             storage_type=StorageType.LOCAL,
             name=backup_path.name,
             path=backup_path,
             storage_path=storage_location.storage_path,
             tz=self.settings.tz,
         )
+        self._store_sidecar(backup=backup, checksum=checksum)
+        return backup
 
     def delete(self, backup: Backup) -> bool:
         """Unlink a local backup file, tolerating one already removed elsewhere.
@@ -117,7 +113,7 @@ class LocalBackend(StorageBackend):
         try:
             backup.path.unlink()
             logger.info(f"Deleted: {backup.path}")
-            self._delete_sidecar(backup.path)
+            self._remove_sidecar(backup)
         except OSError as e:
             logger.warning(f"Missing, not deleted: {backup.path} (errno={e.errno}: {e.strerror})")
             # Forensics for shared-storage cache skew: if the directory listing still
@@ -135,13 +131,31 @@ class LocalBackend(StorageBackend):
             return False
         return True
 
-    def _delete_sidecar(self, archive_path: Path) -> None:  # noqa: PLR6301
-        """Remove the checksum sidecar next to an archive; tolerate its absence.
+    def _write_sidecar(self, *, backup: Backup, content: str) -> None:  # noqa: PLR6301
+        """Write the sidecar file next to a local archive; a failure warns and is tolerated.
 
         Args:
-            archive_path (Path): The archive whose sidecar should be removed.
+            backup (Backup): The backup the sidecar belongs to.
+            content (str): The sidecar file content.
         """
-        sidecar_path = archive_path.parent / sidecar_name(archive_path.name)
+        if backup.path is None:
+            return
+        sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
+        try:
+            sidecar_path.write_text(content)
+        except OSError as e:
+            # Best-effort: the archive is intact, just unverifiable later.
+            logger.warning(f"Failed to write checksum sidecar '{sidecar_path}': {e}")
+
+    def _remove_sidecar(self, backup: Backup) -> None:  # noqa: PLR6301
+        """Remove the checksum sidecar next to a local archive; tolerate its absence.
+
+        Args:
+            backup (Backup): The backup whose sidecar should be removed.
+        """
+        if backup.path is None:
+            return
+        sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
         try:
             sidecar_path.unlink(missing_ok=True)
         except OSError as e:
@@ -171,20 +185,20 @@ class LocalBackend(StorageBackend):
         logger.info(f"Restoring backup from local: {backup.name}")
         return backup.path
 
-    def get_checksum(self, backup: Backup) -> str | None:  # noqa: PLR6301
-        """Read the expected digest from the sidecar next to a local archive.
+    def _read_sidecar(self, backup: Backup) -> str | None:  # noqa: PLR6301
+        """Return the raw sidecar content next to a local archive, or None if unreadable.
 
         Args:
             backup (Backup): The backup to look up.
 
         Returns:
-            str | None: The stored digest, or None if the sidecar is absent or unusable.
+            str | None: The sidecar content, or None if it is absent or unreadable.
         """
         if backup.path is None:
             return None
         sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
         try:
-            content = sidecar_path.read_text()
+            return sidecar_path.read_text()
         except FileNotFoundError:
             return None
         except (OSError, UnicodeDecodeError) as e:
@@ -193,4 +207,3 @@ class LocalBackend(StorageBackend):
             # not crash the restore.
             logger.warning(f"Could not read checksum sidecar '{sidecar_path}': {e}")
             return None
-        return parse_sidecar(content)
