@@ -1,3 +1,7 @@
+---
+icon: lucide/download
+---
+
 # Installation
 
 ezbak ships as three things from one codebase: a Docker container, a Python

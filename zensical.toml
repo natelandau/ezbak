@@ -52,18 +52,18 @@ Copyright &copy; 2026 Nate Landau
 #
 # Read more: https://zensical.org/docs/setup/navigation/
 nav = [
-  { "Home" = "index.md" },
-  { "Getting started" = [
+  { "Home" = [
+    "index.md",
     "getting-started/installation.md",
     "getting-started/quickstart.md",
-    "upgrading.md",
   ] },
-  { "Orchestration" = [
-    "orchestration/index.md",
-    "orchestration/nomad.md",
-    "orchestration/kubernetes.md",
-    "orchestration/fresh-deploys.md",
-    "orchestration/monitoring.md",
+  { "Concepts" = [
+    "concepts/backup-names.md",
+    "concepts/storage-locations.md",
+    "concepts/filtering.md",
+    "concepts/retention.md",
+    "concepts/checksums.md",
+    "concepts/failure-behavior.md",
   ] },
   { "Guides" = [
     "guides/docker.md",
@@ -71,13 +71,13 @@ nav = [
     "guides/python.md",
     "guides/s3.md",
     "guides/restore.md",
-    "guides/retention.md",
-  ] },
-  { "Concepts" = [
-    "concepts/backup-names.md",
-    "concepts/storage-locations.md",
-    "concepts/filtering.md",
-    "concepts/failure-behavior.md",
+    { "Orchestration" = [
+      "orchestration/index.md",
+      "orchestration/nomad.md",
+      "orchestration/kubernetes.md",
+      "orchestration/fresh-deploys.md",
+      "orchestration/monitoring.md",
+    ] },
   ] },
   { "Reference" = [
     "reference/configuration.md",

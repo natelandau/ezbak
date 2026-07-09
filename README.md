@@ -26,15 +26,40 @@ ezbak requires Python 3.11 or higher.
 
 ## Quickstart
 
+Each interface runs the same backup. Every example below writes a
+`my-backup-<timestamp>.tgz` archive to the storage location.
+
+Python:
+
 ```python
 from ezbak import ezbak
 
-backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backups"], max_backups=7)
+backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backups"], keep_last=7)
 backups.create_backup()
 backups.restore_backup(restore_path="/restore")
 ```
 
-The command line and container do the same work. See the [quickstart](https://natelandau.github.io/ezbak/getting-started/quickstart/) for all three.
+Command line:
+
+```bash
+ezbak --name my-backup --storage ~/Backups create --source ~/Documents
+```
+
+Container:
+
+```bash
+docker run -it \
+    -v /path/to/source:/source:ro \
+    -v /path/to/backups:/backups \
+    -e EZBAK_ACTION=backup \
+    -e EZBAK_NAME=my-backup \
+    -e EZBAK_SOURCE_PATHS=/source \
+    -e EZBAK_STORAGE_PATHS=/backups \
+    -e EZBAK_KEEP_LAST=7 \
+    ghcr.io/natelandau/ezbak:latest
+```
+
+See the [quickstart](https://natelandau.github.io/ezbak/getting-started/quickstart/) for listing and restoring across all three.
 
 ## Contributing
 

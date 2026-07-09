@@ -1,31 +1,23 @@
+---
+icon: lucide/settings
+---
+
 # Configuration reference
 
-Every ezbak option lives on one schema: the `BackupConfig` model. The library
-takes a `BackupConfig` directly, the container reads the same fields from
-`EZBAK_`-prefixed environment variables, and the CLI maps its own flags onto
-them. This page lists every option, its default, and its name on all three
-surfaces.
+ezbak takes the same options three ways: as `EZBAK_` environment variables (the
+container), as command-line flags, or as arguments to the Python library's
+`BackupConfig`. Each table below gives an option's library field, environment
+variable, CLI flag, and default, so you never have to translate between surfaces.
 
-## How the three surfaces map
+The environment variable is the field name uppercased with an `EZBAK_` prefix, so
+`source_paths` becomes `EZBAK_SOURCE_PATHS`. CLI flags use their own names, which
+do not always match, and some sit on a subcommand such as `create` or `prune`.
 
-Each `BackupConfig` field is also an environment variable: uppercase the field
-name and add the `EZBAK_` prefix, so `source_paths` becomes `EZBAK_SOURCE_PATHS`.
-The CLI uses its own flag names, which do not always match the field name, and a
-few flags sit on a subcommand rather than the top-level command.
+A few things to know before the tables:
 
-```mermaid
-graph LR
-  A["EZBAK_ env vars"] --> C["BackupConfig"]
-  B["CLI flags"] --> C
-  D["BackupConfig(...)<br/>library call"] --> C
-  C --> E["EZBak"]
-```
-
-Three details follow from this design:
-
-- Some options have no CLI flag and are read only from the environment
-  (`aws_access_key`, `aws_secret_key`, `tz`). Credentials stay out of your shell
-  history this way.
+- Credentials and a couple of other options are read only from the environment,
+  with no CLI flag (`aws_access_key`, `aws_secret_key`, `tz`). This keeps
+  credentials out of your shell history.
 - Some options apply only to the container (`cron`, `EZBAK_ACTION`,
   `healthcheck_url`). See the [environment variables](environment-variables.md)
   reference.
@@ -80,7 +72,7 @@ example `my-documents-20241215T143022.tgz.sha256` alongside
 `sha256sum`, so `sha256sum -c` verifies it too. Setting `write_checksums` to
 `false` only stops ezbak from generating new sidecars: a restore always
 verifies a sidecar that is already present, no matter how this option is set.
-See [Restore backups](../guides/restore.md).
+See [Archive integrity checksums](../concepts/checksums.md).
 
 !!! warning "delete_source_after_backup removes your source data"
 
@@ -105,7 +97,7 @@ rule marks it, so the rules compose instead of picking one policy.
 | `keep_minutely` | `EZBAK_KEEP_MINUTELY` | `prune -S`, `--keep-minutely` | `None` |
 
 With no rule set, ezbak keeps every backup. Leaving a rule unset, or setting it
-to `0`, marks nothing for that rule. See [Retention policies](../guides/retention.md).
+to `0`, marks nothing for that rule. See [Retention policies](../concepts/retention.md).
 
 ## Restore
 
@@ -153,7 +145,7 @@ backup timestamps. When `tz` is unset, ezbak uses the system timezone, which the
 | `log_file` | `EZBAK_LOG_FILE` | `--log-file` | `None` |
 | `log_prefix` | `EZBAK_LOG_PREFIX` | `--log-prefix` | `None` |
 
-`log_level` accepts `TRACE`, `DEBUG`, `INFO`, `WARNING`, or `ERROR`. On the CLI,
+`log_level` accepts `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. On the CLI,
 `-v` raises the level to `DEBUG` and `-vv` to `TRACE`. `log_file` also writes
 logs to a file. `log_prefix` adds a prefix to every log line, which helps when
 several ezbak tasks share one log stream.

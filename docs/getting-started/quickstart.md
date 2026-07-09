@@ -1,7 +1,11 @@
+---
+icon: lucide/rocket
+---
+
 # Quickstart
 
 This is the shortest path to a first backup. Pick the interface you installed,
-make a backup, and restore it. Each example keeps the most recent seven backups.
+make a backup, and restore it.
 
 ## Make a backup
 
@@ -34,7 +38,6 @@ make a backup, and restore it. Each example keeps the most recent seven backups.
         name="my-backup",
         source_paths=["/data"],
         storage_paths=["/backups"],
-        keep_last=7,
     )
     backups.create_backup()
     ```
@@ -104,7 +107,7 @@ That is a full cycle: create, list, restore.
 
     Combine a fixed count with time-based rules that compose.
 
-    [:octicons-arrow-right-24: Retention policies](../guides/retention.md)
+    [:octicons-arrow-right-24: Retention policies](../concepts/retention.md)
 
 -   :material-cloud-upload-outline: __Back up to S3__
 

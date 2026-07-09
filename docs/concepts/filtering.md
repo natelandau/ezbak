@@ -1,7 +1,12 @@
+---
+icon: lucide/filter
+---
+
 # Including and excluding files
 
-By default ezbak backs up every file under your source paths. Two regex options
-narrow that selection, and a small set of noise files is always skipped.
+By default ezbak backs up every regular file under your source paths. Two regex
+options narrow that selection, a small set of noise files is always skipped, and
+symlinks are never followed.
 
 ## Always-excluded files
 
@@ -16,6 +21,12 @@ ezbak never archives these names, regardless of your other settings:
 
 These are operating-system and tooling artifacts that add noise to a backup and
 never need restoring.
+
+!!! note "Symlinks are skipped"
+
+    ezbak does not follow symbolic links. It logs a warning for each one and
+    leaves it out of the archive, so a backup never escapes the source tree
+    through a link.
 
 ## Include and exclude regex
 

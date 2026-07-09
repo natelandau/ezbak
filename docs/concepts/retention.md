@@ -1,3 +1,7 @@
+---
+icon: lucide/history
+---
+
 # Retention policies
 
 Backups accumulate. A retention policy decides which ones to keep and which to prune.

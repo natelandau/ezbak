@@ -1,3 +1,7 @@
+---
+icon: lucide/square-terminal
+---
+
 # CLI reference
 
 The `ezbak` command wraps the same configuration the library and container use.
@@ -41,6 +45,7 @@ Create a backup archive of one or more sources.
 | `--exclude-regex` | `-e` | Skip files whose path matches this regex. | |
 | `--strip-source-paths` | `-s` | Flatten directory sources in the archive. | `False` |
 | `--compression-level` | `-c` | gzip level, 1 to 9. | `9` |
+| `--write-checksums` / `--no-write-checksums` | | Write a `.sha256` sidecar next to each backup, verified on restore. | `True` |
 
 ```bash
 ezbak --name my-documents --storage ~/Backups create --source ~/Documents
@@ -55,14 +60,15 @@ command takes no options beyond the global ones.
 ezbak --name my-documents --storage ~/Backups list
 ```
 
-Each line includes the full `YYYYMMDDTHHMMSS` timestamp, which you can pass back
-to `restore --restore-date` to restore that exact backup.
+Each line shows the backup's filename, which includes the full
+`YYYYMMDDTHHMMSS` timestamp. Pass that timestamp to `restore --restore-date` to
+restore that exact backup.
 
 ## prune
 
-Delete old backups according to a retention policy. Set one or more keep
-rules; a backup survives if any rule marks it, so the rules compose instead of
-picking one policy.
+Delete old backups according to your keep rules. Set one or more; a backup
+survives if any rule marks it, so the rules compose rather than forcing a single
+choice.
 
 | Option | Short | Description | Default |
 | --- | --- | --- | --- |
@@ -74,6 +80,7 @@ picking one policy.
 | `--keep-hourly` | `-H` | Hourly backups to keep. | |
 | `--keep-minutely` | `-S` | Minutely backups to keep. | |
 | `--dry-run` | | List what would be deleted without deleting. | `False` |
+| `--force` | | Skip the confirmation prompt and prune immediately. | `False` |
 
 ```bash
 # Keep the 10 most recent
@@ -81,6 +88,14 @@ ezbak --name my-documents --storage ~/Backups prune --keep-last 10
 
 # Preview only
 ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --dry-run
+```
+
+Prune asks for confirmation before it deletes. Add `--force` to skip the prompt
+in a non-interactive script; `--dry-run` skips it too, since it deletes nothing.
+
+```bash
+# Prune without the confirmation prompt
+ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --force
 ```
 
 ## restore
