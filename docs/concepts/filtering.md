@@ -35,7 +35,7 @@ EZBak(
         storage_paths=[Path("/backups")],
         include_regex=r"\.log$",   # only .log files
         exclude_regex=r"debug",    # skip anything matching "debug"
-        max_backups=10,
+        keep_last=10,
     )
 )
 ```

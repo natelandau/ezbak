@@ -91,21 +91,21 @@ See [Restore backups](../guides/restore.md).
 
 ## Retention
 
-Choose one policy. Count-based and time-based retention cannot combine: if
-`max_backups` is set, the time-based options are ignored.
+Each retention field sets one keep rule. A backup survives pruning if any set
+rule marks it, so the rules compose instead of picking one policy.
 
 | Field | Environment variable | CLI flag | Default |
 | --- | --- | --- | --- |
-| `max_backups` | `EZBAK_MAX_BACKUPS` | `prune -x`, `--max-backups` | `None` |
-| `retention_yearly` | `EZBAK_RETENTION_YEARLY` | `prune -Y`, `--yearly` | `None` |
-| `retention_monthly` | `EZBAK_RETENTION_MONTHLY` | `prune -M`, `--monthly` | `None` |
-| `retention_weekly` | `EZBAK_RETENTION_WEEKLY` | `prune -W`, `--weekly` | `None` |
-| `retention_daily` | `EZBAK_RETENTION_DAILY` | `prune -D`, `--daily` | `None` |
-| `retention_hourly` | `EZBAK_RETENTION_HOURLY` | `prune -H`, `--hourly` | `None` |
-| `retention_minutely` | `EZBAK_RETENTION_MINUTELY` | `prune -S`, `--minutely` | `None` |
+| `keep_last` | `EZBAK_KEEP_LAST` | `prune --keep-last` | `None` |
+| `keep_yearly` | `EZBAK_KEEP_YEARLY` | `prune -Y`, `--keep-yearly` | `None` |
+| `keep_monthly` | `EZBAK_KEEP_MONTHLY` | `prune -M`, `--keep-monthly` | `None` |
+| `keep_weekly` | `EZBAK_KEEP_WEEKLY` | `prune -W`, `--keep-weekly` | `None` |
+| `keep_daily` | `EZBAK_KEEP_DAILY` | `prune -D`, `--keep-daily` | `None` |
+| `keep_hourly` | `EZBAK_KEEP_HOURLY` | `prune -H`, `--keep-hourly` | `None` |
+| `keep_minutely` | `EZBAK_KEEP_MINUTELY` | `prune -S`, `--keep-minutely` | `None` |
 
-With no retention option set, ezbak keeps every backup. With any time-based
-option set, each unset period keeps 1. See [Retention policies](../guides/retention.md).
+With no rule set, ezbak keeps every backup. Leaving a rule unset, or setting it
+to `0`, marks nothing for that rule. See [Retention policies](../guides/retention.md).
 
 ## Restore
 

@@ -39,7 +39,7 @@ docker run -it \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_SOURCE_PATHS=/source \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_MAX_BACKUPS=7 \
+    -e EZBAK_KEEP_LAST=7 \
     ghcr.io/natelandau/ezbak:latest
 ```
 
@@ -58,7 +58,7 @@ docker run -d \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_SOURCE_PATHS=/source \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_MAX_BACKUPS=7 \
+    -e EZBAK_KEEP_LAST=7 \
     -e EZBAK_CRON="0 2 * * *" \
     -e TZ=America/New_York \
     ghcr.io/natelandau/ezbak:latest
@@ -111,7 +111,7 @@ services:
       EZBAK_NAME: my-backup
       EZBAK_SOURCE_PATHS: /source
       EZBAK_STORAGE_PATHS: /backups
-      EZBAK_MAX_BACKUPS: 7
+      EZBAK_KEEP_LAST: 7
       EZBAK_CRON: "0 2 * * *"
       TZ: America/New_York
 ```
