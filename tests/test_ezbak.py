@@ -858,3 +858,15 @@ def test_restore_verifies_good_archive(filesystem, tmp_path) -> None:
     # source directory's own name (matches the convention used by other restore
     # tests in this file, e.g. test_exclude_regex).
     assert (restore_dir / src_dir.name / "foo.txt").exists()
+
+
+def test_local_prune_deletes_sidecar(filesystem) -> None:
+    """Verify prune removes a pruned archive's sidecar, leaving none orphaned."""
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], max_backups=1)
+    app.create_backup()
+    app.create_backup()
+    app.prune_backups()
+
+    assert len(list(dest1.glob("*.tgz"))) == 1
+    assert len(list(dest1.glob("*.sha256"))) == 1

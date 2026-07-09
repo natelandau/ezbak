@@ -8,7 +8,7 @@ from loguru import logger
 from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import format_sidecar, parse_sidecar, sidecar_name
 from ezbak.config import BackupConfig
-from ezbak.constants import StorageType
+from ezbak.constants import CHECKSUM_EXTENSION, StorageType
 from ezbak.exceptions import StorageDeleteError, StorageReadError, StorageWriteError
 from ezbak.naming import new_staging_filename
 from ezbak.storage.aws import AWSService
@@ -43,6 +43,10 @@ class S3Backend(StorageBackend):
         """
         logger.trace("Indexing S3 storage location")
         found_backups = self.aws_service.list_objects(prefix=self.settings.name)
+
+        # The prefix listing returns sidecars too; drop them so a .sha256 is never
+        # parsed as a spurious Backup and counted against retention.
+        found_backups = [key for key in found_backups if not key.endswith(f".{CHECKSUM_EXTENSION}")]
 
         if self.settings.aws_s3_bucket_prefix:
             found_backups = [
@@ -144,6 +148,14 @@ class S3Backend(StorageBackend):
             logger.error(msg)
             raise StorageDeleteError(msg) from e
         logger.info(f"Deleted from S3: {backup.name}")
+
+        # Remove the sidecar alongside the archive. S3 DeleteObject is idempotent for
+        # absent keys, so a pre-feature backup with no sidecar is unaffected.
+        try:
+            self.aws_service.delete_object(key=sidecar_name(backup.name))
+        except (BotoCoreError, ClientError) as e:
+            logger.warning(f"Failed to delete checksum sidecar for '{backup.name}': {e}")
+
         return True
 
     def delete_many(self, backups: list[Backup]) -> list[Backup]:
@@ -165,7 +177,11 @@ class S3Backend(StorageBackend):
         # keys the API returns (which carry the bucket prefix) can be reported as the
         # Backup objects that were actually removed, not just the ones targeted.
         backup_by_key = {self.aws_service.build_full_key(x.name): x for x in backups}
-        keys = list(backup_by_key)
+        # Delete each archive's sidecar in the same batches. DeleteObjects is
+        # idempotent for absent keys, so pre-feature backups are unaffected. Sidecar
+        # keys are not mapped back to Backups: only archives count as confirmed deleted.
+        sidecar_keys = [self.aws_service.build_full_key(sidecar_name(x.name)) for x in backups]
+        keys = list(backup_by_key) + sidecar_keys
         logger.debug(f"Deleting {len(keys)} S3 backups")
         deleted: list[Backup] = []
         try:

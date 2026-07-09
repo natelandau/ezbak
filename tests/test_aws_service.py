@@ -61,3 +61,41 @@ def test_s3_restore_rejects_corrupt_archive(s3_bucket: str, filesystem, tmp_path
     restore_dir.mkdir()
     with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
         app.restore_backup(restore_path=restore_dir)
+
+
+def test_s3_index_excludes_sidecars(s3_bucket: str, filesystem) -> None:
+    """Verify list_backups does not count the .sha256 sidecar as a backup."""
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    app.create_backup()  # writes one archive + one sidecar
+
+    # The sidecar object must not be indexed as a backup.
+    assert len(app.list_backups()) == 1
+
+
+def test_s3_prune_deletes_sidecars(s3_bucket: str, filesystem) -> None:
+    """Verify prune removes each pruned archive's sidecar, leaving none orphaned."""
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+        max_backups=1,
+    )
+    app.create_backup()
+    app.create_backup()  # two archives + two sidecars; retention keeps 1
+    app.prune_backups()
+
+    client = boto3.client("s3", region_name="us-east-1")
+    keys = [o["Key"] for o in client.list_objects_v2(Bucket=s3_bucket).get("Contents", [])]
+    # One archive and its one sidecar remain; no orphaned .sha256.
+    assert sum(k.endswith(".sha256") for k in keys) == 1
+    assert sum(k.endswith(".tgz") for k in keys) == 1

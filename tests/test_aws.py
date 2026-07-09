@@ -512,10 +512,13 @@ def test_s3_delete_many_chunks_large_batches(s3_bucket, filesystem, mocker):
         backend.aws_service, "delete_objects", side_effect=lambda keys: keys
     )
 
-    # When deleting, then it issues two chunked requests (1000 + 500) and returns all deleted
+    # When deleting, then each archive's sidecar key rides along in the same batches,
+    # doubling the key count to 3000 (1500 archives + 1500 sidecars), chunked into
+    # three requests of 1000 keys each. Only archives count as confirmed deleted.
     deleted = backend.delete_many(backups)
     assert len(deleted) == 1500
     assert deleted == backups
-    assert delete_spy.call_count == 2
+    assert delete_spy.call_count == 3
     assert len(delete_spy.call_args_list[0].kwargs["keys"]) == 1000
-    assert len(delete_spy.call_args_list[1].kwargs["keys"]) == 500
+    assert len(delete_spy.call_args_list[1].kwargs["keys"]) == 1000
+    assert len(delete_spy.call_args_list[2].kwargs["keys"]) == 1000

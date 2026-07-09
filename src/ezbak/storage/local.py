@@ -96,7 +96,7 @@ class LocalBackend(StorageBackend):
             tz=self.settings.tz,
         )
 
-    def delete(self, backup: Backup) -> bool:  # noqa: PLR6301
+    def delete(self, backup: Backup) -> bool:
         """Unlink a local backup file, tolerating one already removed elsewhere.
 
         Args:
@@ -112,6 +112,7 @@ class LocalBackend(StorageBackend):
         try:
             backup.path.unlink()
             logger.info(f"Deleted: {backup.path}")
+            self._delete_sidecar(backup.path)
         except OSError as e:
             logger.warning(f"Missing, not deleted: {backup.path} (errno={e.errno}: {e.strerror})")
             # Forensics for shared-storage cache skew: if the directory listing still
@@ -128,6 +129,18 @@ class LocalBackend(StorageBackend):
                 logger.debug(f"Post-failure check failed: {check_error}")
             return False
         return True
+
+    def _delete_sidecar(self, archive_path: Path) -> None:  # noqa: PLR6301
+        """Remove the checksum sidecar next to an archive; tolerate its absence.
+
+        Args:
+            archive_path (Path): The archive whose sidecar should be removed.
+        """
+        sidecar_path = archive_path.parent / sidecar_name(archive_path.name)
+        try:
+            sidecar_path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"Failed to delete checksum sidecar '{sidecar_path}': {e}")
 
     def delete_many(self, backups: list[Backup]) -> list[Backup]:
         """Delete each local backup individually.
