@@ -138,6 +138,10 @@ class BackupConfig(BaseModel):
     aws_s3_bucket_name: str | None = None
     aws_s3_bucket_prefix: str | None = None
     aws_secret_key: str | None = None
+    # Default None so boto3's standard resolution stays intact: region falls back to
+    # AWS_REGION/AWS_DEFAULT_REGION/~/.aws/config, endpoint to the AWS default.
+    aws_region: str | None = None
+    aws_s3_endpoint_url: str | None = None
 
     _cached_retention_policy: RetentionPolicyManager | None = PrivateAttr(default=None)
 

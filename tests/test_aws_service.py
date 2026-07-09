@@ -6,7 +6,7 @@ import boto3
 import pytest
 
 from ezbak import ezbak
-from ezbak.exceptions import RestoreFailedError
+from ezbak.exceptions import RestoreFailedError, StorageInitError
 from ezbak.storage.aws import AWSService
 
 
@@ -108,6 +108,68 @@ def _service(bucket: str, prefix: str | None = None) -> AWSService:
     return AWSService(
         aws_access_key="k", aws_secret_key="s", bucket_name=bucket, bucket_path=prefix
     )
+
+
+def test_service_forwards_region_and_endpoint_to_client(mocker) -> None:
+    """Verify AWSService hands region and endpoint to boto3.client."""
+    # Given a patched boto3.client so no real S3 call is made
+    mock_client = mocker.patch("ezbak.storage.aws.boto3.client", autospec=True)
+
+    # When constructing the service with an explicit region and endpoint
+    AWSService(
+        aws_access_key="k",
+        aws_secret_key="s",
+        bucket_name="b",
+        region="eu-west-1",
+        endpoint_url="https://minio.example.com",
+    )
+
+    # Then both are forwarded to the client for S3-compatible targets
+    _, kwargs = mock_client.call_args
+    assert kwargs["region_name"] == "eu-west-1"
+    assert kwargs["endpoint_url"] == "https://minio.example.com"
+
+
+def test_service_defaults_region_and_endpoint_to_none(mocker) -> None:
+    """Verify an unset region and endpoint pass None so boto3 resolution stays intact."""
+    # Given a patched boto3.client
+    mock_client = mocker.patch("ezbak.storage.aws.boto3.client", autospec=True)
+
+    # When constructing the service without a region or endpoint
+    AWSService(aws_access_key="k", aws_secret_key="s", bucket_name="b")
+
+    # Then None is forwarded, deferring to boto3's standard resolution
+    _, kwargs = mock_client.call_args
+    assert kwargs["region_name"] is None
+    assert kwargs["endpoint_url"] is None
+
+
+def test_service_blank_region_and_endpoint_normalized_to_none(mocker) -> None:
+    """Verify blank region/endpoint strings are normalized to None, not passed verbatim."""
+    # Given a patched boto3.client and blank settings (e.g. EZBAK_AWS_REGION= in a template)
+    mock_client = mocker.patch("ezbak.storage.aws.boto3.client", autospec=True)
+
+    # When constructing the service with empty strings
+    AWSService(aws_access_key="k", aws_secret_key="s", bucket_name="b", region="", endpoint_url="")
+
+    # Then None is forwarded so boto3 resolves normally instead of building an invalid endpoint
+    _, kwargs = mock_client.call_args
+    assert kwargs["region_name"] is None
+    assert kwargs["endpoint_url"] is None
+
+
+def test_service_malformed_endpoint_raises_storage_init_error() -> None:
+    """Verify a malformed endpoint fails as StorageInitError, not a raw ValueError."""
+    # Given an endpoint missing its scheme (boto3 rejects it at client construction)
+    # When constructing the service
+    # Then the failure surfaces as StorageInitError so core.py records a failed location
+    with pytest.raises(StorageInitError):
+        AWSService(
+            aws_access_key="k",
+            aws_secret_key="s",
+            bucket_name="b",
+            endpoint_url="minio.example.com",
+        )
 
 
 def test_build_full_key_with_and_without_prefix(s3_bucket: str) -> None:

@@ -71,6 +71,47 @@ def test_envconfig_reads_restore_date(monkeypatch):
     assert config.restore_date == "20250102"
 
 
+def test_backupconfig_accepts_region_and_endpoint():
+    """Verify BackupConfig accepts the S3 region and endpoint fields."""
+    # Given a config with an explicit region and S3-compatible endpoint
+    config = BackupConfig(
+        name="x",
+        aws_s3_bucket_name="my-bucket",
+        aws_region="eu-west-1",
+        aws_s3_endpoint_url="https://minio.example.com",
+    )
+
+    # Then both settings are stored on the config
+    assert config.aws_region == "eu-west-1"
+    assert config.aws_s3_endpoint_url == "https://minio.example.com"
+
+
+def test_backupconfig_region_and_endpoint_default_none():
+    """Verify region and endpoint default to None so boto3 resolution stays intact."""
+    # Given a config with no region or endpoint set
+    config = BackupConfig(name="x", aws_s3_bucket_name="my-bucket")
+
+    # Then both are None, deferring to boto3's standard resolution
+    assert config.aws_region is None
+    assert config.aws_s3_endpoint_url is None
+
+
+def test_envconfig_reads_region_and_endpoint(monkeypatch):
+    """Verify EnvConfig loads EZBAK_AWS_REGION and EZBAK_AWS_S3_ENDPOINT_URL."""
+    # Given the S3 env vars set alongside the required fields
+    monkeypatch.setenv("EZBAK_NAME", "from-env")
+    monkeypatch.setenv("EZBAK_AWS_S3_BUCKET_NAME", "my-bucket")
+    monkeypatch.setenv("EZBAK_AWS_REGION", "ap-southeast-2")
+    monkeypatch.setenv("EZBAK_AWS_S3_ENDPOINT_URL", "https://minio.example.com")
+
+    # When building an EnvConfig
+    config = EnvConfig()
+
+    # Then both settings are populated from the environment
+    assert config.aws_region == "ap-southeast-2"
+    assert config.aws_s3_endpoint_url == "https://minio.example.com"
+
+
 def test_coerce_path_list_skips_blank_segments():
     """Verify blank comma segments do not inject a phantom cwd path."""
     # Given a comma list with an empty middle segment

@@ -24,6 +24,8 @@ These apply to every command and come before the subcommand name.
 | `--storage` | | Local storage directory. Repeat for multiple. Optional when `--s3-bucket` is set. | |
 | `--s3-bucket` | | S3 bucket name. | |
 | `--s3-bucket-prefix` | | Key prefix within the bucket. | |
+| `--s3-region` | | AWS region; defaults to boto3's standard resolution. | |
+| `--s3-endpoint-url` | | Custom S3 endpoint for S3-compatible storage such as MinIO. | |
 | `--log-file` | | Also write logs to this file. | |
 | `--log-prefix` | | Prefix added to every log line. | |
 | `-v` / `-vv` | | Raise verbosity to `DEBUG` (`-v`) or `TRACE` (`-vv`). | `INFO` |

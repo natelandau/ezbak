@@ -19,10 +19,22 @@ class AWSService:
         aws_secret_key: str,
         bucket_name: str,
         bucket_path: str | None = None,
+        region: str | None = None,
+        endpoint_url: str | None = None,
     ) -> None:
         """Initialize AWS S3 client with credentials and validate bucket access.
 
         Set up the S3 client with retry configuration and validate that the bucket exists and is accessible. Use this class when you need to perform file operations on a specific S3 bucket with predefined credentials.
+
+        Args:
+            aws_access_key (str): The AWS access key ID.
+            aws_secret_key (str): The AWS secret access key.
+            bucket_name (str): The target S3 bucket.
+            bucket_path (str | None): Key prefix within the bucket. Defaults to None.
+            region (str | None): AWS region. None defers to boto3's standard resolution
+                (AWS_REGION/AWS_DEFAULT_REGION/~/.aws/config). Defaults to None.
+            endpoint_url (str | None): Custom S3 endpoint for S3-compatible storage such
+                as MinIO. None uses the AWS default endpoint. Defaults to None.
 
         Raises:
             StorageInitError: If the credentials are missing or the bucket cannot be accessed.
@@ -39,16 +51,26 @@ class AWSService:
             logger.error(msg)
             raise StorageInitError(msg)
 
-        self.s3 = boto3.client(
-            "s3",
-            aws_access_key_id=self.aws_access_key,
-            aws_secret_access_key=self.aws_secret_key,
-            config=Config(retries={"max_attempts": 10, "mode": "standard"}),
-        )
+        # A blank value (common in .env templates) would reach boto3 as "" and build an
+        # invalid endpoint like "https://s3..amazonaws.com"; normalize to None to defer to
+        # boto3's standard resolution instead.
+        region = region or None
+        endpoint_url = endpoint_url or None
 
+        # Construct the client inside the guard: a malformed endpoint (e.g. a missing scheme)
+        # makes boto3 raise ValueError at construction, which must surface as a StorageInitError
+        # so core.py records a failed storage location instead of escaping as a raw traceback.
         try:
+            self.s3 = boto3.client(
+                "s3",
+                aws_access_key_id=self.aws_access_key,
+                aws_secret_access_key=self.aws_secret_key,
+                region_name=region,
+                endpoint_url=endpoint_url,
+                config=Config(retries={"max_attempts": 10, "mode": "standard"}),
+            )
             self.location = self.s3.get_bucket_location(Bucket=self.bucket)  # Ex. us-east-1
-        except (BotoCoreError, ClientError) as e:
+        except (BotoCoreError, ClientError, ValueError) as e:
             msg = f"Cannot access S3 bucket '{self.bucket}': {e}"
             logger.error(msg)
             raise StorageInitError(msg) from e
