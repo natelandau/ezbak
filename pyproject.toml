@@ -9,14 +9,14 @@
     ]
     dependencies = [
         "apscheduler>=3.11.3,<4.0.0",
-        "boto3>=1.43.42,<2.0.0",
+        "boto3>=1.43.44,<2.0.0",
         "cappa>=0.32.1,<1.0.0",
         "loguru>=0.7.3",
-        "nclutils>=3.4.1,<4.0.0",
+        "nclutils>=3.4.2,<4.0.0",
         "pydantic-settings>=2.14.2,<3.0.0",
         "pydantic>=2.13.4,<3.0.0",
         "rich>=15.0.0",
-        "whenever>=0.10.2",
+        "whenever>=0.10.2,<1.0.0",
     ]
     description = "A simple tool to backup and restore data as tgz files."
     license = "MIT"
@@ -39,7 +39,7 @@
         "coverage>=7.15.0",
         "duty>=1.9.0",
         "moto[s3]>=5.2.2",
-        "mypy>=2.1.0",
+        "mypy>=2.2.0",
         "prek>=0.4.8",
         "pytest-clarity>=1.0.1",
         "pytest-cov>=7.1.0",
@@ -52,12 +52,12 @@
         "time-machine>=3.2.0",
         "typos>=1.48.0",
         "yamllint>=1.38.0",
-        "zensical>=0.0.47",
-]
+        "zensical>=0.0.50",
+    ]
 
 [build-system]
-    build-backend = "hatchling.build"
-    requires      = ["hatchling"]
+    build-backend = "uv_build"
+    requires      = ["uv_build>=0.11.0,<0.12.0"]
 
 [tool.commitizen]
     bump_message               = "bump(release): v${current_version} → v${new_version}"
