@@ -278,6 +278,8 @@ class EZBak:
                     aws_secret_key=self.settings.aws_secret_key,
                     bucket_name=self.settings.aws_s3_bucket_name,
                     bucket_path=self.settings.aws_s3_bucket_prefix,
+                    region=self.settings.aws_region,
+                    endpoint_url=self.settings.aws_s3_endpoint_url,
                 )
             except StorageInitError:
                 # AWSService already logged the failure at the raise site; just record

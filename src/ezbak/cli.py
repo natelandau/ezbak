@@ -100,6 +100,26 @@ class EZBakCLI:
         ),
     ] = None
 
+    s3_region: Annotated[
+        str,
+        cappa.Arg(
+            long="s3-region",
+            help="AWS region. Defaults to boto3's standard resolution (AWS_REGION/AWS_DEFAULT_REGION).",
+            propagate=True,
+            group=(3, "Optional"),
+        ),
+    ] = None
+
+    s3_endpoint_url: Annotated[
+        str,
+        cappa.Arg(
+            long="s3-endpoint-url",
+            help="Custom S3 endpoint for S3-compatible storage such as MinIO.",
+            propagate=True,
+            group=(3, "Optional"),
+        ),
+    ] = None
+
 
 @cappa.command(name="create", invoke="ezbak.cli_commands.create.main")
 class CreateCommand:
@@ -368,6 +388,8 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         "log_prefix": cli.log_prefix,
         "aws_s3_bucket_name": cli.s3_bucket,
         "aws_s3_bucket_prefix": cli.s3_bucket_prefix,
+        "aws_region": cli.s3_region,
+        "aws_s3_endpoint_url": cli.s3_endpoint_url,
     }
 
     if isinstance(cmd, CreateCommand):

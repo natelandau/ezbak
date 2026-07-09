@@ -358,6 +358,36 @@ def test_build_config_reads_s3_bucket(monkeypatch, filesystem):
     assert config.aws_access_key == "AKIA_TEST"
 
 
+def test_build_config_maps_region_and_endpoint(monkeypatch):
+    """Verify the CLI builder wires the S3 region and endpoint into the config."""
+    # Given credentials in the environment and region/endpoint flags
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "AKIA_TEST")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
+
+    # When parsing a create command with --s3-region and --s3-endpoint-url
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=[
+            "--name",
+            "t",
+            "--s3-bucket",
+            "my-bucket",
+            "--s3-region",
+            "eu-west-1",
+            "--s3-endpoint-url",
+            "https://minio.example.com",
+            "create",
+            "--source",
+            "/tmp",  # noqa: S108
+        ],
+    )
+    config = build_config(cli)
+
+    # Then both settings land on the config
+    assert config.aws_region == "eu-west-1"
+    assert config.aws_s3_endpoint_url == "https://minio.example.com"
+
+
 def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     """Verify an S3-only backup parses without the --storage flag."""
     # Given S3 credentials in the environment

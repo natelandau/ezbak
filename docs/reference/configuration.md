@@ -42,6 +42,8 @@ on the command line, or as a comma-separated string in the environment variable.
 | `storage_paths` | `EZBAK_STORAGE_PATHS` | `--storage` | none |
 | `aws_s3_bucket_name` | `EZBAK_AWS_S3_BUCKET_NAME` | `--s3-bucket` | `None` |
 | `aws_s3_bucket_prefix` | `EZBAK_AWS_S3_BUCKET_PREFIX` | `--s3-bucket-prefix` | `None` |
+| `aws_region` | `EZBAK_AWS_REGION` | `--s3-region` | `None` |
+| `aws_s3_endpoint_url` | `EZBAK_AWS_S3_ENDPOINT_URL` | `--s3-endpoint-url` | `None` |
 | `aws_access_key` | `EZBAK_AWS_ACCESS_KEY` | environment only | `None` |
 | `aws_secret_key` | `EZBAK_AWS_SECRET_KEY` | environment only | `None` |
 
