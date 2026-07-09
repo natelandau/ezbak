@@ -40,6 +40,7 @@ CLI flag.
 | --- | --- | --- |
 | `EZBAK_ACTION` | `backup` or `restore` | The action to run. Required. |
 | `EZBAK_CRON` | a cron expression | Run the action on a schedule instead of once. |
+| `EZBAK_CRON_JITTER` | seconds (integer) | Random delay added to each scheduled run so a fleet sharing one cron does not hit a destination at once. Default `60`; set `0` to disable. |
 | `EZBAK_HEALTHCHECK_URL` | a URL | Ping a monitor after each scheduled run. |
 | `EZBAK_BACKUP_ON_SHUTDOWN` | `true` or `false` | Take a final backup when a scheduled backup container shuts down. Default `false`. |
 | `TZ` | an IANA timezone | System timezone for backup timestamps. |
@@ -92,9 +93,10 @@ so old backups do not accumulate.
 
 !!! note "Scheduled runs are jittered"
 
-    ezbak adds a random delay of up to 10 minutes to each scheduled run, so a
-    `"0 2 * * *"` job fires at a random moment within 10 minutes after 02:00.
-    Account for this when sizing a healthcheck grace period. See
+    ezbak adds a random delay of up to 60 seconds to each scheduled run, so a
+    `"0 2 * * *"` job fires at a random moment within 60 seconds after 02:00.
+    Set `EZBAK_CRON_JITTER` to widen or disable the spread, and account for it
+    when sizing a healthcheck grace period. See
     [Monitoring](../orchestration/monitoring.md).
 
 ## A final backup on shutdown

@@ -149,7 +149,7 @@ def _run_cron(app: EZBak, config: EnvConfig, action: Action) -> None:
         func=_run_scheduled,
         args=[app, scheduler, config.healthcheck_url, run],
         trigger=CronTrigger.from_crontab(config.cron),
-        jitter=600,
+        jitter=config.cron_jitter,
         id=action.value,
     )
     logger.info(job)
