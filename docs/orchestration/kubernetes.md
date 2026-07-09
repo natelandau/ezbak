@@ -69,9 +69,9 @@ spec:
               value: "my-backups"
             - name: EZBAK_CRON
               value: "0 * * * *"
-            - name: EZBAK_RETENTION_HOURLY
+            - name: EZBAK_KEEP_HOURLY
               value: "24"
-            - name: EZBAK_RETENTION_DAILY
+            - name: EZBAK_KEEP_DAILY
               value: "7"
             - name: TZ
               value: "America/New_York"

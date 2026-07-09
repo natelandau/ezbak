@@ -15,7 +15,7 @@ name and add the `EZBAK_` prefix.
 export EZBAK_NAME="my-backup"
 export EZBAK_SOURCE_PATHS="/data"
 export EZBAK_STORAGE_PATHS="/backups"
-export EZBAK_RETENTION_DAILY=7
+export EZBAK_KEEP_DAILY=7
 ```
 
 The container also reads a `.env` and a `.env.secrets` file from its working
@@ -57,7 +57,7 @@ docker run -it \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_SOURCE_PATHS=/source \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_MAX_BACKUPS=7 \
+    -e EZBAK_KEEP_LAST=7 \
     ghcr.io/natelandau/ezbak:latest
 ```
 
@@ -76,7 +76,7 @@ docker run -d \
     -e EZBAK_NAME=my-backup \
     -e EZBAK_SOURCE_PATHS=/source \
     -e EZBAK_STORAGE_PATHS=/backups \
-    -e EZBAK_MAX_BACKUPS=7 \
+    -e EZBAK_KEEP_LAST=7 \
     -e EZBAK_CRON="0 2 * * *" \
     -e EZBAK_HEALTHCHECK_URL=https://hc-ping.com/your-uuid \
     -e TZ=America/New_York \

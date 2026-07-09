@@ -15,7 +15,7 @@ backups = EZBak(
         name="my-backup",
         source_paths=[Path("/data")],
         storage_paths=[Path("/backups")],
-        max_backups=10,
+        keep_last=10,
     )
 )
 

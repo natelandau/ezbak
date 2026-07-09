@@ -91,7 +91,7 @@ def test_s3_prune_deletes_sidecars(s3_bucket: str, filesystem) -> None:
         aws_s3_bucket_name=s3_bucket,
         aws_access_key="k",
         aws_secret_key="s",
-        max_backups=1,
+        keep_last=1,
     )
     app.create_backup()
     app.create_backup()  # two archives + two sidecars; retention keeps 1

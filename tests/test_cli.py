@@ -13,7 +13,7 @@ import pytest
 import time_machine
 
 from ezbak.backup import Backup
-from ezbak.cli import CreateCommand, EZBakCLI, RestoreCommand, build_config
+from ezbak.cli import CreateCommand, EZBakCLI, PruneCommand, RestoreCommand, build_config
 from ezbak.cli_commands import list as list_cmd
 from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
 from ezbak.logging import instantiate_logger
@@ -54,8 +54,8 @@ def test_cli_create_backup(filesystem, debug, capsys, tmp_path):
     assert f"INFO     | Created: dest2/{filename}" in output
 
 
-def test_cli_prune_backups_max_backups(mocker, debug, capsys, tmp_path):
-    """Verify pruning backups with max backup set."""
+def test_cli_prune_backups_keep_last(mocker, debug, capsys, tmp_path):
+    """Verify pruning backups with keep_last set."""
     mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
     # Given: A backup manager configured with test parameters
     filenames = [
@@ -84,7 +84,7 @@ def test_cli_prune_backups_max_backups(mocker, debug, capsys, tmp_path):
             "test",
             "--storage",
             str(tmp_path),
-            "--max-backups",
+            "--keep-last",
             "3",
         ],
     )
@@ -132,30 +132,42 @@ def test_cli_prune_backups_with_policy(mocker, debug, capsys, tmp_path):
             "test",
             "--storage",
             str(tmp_path),
-            "--yearly",
+            "--keep-yearly",
             "1",
-            "--monthly",
+            "--keep-monthly",
             "4",
-            "--weekly",
+            "--keep-weekly",
             "4",
-            "--daily",
+            "--keep-daily",
             "4",
-            "--hourly",
+            "--keep-hourly",
             "4",
-            "--minutely",
+            "--keep-minutely",
             "4",
         ],
     )
     output = capsys.readouterr().err
     # debug(output)
 
-    assert "Pruned 3 backups" in output
+    assert "Pruned 8 backups" in output
     existing_files = list(tmp_path.iterdir())
-    assert len(existing_files) == 10
+    assert len(existing_files) == 5
     for filename in [
+        "test-20250609T101857-hourly.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T095751-minutely.tgz",
+        "test-20250609T095625-monthly.tgz",
         "test-20240609T090932-yearly.tgz",
+    ]:
+        assert Path(tmp_path / filename).exists()
+    for filename in [
         "test-20250609T095745-minutely.tgz",
         "test-20250609T095737-minutely.tgz",
+        "test-20250609T095737-minutely-6klf7.tgz",
+        "test-20250609T095804-minutely-p2we3r.tgz",
+        "test-20250609T095730-weekly-k6lop.tgz",
+        "test-20250609T095730-daily.tgz",
+        "test-20250609T090932-yearly.tgz",
     ]:
         assert not Path(tmp_path / filename).exists()
 
@@ -193,7 +205,7 @@ def test_cli_prune_backups_dry_run(mocker, debug, capsys, tmp_path):
             "test",
             "--storage",
             str(tmp_path),
-            "--max-backups",
+            "--keep-last",
             "3",
             "--dry-run",
         ],
@@ -228,7 +240,7 @@ def test_cli_prune_backups_dry_run_no_targets(mocker, debug, capsys, tmp_path):
             "test",
             "--storage",
             str(tmp_path),
-            "--max-backups",
+            "--keep-last",
             "100",
             "--dry-run",
         ],
@@ -434,6 +446,23 @@ def test_build_config_maps_if_exists():
 
     # Then restore_if_exists is set
     assert config.restore_if_exists is True
+
+
+def test_prune_flags_map_to_keep_fields():
+    """Verify --keep-* flags populate the matching keep_* config fields."""
+    # Given a prune command carrying keep_last and keep_daily
+    cli = EZBakCLI(
+        command=PruneCommand(keep_last=3, keep_daily=4),
+        name="test",
+        storage_paths=[Path("/tmp")],  # noqa: S108
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then keep_last and keep_daily carry the flag values
+    assert config.keep_last == 3
+    assert config.keep_daily == 4
 
 
 def test_cli_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):

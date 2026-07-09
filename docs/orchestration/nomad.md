@@ -62,8 +62,8 @@ job "my-service" {
         EZBAK_SOURCE_PATHS        = "/data"
         EZBAK_AWS_S3_BUCKET_NAME  = "my-backups"
         EZBAK_CRON                = "0 * * * *" # (4)!
-        EZBAK_RETENTION_HOURLY    = "24"
-        EZBAK_RETENTION_DAILY     = "7"
+        EZBAK_KEEP_HOURLY         = "24"
+        EZBAK_KEEP_DAILY          = "7"
         EZBAK_HEALTHCHECK_URL     = "https://hc-ping.com/your-uuid"
         TZ                        = "America/New_York"
       }
@@ -89,8 +89,8 @@ job "my-service" {
         EZBAK_NAME                = "my-service"
         EZBAK_SOURCE_PATHS        = "/data"
         EZBAK_AWS_S3_BUCKET_NAME  = "my-backups"
-        EZBAK_RETENTION_HOURLY    = "24"
-        EZBAK_RETENTION_DAILY     = "7"
+        EZBAK_KEEP_HOURLY         = "24"
+        EZBAK_KEEP_DAILY          = "7"
       }
     }
 
