@@ -81,15 +81,6 @@ class RetentionPolicyManager:
 
         return keep
 
-    def backups_to_delete(self, backups: list[Backup]) -> list[Backup]:
-        """Return the backups no rule marks, preserving input order.
-
-        Args:
-            backups: All backups in one storage location.
-        """
-        keep = self.backups_to_keep(backups)
-        return [b for b in backups if b not in keep]
-
     def summary(self) -> dict[str, int]:
         """Return the set rules as a display dict, omitting unset ones."""
         out: dict[str, int] = {}
