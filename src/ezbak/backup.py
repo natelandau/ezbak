@@ -57,8 +57,10 @@ class Backup:
         dt = self.zoned_datetime
         self.year = str(dt.year)
         self.month = f"{dt.year}-{dt.month}"
-        # %W stays within dt.year, so pairing it with the calendar year is consistent.
-        self.week = f"{dt.year}-{dt.to_stdlib().strftime('%W')}"
+        # ISO week (not %W) so a week spanning a year boundary keys to one
+        # bucket instead of splitting across two and consuming two keep_weekly slots.
+        iso = dt.to_stdlib().isocalendar()
+        self.week = f"{iso.year}-{iso.week}"
         self.day = f"{dt.year}-{dt.month}-{dt.day}"
         self.hour = f"{dt.year}-{dt.month}-{dt.day}-{dt.hour}"
         self.minute = f"{dt.year}-{dt.month}-{dt.day}-{dt.hour}-{dt.minute}"
