@@ -1,3 +1,7 @@
+---
+icon: lucide/terminal
+---
+
 # Using the CLI
 
 The `ezbak` command runs backups from a shell. It shares its configuration with
@@ -6,8 +10,9 @@ terminal for a one-off backup, a local test, or a scripted job.
 
 ## Command shape
 
-The `name` and `storage` options are global and come before the subcommand.
-Everything else belongs to a subcommand.
+The global options come before the subcommand: `--name`, `--storage`,
+`--s3-bucket`, `--s3-bucket-prefix`, `-v`/`-vv`, `--log-file`, and
+`--log-prefix`. Each subcommand's own options come after it.
 
 ```bash
 ezbak --name my-documents --storage ~/Backups <command> [options]
@@ -32,8 +37,9 @@ Add more sources by repeating `--source`. Narrow the file selection with
 ezbak --name my-documents --storage ~/Backups list
 ```
 
-Each line shows the full `YYYYMMDDTHHMMSS` timestamp. Copy one into
-`restore --restore-date` to restore that exact backup.
+Each line shows the backup's filename, which includes the full
+`YYYYMMDDTHHMMSS` timestamp. Copy that timestamp into `restore --restore-date`
+to restore that exact backup.
 
 ## Prune old backups
 
@@ -48,7 +54,15 @@ ezbak --name my-documents --storage ~/Backups prune --keep-last 10
 ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --dry-run
 ```
 
-See [Retention policies](retention.md) for how the rules combine.
+A prune asks for confirmation before deleting. In a script or any
+non-interactive context, add `--force` to skip the prompt (`--dry-run` skips it
+too, since it deletes nothing).
+
+```bash
+ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --force
+```
+
+See [Retention policies](../concepts/retention.md) for how the rules combine.
 
 ## Restore a backup
 

@@ -1,6 +1,7 @@
 """Tests for the merged EZBak core class."""
 
 import shutil
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,13 @@ from ezbak.core import EZBak, ezbak
 from ezbak.exceptions import ConfigurationError
 
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
+
+
+def _archive_file_members(dest: Path) -> list[str]:
+    """Return the file member names of the single archive found in `dest`."""
+    archive = next(dest.glob("*.tgz"))
+    with tarfile.open(archive) as tar:
+        return [member.name for member in tar.getmembers() if member.isfile()]
 
 
 def test_ezbak_factory_returns_core(filesystem):
@@ -277,3 +285,47 @@ def test_restore_backup_blank_restore_date_uses_latest(tmp_path, mocker):
     # Then the latest backup is restored (blank treated as "no point in time requested")
     assert result is True
     assert spy.call_args.kwargs["backup"].name == "test-20250103T090000.tgz"
+
+
+def test_create_backup_exclude_regex_applies_in_subdirectories(filesystem):
+    """Verify exclude_regex drops matching files nested in subdirectories."""
+    # Given a source with a file to exclude nested inside a subdirectory
+    src, dest1, _ = filesystem
+    (src / "dir1" / "skipme.log").write_text("secret")
+    app = ezbak(name="test", source_paths=[src], storage_paths=[dest1], exclude_regex="skipme")
+
+    # When a backup is created
+    app.create_backup()
+
+    # Then the excluded file is absent from the archive
+    members = _archive_file_members(dest1)
+    assert not any("skipme.log" in m for m in members)
+
+
+def test_create_backup_excludes_noise_names_in_subdirectories(filesystem):
+    """Verify always-excluded names are dropped inside subdirectories."""
+    # Given an always-excluded noise file nested inside a subdirectory
+    src, dest1, _ = filesystem
+    (src / "dir1" / ".DS_Store").write_text("noise")
+    app = ezbak(name="test", source_paths=[src], storage_paths=[dest1])
+
+    # When a backup is created
+    app.create_backup()
+
+    # Then the noise file is absent from the archive
+    members = _archive_file_members(dest1)
+    assert not any(".DS_Store" in m for m in members)
+
+
+def test_create_backup_has_no_duplicate_members(filesystem):
+    """Verify each file is archived once, not duplicated by recursive adds."""
+    # Given a source tree with files nested in a subdirectory
+    src, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src], storage_paths=[dest1])
+
+    # When a backup is created
+    app.create_backup()
+
+    # Then no archive member appears more than once
+    members = _archive_file_members(dest1)
+    assert len(members) == len(set(members))

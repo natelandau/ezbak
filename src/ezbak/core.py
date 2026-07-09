@@ -385,7 +385,12 @@ class EZBak:
             ) as tar:
                 for file in files_to_add:
                     logger.trace(f"Add to tar: {file.relative_path}")
-                    tar.add(file.full_path, arcname=file.relative_path)
+                    # The rglob walk already enumerates every file and directory and
+                    # applies the include/exclude filters, so add each entry
+                    # non-recursively. A recursive add would re-pull a filtered
+                    # directory's entire subtree, defeating the filter and duplicating
+                    # members.
+                    tar.add(file.full_path, arcname=file.relative_path, recursive=False)
         except tarfile.TarError as e:
             logger.error(f"Failed to create backup: {e}")
             return None

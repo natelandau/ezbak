@@ -1,3 +1,7 @@
+---
+icon: lucide/sparkles
+---
+
 # Fresh deploys
 
 The first time you deploy a job, there is no backup yet. A pre-start restore has

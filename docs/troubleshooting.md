@@ -1,3 +1,7 @@
+---
+icon: lucide/wrench
+---
+
 # Troubleshooting
 
 Common problems and what causes them. If your issue is not here, run with `-vv`
@@ -32,8 +36,9 @@ credential fails the run.
 
 ## Backup timestamps are in the wrong timezone
 
-Timestamps use ezbak's configured timezone, and the default is the host's system
-timezone.
+Timestamps use ezbak's configured timezone. When none is set, ezbak falls back to
+the system timezone, and the container image sets that to `Etc/UTC`, so an
+unconfigured container stamps timestamps in UTC.
 
 - In a container, set `TZ` to your IANA timezone, for example
   `TZ=America/New_York`.

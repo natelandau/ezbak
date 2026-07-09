@@ -1,3 +1,7 @@
+---
+icon: lucide/rotate-ccw
+---
+
 # Restore backups
 
 A restore extracts a backup archive into a target directory. By default ezbak
@@ -35,8 +39,8 @@ time, empty the target first, and set ownership on the restored files.
 
     If the backup has a `.sha256` sidecar, ezbak checks the archive against it
     before extracting anything. A mismatch fails the restore; a missing or
-    unreadable sidecar logs a warning and restores anyway. See [Failure
-    behavior](../concepts/failure-behavior.md).
+    unreadable sidecar logs a warning and restores anyway. See [Archive
+    integrity checksums](../concepts/checksums.md).
 
 ## Restore a backup from a point in time
 
@@ -61,8 +65,9 @@ The date accepts six granularities, from a year down to a second:
 | `YYYYMMDDTHHMM` | `20241215T1430` | the end of the 14:30 minute |
 | `YYYYMMDDTHHMMSS` | `20241215T143022` | that exact second |
 
-The full `YYYYMMDDTHHMMSS` form matches the timestamp the `list` command prints,
-so you can copy a value from `list` output to restore that exact backup.
+The full `YYYYMMDDTHHMMSS` form matches the timestamp in each filename the `list`
+command prints, so you can copy that timestamp from a `list` entry to restore
+that exact backup.
 
 !!! note "A restore date that matches nothing fails, it does not fall back"
 
