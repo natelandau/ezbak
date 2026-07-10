@@ -381,6 +381,81 @@ def test_cron_jitter_rejects_negative(filesystem):
         EnvConfig(_env_file=None)
 
 
+def test_hooks_default_to_none(filesystem):
+    """Verify the four hook fields default to None and hook_timeout to 300."""
+    # Given no hook env vars
+    src_dir, dest1, _ = filesystem
+    for var in (
+        "EZBAK_PRE_BACKUP_HOOK",
+        "EZBAK_POST_BACKUP_HOOK",
+        "EZBAK_PRE_RESTORE_HOOK",
+        "EZBAK_POST_RESTORE_HOOK",
+        "EZBAK_HOOK_TIMEOUT",
+    ):
+        os.environ.pop(var, None)
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then hooks are unset and timeout defaults to 300
+    config = EnvConfig(_env_file=None)
+    assert config.pre_backup_hook is None
+    assert config.post_backup_hook is None
+    assert config.pre_restore_hook is None
+    assert config.post_restore_hook is None
+    assert config.hook_timeout == 300
+
+
+def test_pre_backup_hook_parses(filesystem):
+    """Verify EZBAK_PRE_BACKUP_HOOK populates the hook field verbatim."""
+    # Given a pre-backup hook command
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_PRE_BACKUP_HOOK"] = 'sqlite3 /data/db ".backup /data/db.bak"'
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then the command is stored unchanged
+    config = EnvConfig(_env_file=None)
+    assert config.pre_backup_hook == 'sqlite3 /data/db ".backup /data/db.bak"'
+
+
+def test_hook_timeout_parses_override(filesystem):
+    """Verify EZBAK_HOOK_TIMEOUT overrides the default timeout."""
+    # Given an explicit timeout
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_HOOK_TIMEOUT"] = "30"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then the override is used
+    config = EnvConfig(_env_file=None)
+    assert config.hook_timeout == 30
+
+
+def test_hook_timeout_rejects_negative(filesystem):
+    """Verify a negative EZBAK_HOOK_TIMEOUT is rejected at load time."""
+    # Given a mistyped negative timeout
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_HOOK_TIMEOUT"] = "-1"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+
+    # When loading the container config, then validation fails
+    with pytest.raises(ValidationError):
+        EnvConfig(_env_file=None)
+
+
 def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
     """Verify a cron BACKUP container takes a final backup on shutdown when opted in."""
     # Given a backup container that opted into backup-on-shutdown
