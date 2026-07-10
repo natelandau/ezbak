@@ -45,6 +45,10 @@ def run_hook(command: str | None, *, phase: str, timeout: int) -> bool:
             timeout=timeout or None,
             capture_output=True,
             text=True,
+            # Decode captured output lossily: a hook that exits 0 but prints non-UTF-8
+            # bytes must not raise UnicodeDecodeError (a ValueError, so uncaught here)
+            # and turn a successful hook into a crash.
+            errors="replace",
             check=False,
         )
     except subprocess.TimeoutExpired as e:

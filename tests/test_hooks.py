@@ -98,3 +98,13 @@ def test_run_hook_timeout_zero_disables_timeout(mocker):
 
     # Then subprocess.run was called with timeout=None
     assert spy.call_args.kwargs["timeout"] is None
+
+
+def test_run_hook_non_utf8_output_still_succeeds():
+    """Verify a zero-exit hook that prints non-UTF-8 bytes is not turned into a crash."""
+    # Given a hook that exits 0 but writes an invalid UTF-8 byte to stdout
+    # When running it
+    result = run_hook(r"printf '\377'", phase="post-backup", timeout=300)
+
+    # Then the successful exit is honored instead of raising UnicodeDecodeError
+    assert result is True
