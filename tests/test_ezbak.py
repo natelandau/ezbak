@@ -943,6 +943,24 @@ def test_restore_verifies_good_archive(filesystem, tmp_path) -> None:
     assert (restore_dir / src_dir.name / "foo.txt").exists()
 
 
+def test_restore_rejects_valid_archive_with_wrong_sidecar(filesystem, tmp_path) -> None:
+    """Verify a decompressible archive whose digest is wrong fails before the live dir is touched."""
+    # Given: a good backup whose sidecar is rewritten to a valid-format but wrong digest,
+    # so the archive still extracts but the after-extract verification must reject it
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backup = app.create_backup()[0]
+    sidecar = backup.path.parent / (backup.path.name + ".sha256")
+    sidecar.write_text(f"{'0' * 64}  {backup.path.name}\n")
+
+    # When/Then: the restore fails on the digest and leaves the destination untouched
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
+        app.restore_backup(restore_path=restore_dir)
+    assert not any(restore_dir.iterdir())
+
+
 def test_local_prune_deletes_sidecar(filesystem) -> None:
     """Verify prune removes a pruned archive's sidecar, leaving none orphaned."""
     src_dir, dest1, _ = filesystem

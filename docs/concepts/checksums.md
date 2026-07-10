@@ -6,8 +6,8 @@ icon: lucide/shield-check
 
 ezbak fingerprints every archive it writes and stores that fingerprint in a
 small file next to the backup. On restore it re-checks the archive against the
-fingerprint, so a corrupt or truncated backup is caught before anything is
-extracted.
+fingerprint, so a corrupt or truncated backup fails the restore before it can
+replace your data.
 
 This matters most in the workflow ezbak is built for. A pre-start task on a new
 host downloads the latest archive from S3 and stages it before the job starts.
@@ -50,32 +50,34 @@ therefore exist without a sidecar, and restore handles that case.
 
 ## How restore uses it
 
-With `use_checksums` enabled, ezbak looks for the archive's sidecar before
-restoring, re-hashes the archive, and compares the two digests. The check runs
-before the restore path is touched, so a corrupt archive is rejected up front
-and never extracted. With `use_checksums` off, ezbak skips this step and does
-not read the sidecar at all.
+With `use_checksums` enabled, ezbak looks for the archive's sidecar, then hashes
+the archive as it extracts and compares the two digests. A restore extracts into
+a staging directory and swaps it into place only on success (see [Restore
+failures](failure-behavior.md#restore-failures-and-clean-before-restore)), so a
+digest mismatch aborts before that swap and the corrupt archive never reaches
+your data. With `use_checksums` off, ezbak skips this step and does not read the
+sidecar at all.
 
 ```mermaid
 graph TD
   R["Restore starts"] --> Q{"Usable sidecar?"}
   Q -->|"no (missing, unreadable,<br/>or malformed)"| W["Warn, restore<br/>without verification"]
-  Q -->|yes| H["Re-hash the archive"]
+  Q -->|yes| H["Extract, hashing the<br/>archive as it reads"]
   H --> C{"Digest matches?"}
-  C -->|yes| OK["Extract the archive"]
-  C -->|no| F["Abort before extracting,<br/>raise RestoreFailedError"]
+  C -->|yes| OK["Swap restored files<br/>into place"]
+  C -->|no| F["Discard staged files,<br/>raise RestoreFailedError"]
 ```
 
 | Sidecar in storage | What ezbak does |
 | --- | --- |
 | Present, digest matches | Restores normally |
-| Present, digest differs | Aborts before extracting and raises `RestoreFailedError` |
+| Present, digest differs | Fails before the swap and raises `RestoreFailedError` |
 | Missing, unreadable, or malformed | Logs a warning and restores without verification |
 
-A mismatch is treated as corruption, not a soft problem: the archive is never
-extracted. A missing or unusable sidecar degrades to a warning, because a
-checksum is an added safeguard, not a requirement for restoring a backup that
-already exists.
+A mismatch is treated as corruption, not a soft problem: the restore fails and
+your existing data is left untouched. A missing or unusable sidecar degrades to a
+warning, because a checksum is an added safeguard, not a requirement for
+restoring a backup that already exists.
 
 `use_checksums` governs both directions. With it enabled (the default), ezbak
 writes a sidecar for each new backup and verifies an archive against its sidecar

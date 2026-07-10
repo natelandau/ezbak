@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import tarfile
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
-from typing import TYPE_CHECKING, Literal, NoReturn, assert_never
+from typing import IO, TYPE_CHECKING, Literal, NoReturn, assert_never, cast
 
 from loguru import logger
 from nclutils.fs import clean_directory
 from pydantic import ValidationError
 from whenever import PlainDateTime
 
-from ezbak.checksums import sha256_file
+from ezbak.checksums import HashingReader, HashingWriter
 from ezbak.config import BackupConfig
 from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
@@ -98,32 +99,74 @@ def _fail_restore(msg: str, cause: Exception | None = None) -> NoReturn:
     raise RestoreFailedError(msg) from cause
 
 
-def _verify_checksum(backend: StorageBackend, backup: Backup, tarfile_path: Path) -> None:
-    """Reject a restore whose archive bytes no longer match its checksum sidecar.
+def _expected_checksum(backend: StorageBackend, backup: Backup) -> str | None:
+    """Return the sidecar digest to verify a restore against, or None to skip it.
 
-    Runs before staging or the destination are touched, so a corrupt archive is
-    rejected up front. A missing or unreadable sidecar degrades to a warning
-    rather than aborting, since checksums are an added safeguard, not a hard
-    requirement for restoring an existing backup. A digest mismatch aborts via
-    `_fail_restore`, which logs and raises `RestoreFailedError`.
+    A missing or unreadable sidecar degrades to a warning rather than aborting,
+    since checksums are an added safeguard, not a hard requirement for restoring
+    an existing backup.
     """
-    logger.trace(f"Verifying checksum for '{backup.name}'")
     expected = backend.get_checksum(backup)
     if expected is None:
         logger.warning(
             f"No checksum sidecar for '{backup.name}'; restoring without integrity verification"
         )
+        return None
+    logger.trace(f"Expected checksum for '{backup.name}': {expected}")
+    return expected
+
+
+def _extract_archive(
+    *, tarfile_path: Path, staging: Path, expected_checksum: str | None, backup_name: str
+) -> None:
+    """Extract an archive into staging, verifying its checksum in the same read pass.
+
+    When a checksum is expected, hash the compressed archive as tarfile reads it,
+    rather than in a separate pre-extract read, and compare after extraction but
+    before the caller commits staging into the live destination. A corrupt archive
+    is caught without touching live data and without a second full read of a
+    multi-gigabyte file (that re-read was OOM-killing the container). A digest
+    mismatch aborts via `_fail_restore`, which logs and raises RestoreFailedError.
+    """
+    if expected_checksum is None:
+        with tarfile.open(tarfile_path) as archive:
+            archive.extractall(path=staging, filter="data")
+            # getmembers() is cached by extractall, so this is not a re-read.
+            logger.trace(
+                f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"
+            )
         return
 
-    logger.trace(f"Expected checksum for '{backup.name}': {expected}")
-    actual = sha256_file(tarfile_path)
+    hasher = hashlib.sha256()
+    extract_error: tarfile.TarError | OSError | None = None
+    with tarfile_path.open("rb") as raw:
+        reader = HashingReader(fileobj=raw, hasher=hasher)
+        try:
+            # Explicit "r:gz" (not auto-detect "r") reads the stream forward-only, so
+            # the non-seekable HashingReader sees every compressed byte exactly once.
+            with tarfile.open(fileobj=cast("IO[bytes]", reader), mode="r:gz") as archive:
+                archive.extractall(path=staging, filter="data")
+                logger.trace(
+                    f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"
+                )
+        except (tarfile.TarError, OSError) as e:
+            extract_error = e
+        # Drain whatever tarfile left unread so the digest spans the whole file:
+        # the gzip trailer on success, or everything past a corrupt header on failure.
+        reader.drain()
+
+    actual = hasher.hexdigest()
     logger.trace(f"Computed checksum of '{tarfile_path.name}': {actual}")
-    if actual != expected:
+    if actual != expected_checksum:
         _fail_restore(
-            f"Checksum mismatch for '{backup.name}': archive is corrupt, refusing to "
-            f"extract (expected {expected}, got {actual})"
+            f"Checksum mismatch for '{backup_name}': archive is corrupt, refusing to "
+            f"restore (expected {expected_checksum}, got {actual})"
         )
-    logger.debug(f"Checksum verified for '{backup.name}'")
+    if extract_error is not None:
+        # The digest matched, so the archive is intact and the failure is a real
+        # extraction problem (e.g. no space in staging). Re-raise for the caller.
+        raise extract_error
+    logger.debug(f"Checksum verified for '{backup_name}'")
 
 
 def _is_within(inner: Path, outer: Path) -> bool:
@@ -322,13 +365,19 @@ class EZBak:
         self.rebuild_storage_locations = False
         return self._storage_locations
 
-    def _create_tmp_backup_file(self) -> Path | None:
+    def _create_tmp_backup_file(self) -> tuple[Path, str | None] | None:
         """Create a temporary backup file in the temporary directory.
 
         Compress all configured source files and directories into a single tar.gz archive in the temporary directory. Use this to prepare backup data before distributing it to storage locations.
 
+        When checksums are enabled, the archive's SHA-256 is computed inline while
+        the tar is written, so no separate read pass over the finished archive is
+        needed (that re-read inflated the container's page-cache footprint).
+
         Returns:
-            Path | None: The path to the temporary backup file, or None if archive creation failed.
+            tuple[Path, str | None] | None: The temporary backup path and its
+            SHA-256 hex digest (None when checksums are disabled), or None if
+            archive creation failed.
 
         Raises:
             ConfigurationError: If no source paths are configured or a source path is neither a file nor a directory.
@@ -340,12 +389,18 @@ class EZBak:
 
         temp_tarfile = self.tmp_dir / new_staging_filename()
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
+        hasher = hashlib.sha256() if self.settings.use_checksums else None
         try:
-            with tarfile.open(
-                temp_tarfile, "w:gz", compresslevel=self.settings.compression_level
-            ) as tar:
-                for source in self.settings.source_paths:
-                    self._archive_source(tar, source)
+            with temp_tarfile.open("wb") as raw:
+                # Tee the compressed bytes through the hash as tarfile writes them.
+                stream = HashingWriter(fileobj=raw, hasher=hasher) if hasher is not None else raw
+                with tarfile.open(
+                    fileobj=cast("IO[bytes]", stream),
+                    mode="w:gz",
+                    compresslevel=self.settings.compression_level,
+                ) as tar:
+                    for source in self.settings.source_paths:
+                        self._archive_source(tar, source)
         except (tarfile.TarError, OSError) as e:
             # Fail the whole backup loudly rather than write a partial archive: an
             # unreadable directory or a file that vanished mid-walk must not silently
@@ -353,8 +408,9 @@ class EZBak:
             logger.error(f"Failed to create backup: {e}")
             return None
 
+        checksum = hasher.hexdigest() if hasher is not None else None
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
-        return temp_tarfile
+        return temp_tarfile, checksum
 
     def _tar_add_filter(
         self, source: Path, *, strip: bool
@@ -493,8 +549,13 @@ class EZBak:
 
         # use_checksums is the master switch: when off, skip verification entirely and
         # ignore any sidecar in storage, rather than verifying whenever one is present.
-        if self.settings.use_checksums:
-            _verify_checksum(backend=backend, backup=backup, tarfile_path=tarfile_path)
+        # The digest is checked during extraction (see _extract_archive), not here, so
+        # the archive is read only once.
+        expected_checksum = (
+            _expected_checksum(backend=backend, backup=backup)
+            if self.settings.use_checksums
+            else None
+        )
 
         # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
         # a given target are not concurrent, so removing our own scratch dirs is safe.
@@ -513,14 +574,16 @@ class EZBak:
         try:
             # Catch OSError alongside TarError so a missing or unreadable archive
             # fails loudly rather than escaping as a raw error. The extract runs
-            # entirely in staging, so a failure here never touches the live data.
+            # entirely in staging, so a failure here never touches the live data. A
+            # checksum mismatch raises RestoreFailedError from inside and propagates
+            # past this handler unchanged.
             try:
-                with tarfile.open(tarfile_path) as archive:
-                    archive.extractall(path=staging, filter="data")
-                    # getmembers() is cached by extractall, so this is not a re-read.
-                    logger.trace(
-                        f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"
-                    )
+                _extract_archive(
+                    tarfile_path=tarfile_path,
+                    staging=staging,
+                    expected_checksum=expected_checksum,
+                    backup_name=backup.name,
+                )
             except (tarfile.TarError, OSError) as e:
                 _fail_restore(f"Failed to extract backup archive: {tarfile_path}: {e}", e)
 
@@ -624,12 +687,12 @@ class EZBak:
         validate_source_paths(source_paths=self.settings.source_paths)
 
         logger.trace("Creating new backup")
-        tmp_backup = self._create_tmp_backup_file()
-        if tmp_backup is None:
+        result = self._create_tmp_backup_file()
+        if result is None:
             logger.error("Backup creation aborted: temporary archive was not created")
             raise BackupFailedError(["backup archive could not be created"])
 
-        checksum = sha256_file(tmp_backup) if self.settings.use_checksums else None
+        tmp_backup, checksum = result
         if checksum is not None:
             logger.trace(f"Computed checksum of staged archive: {checksum}")
         created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)

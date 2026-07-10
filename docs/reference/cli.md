@@ -113,7 +113,7 @@ name a point in time or use `--if-exists`.
 | `--if-exists` | | Exit cleanly instead of failing when no backup exists. | `False` |
 | `--uid` | `-u` | Set owner UID on restored files. | |
 | `--gid` | `-g` | Set owner GID on restored files. | |
-| `--use-checksums` / `--no-use-checksums` | | Verify the archive against its `.sha256` sidecar before extracting. | `True` |
+| `--use-checksums` / `--no-use-checksums` | | Verify the archive against its `.sha256` sidecar on restore. | `True` |
 
 ```bash
 # Restore the latest backup

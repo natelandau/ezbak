@@ -38,11 +38,11 @@ time, empty the target first, and set ownership on the restored files.
 !!! note "Restores verify a checksum sidecar by default"
 
     With `use_checksums` enabled (the default), ezbak checks the archive against
-    its `.sha256` sidecar before extracting anything. A mismatch fails the
-    restore; a missing or unreadable sidecar logs a warning and restores anyway.
-    Set `use_checksums` to `false` (or pass `--no-use-checksums`) to skip the
-    check and ignore any sidecar. See [Archive integrity
-    checksums](../concepts/checksums.md).
+    its `.sha256` sidecar while extracting it and fails the restore before your
+    data is touched if they differ. A missing or unreadable sidecar logs a
+    warning and restores anyway. Set `use_checksums` to `false` (or pass
+    `--no-use-checksums`) to skip the check and ignore any sidecar. See [Archive
+    integrity checksums](../concepts/checksums.md).
 
 ## Restore a backup from a point in time
 
