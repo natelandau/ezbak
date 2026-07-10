@@ -97,3 +97,12 @@ class RestoreFailedError(EZBakError):
     that could not be extracted, so a failed restore never looks like a success.
     This is especially important after a clean-before-restore wiped the target.
     """
+
+
+class HookFailedError(EZBakError):
+    """A configured lifecycle hook failed, so the run must not be treated as a success.
+
+    Raised by the container run path when a pre/post backup or restore hook exits
+    non-zero, times out, or cannot be spawned. Subclasses EZBakError so the existing
+    entrypoint handlers log it, ping the healthcheck failure URL, and exit non-zero.
+    """

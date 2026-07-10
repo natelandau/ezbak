@@ -42,3 +42,14 @@ class EnvConfig(BackupConfig, BaseSettings):
     # that share one cron so they do not hit a shared destination at the same instant.
     # ge=0 rejects a mistyped negative EZBAK_CRON_JITTER at load time.
     cron_jitter: int = Field(default=60, ge=0)
+
+    # Operator-configured lifecycle hooks run around container backup/restore runs.
+    # Each is a shell command run via `sh -c` (see ezbak.hooks.run_hook); unset is a
+    # no-op. Container-only: a library caller wraps its own code around the call.
+    pre_backup_hook: str | None = None
+    post_backup_hook: str | None = None
+    pre_restore_hook: str | None = None
+    post_restore_hook: str | None = None
+    # Seconds before a hook is killed; 0 runs to completion. ge=0 rejects a mistyped
+    # negative EZBAK_HOOK_TIMEOUT at load time.
+    hook_timeout: int = Field(default=300, ge=0)
