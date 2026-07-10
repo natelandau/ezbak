@@ -37,6 +37,9 @@ def run_hook(command: str | None, *, phase: str, timeout: int) -> bool:
         return True
 
     logger.info(f"Running {phase} hook: {command}")
+    # Effective timeout after the 0 -> None conversion below, so a stuck hook can be
+    # diagnosed at TRACE without re-reading the config.
+    logger.trace(f"{phase} hook exec: /bin/sh -c with timeout={timeout or None}")
     try:
         # timeout or None: a configured 0 means "run to completion" (subprocess treats
         # None as no timeout). shell=False; the shell is the explicit `/bin/sh -c` argv.

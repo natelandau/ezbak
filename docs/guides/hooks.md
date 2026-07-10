@@ -137,6 +137,22 @@ ping.
     restore happened. Write a pre-restore hook that tolerates running with
     nothing to restore. See [Fresh deploys](../orchestration/fresh-deploys.md).
 
+## Debugging a hook
+
+When a hook misbehaves, raise `EZBAK_LOG_LEVEL` and re-run. Hook logging is
+tiered so each level adds detail:
+
+| `EZBAK_LOG_LEVEL` | What you see |
+| --- | --- |
+| `INFO` (default) | Each configured hook is announced at boot with its timeout, so you can confirm the container picked it up. Every run logs the command as it starts, and any failure logs the exit code, timeout, or spawn error along with the hook's captured output. |
+| `DEBUG` | Adds a success line per hook and the captured stdout/stderr of hooks that succeed, so you can inspect a hook that exits `0` but does the wrong thing. |
+| `TRACE` | Adds the resolved shell invocation and effective timeout. |
+
+A hook configured for the action the container is not running (a
+`EZBAK_PRE_RESTORE_HOOK` on a container whose `EZBAK_ACTION` is `backup`, for
+example) never fires. ezbak warns about that at boot, since it is the usual cause
+of a hook that seems configured but never runs.
+
 ## Timeout
 
 `EZBAK_HOOK_TIMEOUT` caps how long a hook can run, in seconds. The default is

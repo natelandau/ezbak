@@ -22,6 +22,7 @@ from ezbak.container import (
     _run_shutdown_backup,
     do_backup,
     do_restore,
+    log_configured_hooks,
 )
 from ezbak.container import main as entrypoint
 from ezbak.env import EnvConfig
@@ -868,3 +869,74 @@ def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
     # When running do_restore, then it returns cleanly and the post hook did not run
     do_restore(app, config)
     assert not marker.exists()
+
+
+def test_log_configured_hooks_logs_active_hook_at_info(filesystem, capsys):
+    """Verify a configured hook matching the action is announced at INFO on boot."""
+    # Given a backup container with a pre-backup hook configured
+    instantiate_logger(LogLevel.INFO)
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    os.environ["EZBAK_ACTION"] = "backup"
+    src_dir, dest1, _ = filesystem
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        pre_backup_hook="echo hi",
+        hook_timeout=30,
+        _env_file=None,
+    )
+
+    # When logging the hook configuration at boot
+    log_configured_hooks(config)
+
+    # Then the active hook and its timeout are surfaced at INFO
+    output = capsys.readouterr().err
+    assert "INFO" in output
+    assert "pre-backup hook configured (30s timeout): echo hi" in output
+
+
+def test_log_configured_hooks_warns_on_action_mismatch(filesystem, capsys):
+    """Verify a hook configured for the other action is flagged as never running."""
+    # Given a backup container that mistakenly configured a restore hook
+    instantiate_logger(LogLevel.INFO)
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    os.environ["EZBAK_ACTION"] = "backup"
+    src_dir, dest1, _ = filesystem
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        pre_restore_hook="echo hi",
+        _env_file=None,
+    )
+
+    # When logging the hook configuration at boot
+    log_configured_hooks(config)
+
+    # Then the mismatched hook is warned about instead of announced as active
+    output = capsys.readouterr().err
+    assert "WARNING" in output
+    assert "pre-restore hook is configured but EZBAK_ACTION is 'backup'" in output
+
+
+def test_log_configured_hooks_silent_when_no_hooks(filesystem, capsys):
+    """Verify no hook lines are logged when no hooks are configured."""
+    # Given a container with no hooks configured
+    instantiate_logger(LogLevel.INFO)
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    os.environ["EZBAK_ACTION"] = "backup"
+    src_dir, dest1, _ = filesystem
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        _env_file=None,
+    )
+
+    # When logging the hook configuration at boot
+    log_configured_hooks(config)
+
+    # Then nothing about hooks is emitted
+    output = capsys.readouterr().err
+    assert "hook" not in output

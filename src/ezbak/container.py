@@ -231,6 +231,36 @@ def _run_cron(app: EZBak, config: EnvConfig, action: Action) -> None:
             scheduler.shutdown(wait=False)
 
 
+def log_configured_hooks(config: EnvConfig) -> None:
+    """Announce configured lifecycle hooks at boot so an operator can confirm they are live.
+
+    Which hooks are active materially changes a run (a failing pre-backup hook aborts the
+    backup), so surface it at INFO in default logs rather than burying it in the debug
+    config dump. Warn about a hook configured for the action this container is not running:
+    it will never fire, which is almost always the cause of a "my hook never ran" report.
+
+    Args:
+        config (EnvConfig): The container configuration holding the hook fields.
+    """
+    hooks = (
+        ("pre-backup", config.pre_backup_hook, Action.BACKUP),
+        ("post-backup", config.post_backup_hook, Action.BACKUP),
+        ("pre-restore", config.pre_restore_hook, Action.RESTORE),
+        ("post-restore", config.post_restore_hook, Action.RESTORE),
+    )
+    timeout_desc = f"{config.hook_timeout}s timeout" if config.hook_timeout else "no timeout"
+    for phase, command, action in hooks:
+        if not command or not command.strip():
+            continue
+        if config.entrypoint_action is not None and config.entrypoint_action != action:
+            logger.warning(
+                f"{phase} hook is configured but EZBAK_ACTION is "
+                f"'{config.entrypoint_action.value}', so it will never run"
+            )
+        else:
+            logger.info(f"{phase} hook configured ({timeout_desc}): {command}")
+
+
 def log_debug_info(app: EZBak) -> None:
     """Log debug information about the configuration."""
     for key, value in sorted(app.settings.model_dump().items()):
@@ -271,6 +301,7 @@ def main() -> None:
 
     logger.info(f"ezbak v{__version__}")
     log_debug_info(app)
+    log_configured_hooks(config)
 
     if config.entrypoint_action is None:
         logger.error("No action configured: set EZBAK_ACTION to 'backup' or 'restore'")
