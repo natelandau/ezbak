@@ -31,14 +31,20 @@ def chown_files(directory: Path | str, uid: int, gid: int) -> None:
     uid = int(uid)
     gid = int(gid)
 
+    failures = 0
     for path in directory.rglob("*"):
         try:
-            os.chown(path.resolve(), uid, gid)
-        except (OSError, PermissionError) as e:
+            # lchown targets the entry itself: a symlink inside the restored tree
+            # must never chown whatever it points at (possibly outside the tree).
+            os.lchown(path=path, uid=uid, gid=gid)
+        except OSError as e:
+            failures += 1
             logger.warning(f"Failed to chown {path}: {e}")
-            break
 
-    logger.info(f"chown all restored files to '{uid}:{gid}'")
+    if failures:
+        logger.warning(f"chown restored files to '{uid}:{gid}' finished with {failures} failures")
+    else:
+        logger.info(f"chown all restored files to '{uid}:{gid}'")
 
 
 def should_include_file(
