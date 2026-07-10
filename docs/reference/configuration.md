@@ -55,7 +55,7 @@ for the model and [Back up to S3](../guides/s3.md) for the S3 setup.
 
 | Field | Environment variable | CLI flag | Default |
 | --- | --- | --- | --- |
-| `compression_level` | `EZBAK_COMPRESSION_LEVEL` | `create -c`, `--compression-level` | `9` |
+| `compression_level` | `EZBAK_COMPRESSION_LEVEL` | `create -c`, `--compression-level` | `6` |
 | `strip_source_paths` | `EZBAK_STRIP_SOURCE_PATHS` | `create -s`, `--strip-source-paths` | `False` |
 | `delete_source_after_backup` | `EZBAK_DELETE_SOURCE_AFTER_BACKUP` | environment only | `False` |
 | `include_regex` | `EZBAK_INCLUDE_REGEX` | `create -i`, `--include-regex` | `None` |

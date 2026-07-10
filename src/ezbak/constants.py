@@ -14,7 +14,7 @@ TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
 # `\Z` (not `$`) so a trailing newline does not slip through: `$` also matches
 # just before a final `\n`, which would pass a value like "20250101\n".
 RESTORE_DATE_REGEX = re.compile(r"^\d{4}(\d{2}(\d{2}(T\d{2}(\d{2}(\d{2})?)?)?)?)?\Z")
-DEFAULT_COMPRESSION_LEVEL = 9
+DEFAULT_COMPRESSION_LEVEL = 6
 ENVAR_PREFIX = "EZBAK_"
 BACKUP_EXTENSION = "tgz"
 CHECKSUM_EXTENSION = "sha256"

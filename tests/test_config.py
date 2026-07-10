@@ -171,3 +171,13 @@ def test_use_checksums_defaults_true():
 
     # Then it defaults to using checksum sidecars
     assert config.use_checksums is True
+
+
+def test_compression_level_defaults_to_six():
+    """Verify the default gzip level is 6, the speed/size sweet spot."""
+    # Given a minimal config with no explicit compression_level
+    # When constructing the config
+    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # noqa: S108
+
+    # Then it defaults to gzip level 6
+    assert config.compression_level == 6
