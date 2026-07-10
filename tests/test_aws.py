@@ -90,7 +90,7 @@ def test_get_latest_backup(s3_bucket, filesystem, debug, capsys, tmp_path):
     output = capsys.readouterr().err
     # debug(output)
     assert "Restoring backup: test-20240609T000000-yearly.tgz" in output
-    assert "S3 file exists: 'test-20240609T000000-yearly.tgz'" in output
+    assert "Downloading backup from S3 to tmp file: test-20240609T000000-yearly.tgz" in output
 
 
 def test_delete_object(s3_bucket, mocker, debug, capsys, tmp_path):
@@ -117,7 +117,7 @@ def test_delete_object(s3_bucket, mocker, debug, capsys, tmp_path):
     # debug(output)
     assert "S3: Deleted test-20240609T000000-yearly.tgz" in output
     assert backup_manager.aws_service is not None
-    assert backup_manager.aws_service.object_exists("test-20240609T000000-yearly.tgz") is False
+    assert backup_manager.aws_service.list_objects() == []
 
 
 def test_delete_objects(mocker, debug, capsys):
@@ -356,11 +356,6 @@ def test_s3_prepare_for_restore_network_error_raises_storage_read_error(
     )
     backend = app.backends[0]
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
-    # The download path checks object_exists before calling get_object, so a real
-    # object must be present for that check to reach the patched get_object call.
-    boto3.client("s3", region_name="us-east-1").put_object(
-        Bucket=s3_bucket, Key="test-20240609T000000-yearly.tgz", Body=b"data"
-    )
     mocker.patch.object(
         backend.aws_service,
         "get_object",
@@ -388,11 +383,6 @@ def test_s3_prepare_for_restore_client_error_raises_storage_read_error(
     )
     backend = app.backends[0]
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
-    # The download path checks object_exists before calling get_object, so a real
-    # object must be present for that check to reach the patched get_object call.
-    boto3.client("s3", region_name="us-east-1").put_object(
-        Bucket=s3_bucket, Key="test-20240609T000000-yearly.tgz", Body=b"data"
-    )
     mocker.patch.object(
         backend.aws_service,
         "get_object",

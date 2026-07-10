@@ -565,80 +565,88 @@ class EZBak:
         if tarfile_path is None:
             _fail_restore(f"Backup archive is missing from storage: {backup.name}")
 
-        # use_checksums is the master switch: when off, skip verification entirely and
-        # ignore any sidecar in storage, rather than verifying whenever one is present.
-        # The digest is checked during extraction (see _extract_archive), not here, so
-        # the archive is read only once.
-        expected_checksum = (
-            _expected_checksum(backend=backend, backup=backup)
-            if self.settings.use_checksums
-            else None
-        )
-
-        # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
-        # a given target are not concurrent, so removing our own scratch dirs is safe.
-        if not clean:
-            _reap_orphaned_staging(destination)
-
-        # Stage inside the destination (a child, not a sibling) so the commit is a
-        # same-filesystem rename even when the destination is itself a mount point.
+        # From here the backend may hold a staged download, so every exit path,
+        # including failures before the extract starts (sidecar fetch, orphan reap,
+        # staging mkdtemp), must run cleanup_restore_artifact or the download leaks.
         try:
-            staging = Path(mkdtemp(dir=destination, prefix=_STAGING_PREFIX))
-        except OSError as e:
-            _fail_restore(f"Failed to create restore staging directory in '{destination}': {e}", e)
+            # use_checksums is the master switch: when off, skip verification entirely
+            # and ignore any sidecar in storage, rather than verifying whenever one is
+            # present. The digest is checked during extraction (see _extract_archive),
+            # not here, so the archive is read only once.
+            expected_checksum = (
+                _expected_checksum(backend=backend, backup=backup)
+                if self.settings.use_checksums
+                else None
+            )
 
-        logger.trace(f"Attempting to extract backup to staging dir '{staging}'")
-        commit_failed = False
-        try:
-            # Catch OSError alongside TarError so a missing or unreadable archive
-            # fails loudly rather than escaping as a raw error. The extract runs
-            # entirely in staging, so a failure here never touches the live data. A
-            # checksum mismatch raises RestoreFailedError from inside and propagates
-            # past this handler unchanged.
+            # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
+            # a given target are not concurrent, so removing our own scratch dirs is safe.
+            if not clean:
+                _reap_orphaned_staging(destination)
+
+            # Stage inside the destination (a child, not a sibling) so the commit is a
+            # same-filesystem rename even when the destination is itself a mount point.
             try:
-                _extract_archive(
-                    tarfile_path=tarfile_path,
-                    staging=staging,
-                    expected_checksum=expected_checksum,
-                    backup_name=backup.name,
-                )
-            except (tarfile.TarError, OSError) as e:
-                _fail_restore(f"Failed to extract backup archive: {tarfile_path}: {e}", e)
-
-            # chown the staging tree, not the destination: in overlay mode only the
-            # restored files change ownership; in clean mode staging becomes the
-            # whole destination. Compare against None, not truthiness: uid/gid 0
-            # (root) is a valid target and must not be treated as "unset".
-            if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
-                chown_files(
-                    directory=staging,
-                    uid=self.settings.chown_uid,
-                    gid=self.settings.chown_gid,
-                )
-
-            # Commit only after a fully successful extract.
-            try:
-                _commit_restore(staging=staging, dest=destination, clean=clean)
+                staging = Path(mkdtemp(dir=destination, prefix=_STAGING_PREFIX))
             except OSError as e:
-                # The commit deletes then moves, so a failure here can leave the
-                # destination partial. Keep the extracted staging tree so an operator
-                # can recover the restored files by hand; make the failure loud.
-                commit_failed = True
                 _fail_restore(
-                    f"Restore failed while swapping files into '{destination}'; "
-                    f"the directory may be in an inconsistent state. The extracted "
-                    f"files are preserved at '{staging}' for manual recovery: {e}",
-                    e,
+                    f"Failed to create restore staging directory in '{destination}': {e}", e
                 )
-        finally:
-            # Remove staging on success and on extract failure (throwaway). Only a
-            # commit failure preserves it (see above), because the destination is
-            # then partial and staging holds the sole clean copy of the restore.
-            if not commit_failed:
+
+            logger.trace(f"Attempting to extract backup to staging dir '{staging}'")
+            commit_failed = False
+            try:
+                # Catch OSError alongside TarError so a missing or unreadable archive
+                # fails loudly rather than escaping as a raw error. The extract runs
+                # entirely in staging, so a failure here never touches the live data. A
+                # checksum mismatch raises RestoreFailedError from inside and propagates
+                # past this handler unchanged.
                 try:
-                    shutil.rmtree(staging)
+                    _extract_archive(
+                        tarfile_path=tarfile_path,
+                        staging=staging,
+                        expected_checksum=expected_checksum,
+                        backup_name=backup.name,
+                    )
+                except (tarfile.TarError, OSError) as e:
+                    _fail_restore(f"Failed to extract backup archive: {tarfile_path}: {e}", e)
+
+                # chown the staging tree, not the destination: in overlay mode only the
+                # restored files change ownership; in clean mode staging becomes the
+                # whole destination. Compare against None, not truthiness: uid/gid 0
+                # (root) is a valid target and must not be treated as "unset".
+                if self.settings.chown_uid is not None and self.settings.chown_gid is not None:
+                    chown_files(
+                        directory=staging,
+                        uid=self.settings.chown_uid,
+                        gid=self.settings.chown_gid,
+                    )
+
+                # Commit only after a fully successful extract.
+                try:
+                    _commit_restore(staging=staging, dest=destination, clean=clean)
                 except OSError as e:
-                    logger.warning(f"Failed to remove restore staging dir '{staging}': {e}")
+                    # The commit deletes then moves, so a failure here can leave the
+                    # destination partial. Keep the extracted staging tree so an operator
+                    # can recover the restored files by hand; make the failure loud.
+                    commit_failed = True
+                    _fail_restore(
+                        f"Restore failed while swapping files into '{destination}'; "
+                        f"the directory may be in an inconsistent state. The extracted "
+                        f"files are preserved at '{staging}' for manual recovery: {e}",
+                        e,
+                    )
+            finally:
+                # Remove staging on success and on extract failure (throwaway). Only a
+                # commit failure preserves it (see above), because the destination is
+                # then partial and staging holds the sole clean copy of the restore.
+                if not commit_failed:
+                    try:
+                        shutil.rmtree(staging)
+                    except OSError as e:
+                        logger.warning(f"Failed to remove restore staging dir '{staging}': {e}")
+        finally:
+            backend.cleanup_restore_artifact(tarfile_path)
 
         logger.info(f"Backup restored to '{destination}'")
         return True

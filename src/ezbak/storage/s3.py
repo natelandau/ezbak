@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 
@@ -11,11 +12,17 @@ from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
 from ezbak.exceptions import StorageDeleteError, StorageReadError, StorageWriteError
 from ezbak.naming import new_staging_filename
-from ezbak.storage.aws import AWSService
+from ezbak.storage.aws import AWSService, is_missing_object_error
 from ezbak.storage.base import StorageBackend
 
 # The S3 DeleteObjects API accepts at most 1000 keys per request.
 _S3_DELETE_BATCH_LIMIT = 1000
+
+# Every failure an AWSService call can surface. Boto3Error is required alongside
+# the botocore pair: the managed transfers convert errors (upload_file wraps a
+# ClientError into S3UploadFailedError, download_file raises RetriesExceededError),
+# and those subclass Boto3Error, not BotoCoreError.
+_S3_ERRORS = (Boto3Error, BotoCoreError, ClientError)
 
 
 class S3Backend(StorageBackend):
@@ -96,7 +103,7 @@ class S3Backend(StorageBackend):
         logger.debug(f"Upload tmp backup to S3: {backup_name}")
         try:
             self.aws_service.upload_object(file=tmp_backup, name=backup_name)
-        except (BotoCoreError, ClientError) as e:
+        except _S3_ERRORS as e:
             msg = f"S3 upload failed for '{backup_name}': {e}"
             logger.error(msg)
             raise StorageWriteError(msg) from e
@@ -114,22 +121,14 @@ class S3Backend(StorageBackend):
     def _write_sidecar(self, *, backup: Backup, content: str) -> None:
         """Upload the .sha256 sidecar for an archive; a failure warns and is tolerated.
 
-        Stage the tiny sidecar in the backend's temp dir and reuse the same
-        upload path as the archive, so the sidecar has no special S3 code path.
-
         Args:
             backup (Backup): The backup the sidecar belongs to.
             content (str): The sidecar object content.
         """
-        sidecar = sidecar_name(backup.name)
-        tmp_sidecar = self.tmp_dir / sidecar
         try:
-            tmp_sidecar.write_text(content)
-            self.aws_service.upload_object(file=tmp_sidecar, name=sidecar)
-        except (OSError, BotoCoreError, ClientError) as e:
+            self.aws_service.upload_content(content=content, name=sidecar_name(backup.name))
+        except (OSError, *_S3_ERRORS) as e:
             logger.warning(f"Failed to write checksum sidecar for '{backup.name}': {e}")
-        finally:
-            tmp_sidecar.unlink(missing_ok=True)
 
     def delete(self, backup: Backup) -> bool:
         """Delete a single object from the bucket.
@@ -148,7 +147,7 @@ class S3Backend(StorageBackend):
         """
         try:
             self.aws_service.delete_object(key=backup.name)
-        except (BotoCoreError, ClientError) as e:
+        except _S3_ERRORS as e:
             msg = f"S3 delete failed for '{backup.name}': {e}"
             logger.error(msg)
             raise StorageDeleteError(msg) from e
@@ -167,7 +166,7 @@ class S3Backend(StorageBackend):
         """
         try:
             self.aws_service.delete_object(key=sidecar_name(backup.name))
-        except (BotoCoreError, ClientError) as e:
+        except _S3_ERRORS as e:
             logger.warning(f"Failed to delete checksum sidecar for '{backup.name}': {e}")
 
     def delete_many(self, backups: list[Backup]) -> list[Backup]:
@@ -211,7 +210,7 @@ class S3Backend(StorageBackend):
                     if backup is not None:
                         logger.info(f"Deleted from S3: {backup.name}")
                         deleted.append(backup)
-        except (BotoCoreError, ClientError) as e:
+        except _S3_ERRORS as e:
             msg = f"S3 batch delete failed: {e}"
             logger.error(msg)
             raise StorageDeleteError(msg) from e
@@ -227,22 +226,37 @@ class S3Backend(StorageBackend):
             Path | None: The downloaded archive path, or None if the object is missing.
 
         Raises:
-            StorageReadError: If checking existence or downloading the object fails.
+            StorageReadError: If downloading the object fails.
         """
         logger.info(f"Restoring backup from S3: {backup.name}")
+        logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
+        tmp_file = self.tmp_dir / new_staging_filename()
+        # Attempt the download directly and treat a missing key as "no backup",
+        # rather than paying a HEAD round trip before every GET.
         try:
-            if not self.aws_service.object_exists(backup.name):
+            self.aws_service.get_object(key=backup.name, destination=tmp_file)
+        except _S3_ERRORS as e:
+            # A failed transfer can leave a partial file behind; the caller never
+            # receives the path on this branch, so reclaim it here.
+            tmp_file.unlink(missing_ok=True)
+            if isinstance(e, ClientError) and is_missing_object_error(e):
                 logger.error(f"Backup file does not exist in S3: {backup.name}")
                 return None
-
-            logger.trace(f"Downloading backup from S3 to tmp file: {backup.name}")
-            tmp_file = self.tmp_dir / new_staging_filename()
-            self.aws_service.get_object(key=backup.name, destination=tmp_file)
-        except (BotoCoreError, ClientError) as e:
             msg = f"S3 download failed for '{backup.name}': {e}"
             logger.error(msg)
             raise StorageReadError(msg) from e
         return tmp_file
+
+    def cleanup_restore_artifact(self, path: Path) -> None:  # noqa: PLR6301
+        """Delete the downloaded archive copy staged by `prepare_for_restore`.
+
+        The staging dir only vanishes at process exit, so without this a
+        scheduled restore leaks one archive-sized file per run.
+        """
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning(f"Failed to remove downloaded archive '{path}': {e}")
 
     def _read_sidecar(self, backup: Backup) -> str | None:
         """Download and return the raw sidecar object for a backup, if one exists.
@@ -259,21 +273,15 @@ class S3Backend(StorageBackend):
         """
         sidecar = sidecar_name(backup.name)
         logger.trace(f"Looking up checksum sidecar object '{sidecar}'")
-        tmp_sidecar: Path | None = None
+        # Read the tiny object straight into memory (no disk staging) and treat a
+        # missing key as "no sidecar", rather than paying a HEAD round trip before
+        # every GET. UnicodeDecodeError is caught alongside the storage errors: a
+        # bit-rotted sidecar must warn and proceed, not crash the restore.
         try:
-            if not self.aws_service.object_exists(sidecar):
+            return self.aws_service.get_object_content(key=sidecar)
+        except (UnicodeDecodeError, *_S3_ERRORS) as e:
+            if isinstance(e, ClientError) and is_missing_object_error(e):
                 logger.trace(f"No checksum sidecar object '{sidecar}'")
-                return None
-            tmp_sidecar = self.tmp_dir / new_staging_filename()
-            self.aws_service.get_object(key=sidecar, destination=tmp_sidecar)
-            return tmp_sidecar.read_text()
-        except (OSError, UnicodeDecodeError, BotoCoreError, ClientError) as e:
-            # UnicodeDecodeError is a ValueError subclass, not an OSError, so it
-            # needs its own clause: a bit-rotted sidecar must warn and proceed,
-            # not crash the restore.
-            logger.warning(f"Could not read checksum sidecar for '{backup.name}': {e}")
+            else:
+                logger.warning(f"Could not read checksum sidecar for '{backup.name}': {e}")
             return None
-        finally:
-            # Guard for the case the download failed before tmp_sidecar was assigned.
-            if tmp_sidecar is not None:
-                tmp_sidecar.unlink(missing_ok=True)

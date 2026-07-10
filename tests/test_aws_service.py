@@ -4,9 +4,17 @@ from pathlib import Path
 
 import boto3
 import pytest
+from boto3.exceptions import RetriesExceededError, S3UploadFailedError
 
 from ezbak import ezbak
-from ezbak.exceptions import RestoreFailedError, StorageInitError
+from ezbak.backup import Backup
+from ezbak.constants import StorageType
+from ezbak.exceptions import (
+    BackupFailedError,
+    RestoreFailedError,
+    StorageInitError,
+    StorageReadError,
+)
 from ezbak.storage.aws import AWSService
 
 
@@ -64,6 +72,170 @@ def test_s3_restore_rejects_corrupt_archive(s3_bucket: str, filesystem, tmp_path
     restore_dir.mkdir()
     with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
         app.restore_backup(restore_path=restore_dir)
+
+
+def test_s3_restore_removes_downloaded_archive(s3_bucket: str, filesystem, tmp_path) -> None:
+    """Verify a successful S3 restore removes the downloaded archive from the staging dir."""
+    # Given: a backup stored in S3
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    app.create_backup()
+
+    # When: restoring the backup
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    assert app.restore_backup(restore_path=restore_dir)
+
+    # Then: the staging dir is empty again, so a cron restore container does not
+    # accumulate one archive-sized file per tick
+    assert list(app.tmp_dir.iterdir()) == []
+
+
+def test_s3_prepare_for_restore_missing_object_returns_none(s3_bucket: str, filesystem) -> None:
+    """Verify preparing a restore for an object absent from the bucket returns None."""
+    # Given: an S3 app and a backup whose object was never uploaded
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    backend = app.backends[0]
+    backup = Backup(name="test-20240609T000000.tgz", storage_type=StorageType.AWS)
+
+    # When: preparing the restore
+    # Then: the missing object degrades to None rather than raising
+    assert backend.prepare_for_restore(backup) is None
+
+
+def test_s3_restore_missing_sidecar_warns_and_succeeds(
+    s3_bucket: str, filesystem, tmp_path, capsys
+) -> None:
+    """Verify an S3 restore proceeds with a warning when the sidecar object is absent."""
+    # Given: a stored backup whose sidecar object has been removed
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    backup = app.create_backup()[0]
+    client = boto3.client("s3", region_name="us-east-1")
+    client.delete_object(Bucket=s3_bucket, Key=backup.name + ".sha256")
+
+    # When: restoring the backup
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    assert app.restore_backup(restore_path=restore_dir)
+
+    # Then: the restore succeeded and warned about the missing sidecar
+    output = capsys.readouterr().err
+    assert "No checksum sidecar" in output
+    assert (restore_dir / "src" / "foo.txt").exists()
+
+
+def test_s3_write_wraps_managed_transfer_error(s3_bucket: str, filesystem, mocker) -> None:
+    """Verify an upload failure surfaced as boto3's S3UploadFailedError becomes StorageWriteError."""
+    # Given: an S3 app whose managed upload fails (boto3 wraps the ClientError itself)
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    mocker.patch.object(
+        app.backends[0].aws_service,
+        "upload_object",
+        side_effect=S3UploadFailedError("denied"),
+    )
+
+    # When: creating a backup
+    # Then: the run fails loudly instead of crashing with a raw boto3 error
+    with pytest.raises(BackupFailedError):
+        app.create_backup()
+
+
+def test_s3_restore_wraps_managed_transfer_error(s3_bucket: str, filesystem, mocker) -> None:
+    """Verify a download failure surfaced as boto3's RetriesExceededError becomes StorageReadError."""
+    # Given: a stored backup whose download exhausts boto3's transfer retries
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    app.create_backup()
+    mocker.patch.object(
+        app.backends[0].aws_service,
+        "get_object",
+        side_effect=RetriesExceededError(OSError("connection reset")),
+    )
+
+    # When: preparing the restore
+    # Then: the failure is wrapped instead of escaping as a raw boto3 error
+    with pytest.raises(StorageReadError, match="S3 download failed"):
+        app.backends[0].prepare_for_restore(app.list_backups()[0])
+
+    # Then: no partial download is left behind in the staging dir
+    assert list(app.tmp_dir.iterdir()) == []
+
+
+def test_s3_restore_cleans_download_when_staging_fails(
+    s3_bucket: str, filesystem, tmp_path, mocker
+) -> None:
+    """Verify the downloaded archive is removed when the restore fails before extraction."""
+    # Given: a stored backup and a restore whose staging dir cannot be created
+    src_dir, _, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="k",
+        aws_secret_key="s",
+    )
+    app.create_backup()
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    mocker.patch("ezbak.core.mkdtemp", autospec=True, side_effect=OSError("no space"))
+
+    # When: restoring fails before the extract begins
+    with pytest.raises(RestoreFailedError, match="staging directory"):
+        app.restore_backup(restore_path=restore_dir)
+
+    # Then: the downloaded archive was reclaimed, not leaked until process exit
+    assert list(app.tmp_dir.iterdir()) == []
+
+
+def test_local_restore_keeps_stored_archive(filesystem, tmp_path) -> None:
+    """Verify a local restore never deletes the stored archive it restored from."""
+    # Given: a backup stored in a local storage path
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backup = app.create_backup()[0]
+
+    # When: restoring the backup
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    assert app.restore_backup(restore_path=restore_dir)
+
+    # Then: the archive is still in storage (prepare_for_restore returned the
+    # stored file itself, not a staged copy)
+    assert backup.path is not None
+    assert backup.path.exists()
 
 
 def test_s3_index_excludes_sidecars(s3_bucket: str, filesystem) -> None:
@@ -183,8 +355,8 @@ def test_build_full_key_with_and_without_prefix(s3_bucket: str) -> None:
     assert svc.build_full_key("team/a.tgz") == "team/a.tgz"  # already-prefixed is not doubled
 
 
-def test_upload_object_exists_and_get(s3_bucket: str, tmp_path: Path) -> None:
-    """Verify upload_object stores a file that object_exists and get_object can retrieve."""
+def test_upload_object_round_trips_via_get(s3_bucket: str, tmp_path: Path) -> None:
+    """Verify upload_object stores a file that list_objects and get_object can retrieve."""
     # Given: a service and a local file
     svc = _service(s3_bucket)
     src = tmp_path / "a.txt"
@@ -193,13 +365,13 @@ def test_upload_object_exists_and_get(s3_bucket: str, tmp_path: Path) -> None:
     # When: uploading the file
     svc.upload_object(file=src, name="a.txt")
 
-    # Then: the object exists in the bucket, missing keys do not, and the bytes round-trip
-    assert svc.object_exists("a.txt") is True
-    assert svc.object_exists("missing.txt") is False
+    # Then: the object is listed in the bucket and the bytes round-trip
+    assert svc.list_objects() == ["a.txt"]
 
     dest = tmp_path / "out.txt"
     svc.get_object(key="a.txt", destination=dest)
     assert dest.read_text() == "hello"
+    assert svc.get_object_content(key="a.txt") == "hello"
 
 
 def test_delete_object(s3_bucket: str, tmp_path: Path) -> None:
@@ -213,7 +385,7 @@ def test_delete_object(s3_bucket: str, tmp_path: Path) -> None:
     # When: deleting the object
     # Then: deletion succeeds and the object no longer exists
     assert svc.delete_object(key="a.txt") is True
-    assert svc.object_exists("a.txt") is False
+    assert svc.list_objects() == []
 
 
 def test_delete_objects_batch(s3_bucket: str, tmp_path: Path) -> None:

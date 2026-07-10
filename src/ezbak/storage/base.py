@@ -137,6 +137,15 @@ class StorageBackend(ABC):
     def prepare_for_restore(self, backup: Backup) -> Path | None:
         """Return a local path to the backup archive, or None if it cannot be retrieved."""
 
+    def cleanup_restore_artifact(self, path: Path) -> None:  # noqa: B027
+        """Reclaim any staging copy `prepare_for_restore` created for `path`.
+
+        Default no-op: a backend whose `prepare_for_restore` returns the stored
+        archive itself must not delete it. A backend that stages a downloaded
+        copy overrides this so repeated restores (a cron restore container) do
+        not accumulate one archive-sized file per run.
+        """
+
     @abstractmethod
     def _write_sidecar(self, *, backup: Backup, content: str) -> None:
         """Persist sidecar `content` alongside `backup`'s archive.

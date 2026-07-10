@@ -10,6 +10,22 @@ from loguru import logger
 from ezbak.exceptions import StorageInitError
 
 
+def is_missing_object_error(error: ClientError) -> bool:
+    """Report whether a ClientError means the requested object does not exist.
+
+    Use to branch "absent, expected" from real failures without a HEAD request
+    before every GET. The code differs by operation: HEAD-based calls surface a
+    bare "404" while GET surfaces "NoSuchKey".
+
+    Args:
+        error (ClientError): The error raised by the S3 call.
+
+    Returns:
+        bool: True when the error is a missing-object response.
+    """
+    return error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey"}
+
+
 class AWSService:
     """Manage file operations on Amazon S3 buckets with automatic credential validation."""
 
@@ -94,34 +110,6 @@ class AWSService:
 
         return f"{normalized_bucket_path}{key}"
 
-    def object_exists(self, key: str) -> bool:
-        """Check if a file exists in the S3 bucket.
-
-        Verify the existence of a file in S3 before performing operations on it. Use this method when you need to check if a file exists before attempting to download, delete, or modify it. The method automatically handles bucket path prefixes and provides detailed logging of the existence check.
-
-        Args:
-            key (str): The S3 object key to check.
-
-        Returns:
-            bool: True if the file exists, False if it does not.
-
-        Raises:
-            ClientError: If the file cannot be checked.
-        """
-        full_key = self.build_full_key(key)
-        try:
-            self.s3.head_object(Bucket=self.bucket, Key=full_key)
-            logger.trace(f"S3 file exists: '{full_key}'")
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code")
-            if error_code == "404":
-                logger.debug(f"S3: File '{full_key}' does not exist (404 Not Found).")
-                return False
-            logger.error(f"S3: Error checking existence of '{full_key}': {e}")
-            raise
-
-        return True
-
     def delete_object(self, key: str) -> bool:
         """Delete a file from the configured S3 bucket.
 
@@ -193,9 +181,9 @@ class AWSService:
         return [str(obj["Key"]) for obj in response.get("Deleted", [])]
 
     def get_object(self, key: str, destination: Path) -> Path:
-        """Retrieve the contents of an object from the S3 bucket using streaming.
+        """Retrieve the contents of an object from the S3 bucket using boto3's managed transfer.
 
-        Download a file from S3 to a local destination with efficient streaming. Use this method when you need to retrieve files from S3 for local processing, backup restoration, or file analysis. The method uses streaming to handle large files efficiently and automatically handles bucket path prefixes.
+        Download a file from S3 to a local destination. Use this method when you need to retrieve files from S3 for local processing, backup restoration, or file analysis. The managed transfer downloads large objects with concurrent ranged requests and per-part retries, so a multi-gigabyte restore is not throttled by a single sequential stream. The method automatically handles bucket path prefixes.
 
         Args:
             key (str): The S3 object key to retrieve.
@@ -207,13 +195,31 @@ class AWSService:
         full_key = self.build_full_key(key)
         logger.trace(f"S3: Attempting to download '{full_key}' to '{destination}'")
 
-        response = self.s3.get_object(Bucket=self.bucket, Key=full_key)
-        with destination.open("wb") as f:
-            for chunk in response["Body"].iter_chunks(chunk_size=8192):
-                f.write(chunk)
+        self.s3.download_file(Bucket=self.bucket, Key=full_key, Filename=str(destination))
 
         logger.trace(f"S3: Downloaded '{full_key}' to '{destination}'")
         return destination
+
+    def get_object_content(self, key: str) -> str:
+        """Return a small object's body as text, without staging it on disk.
+
+        Use for tiny objects like checksum sidecars, where a download-to-file
+        round trip buys nothing. The method automatically handles bucket path
+        prefixes.
+
+        Args:
+            key (str): The S3 object key to read.
+
+        Returns:
+            str: The object body decoded as UTF-8. Botocore errors from the read and
+                UnicodeDecodeError from the decode propagate to the caller.
+        """
+        full_key = self.build_full_key(key)
+        logger.trace(f"S3: Attempting to read '{full_key}'")
+        response = self.s3.get_object(Bucket=self.bucket, Key=full_key)
+        content = response["Body"].read().decode()
+        logger.trace(f"S3: Read '{full_key}' ({len(content)} bytes)")
+        return content
 
     def list_objects(self, prefix: str = "") -> list[str]:
         """List all objects in the configured S3 bucket that start with the specified prefix.
@@ -242,27 +248,40 @@ class AWSService:
         logger.trace(f"S3: Listed {len(object_keys)} objects with prefix '{full_prefix}'")
         return object_keys
 
-    def upload_object(self, file: Path, name: str = "") -> bool:
+    def upload_content(self, *, content: str, name: str) -> bool:
+        """Upload small in-memory content as an object, without staging it on disk.
+
+        Use for tiny generated objects like checksum sidecars, where a write-to-disk
+        round trip before the upload buys nothing.
+
+        Args:
+            content (str): The object body, stored UTF-8 encoded.
+            name (str): The desired object key.
+
+        Returns:
+            bool: True if upload succeeds. Botocore errors from the upload propagate to the caller.
+        """
+        full_name = self.build_full_key(name)
+        self.s3.put_object(Bucket=self.bucket, Key=full_name, Body=content.encode())
+        logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
+        return True
+
+    def upload_object(self, file: Path, name: str) -> bool:
         """Upload a local file to the configured S3 bucket.
 
         Store a file from the local filesystem to the S3 bucket using the configured bucket path. Use this method when you need to store files in S3 for backup, sharing, or cloud storage purposes. The method automatically handles the bucket path prefix and provides detailed logging.
 
         Args:
             file (Path): The local file path to upload to S3.
-            name (str, optional): The desired name for the file in S3. If not provided, use the original filename.
+            name (str): The desired name for the file in S3.
 
         Returns:
-            bool: True if upload succeeds. Botocore errors from the upload propagate to the caller.
+            bool: True if upload succeeds. Transfer errors from the upload (including
+                boto3's S3UploadFailedError wrapping) propagate to the caller.
         """
-        if not name:
-            name = file.name
-
         full_name = self.build_full_key(name)
 
         self.s3.upload_file(Filename=file, Bucket=self.bucket, Key=full_name)
 
-        if name != file.name:
-            logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
-        else:
-            logger.trace(f"S3: Uploaded '{file.name}'")
+        logger.trace(f"S3: Uploaded '{name}' to '{full_name}'")
         return True
