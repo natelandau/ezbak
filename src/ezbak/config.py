@@ -101,9 +101,10 @@ class BackupConfig(BaseModel):
     exclude_regex: str | None = None
     include_regex: str | None = None
     compression_level: int = DEFAULT_COMPRESSION_LEVEL
-    # Write a .sha256 sidecar next to each new backup. Existing sidecars are always
-    # verified on restore regardless of this setting; this only gates generation.
-    write_checksums: bool = True
+    # Master switch for the .sha256 sidecar feature. When True, ezbak writes a sidecar
+    # next to each new backup and verifies an archive against its sidecar on restore.
+    # When False, ezbak neither writes nor verifies checksums.
+    use_checksums: bool = True
 
     # A keep rule is a non-negative count; 0 keeps nothing, None disables the rule.
     # ge=0 rejects a negative value (e.g. a mistyped EZBAK_KEEP_* env var) at

@@ -177,11 +177,11 @@ class CreateCommand:
         ),
     ] = DEFAULT_COMPRESSION_LEVEL
 
-    write_checksums: Annotated[
+    use_checksums: Annotated[
         bool,
         cappa.Arg(
-            long="--write-checksums/--no-write-checksums",
-            help="Write a .sha256 sidecar next to each backup, verified on restore.",
+            long="--use-checksums/--no-use-checksums",
+            help="Write a .sha256 sidecar for each backup and verify it on restore.",
             group=(3, "Optional"),
             show_default=True,
         ),
@@ -250,6 +250,16 @@ class RestoreCommand:
             group=(3, "Optional"),
         ),
     ] = None
+
+    use_checksums: Annotated[
+        bool,
+        cappa.Arg(
+            long="--use-checksums/--no-use-checksums",
+            help="Verify the archive against its .sha256 sidecar before extracting.",
+            group=(3, "Optional"),
+            show_default=True,
+        ),
+    ] = True
 
 
 @cappa.command(name="prune", invoke="ezbak.cli_commands.prune.main")
@@ -399,7 +409,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "include_regex": cmd.include_regex,
             "exclude_regex": cmd.exclude_regex,
             "compression_level": cmd.compression_level,
-            "write_checksums": cmd.write_checksums,
+            "use_checksums": cmd.use_checksums,
         }
     elif isinstance(cmd, RestoreCommand):
         extra = {
@@ -409,6 +419,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "restore_if_exists": cmd.if_exists,
             "chown_uid": cmd.uid,
             "chown_gid": cmd.gid,
+            "use_checksums": cmd.use_checksums,
         }
     elif isinstance(cmd, PruneCommand):
         extra = {

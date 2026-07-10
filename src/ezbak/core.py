@@ -491,7 +491,10 @@ class EZBak:
         if tarfile_path is None:
             _fail_restore(f"Backup archive is missing from storage: {backup.name}")
 
-        _verify_checksum(backend=backend, backup=backup, tarfile_path=tarfile_path)
+        # use_checksums is the master switch: when off, skip verification entirely and
+        # ignore any sidecar in storage, rather than verifying whenever one is present.
+        if self.settings.use_checksums:
+            _verify_checksum(backend=backend, backup=backup, tarfile_path=tarfile_path)
 
         # Reap staging dirs orphaned by a hard kill of a prior restore. Restores to
         # a given target are not concurrent, so removing our own scratch dirs is safe.
@@ -626,7 +629,7 @@ class EZBak:
             logger.error("Backup creation aborted: temporary archive was not created")
             raise BackupFailedError(["backup archive could not be created"])
 
-        checksum = sha256_file(tmp_backup) if self.settings.write_checksums else None
+        checksum = sha256_file(tmp_backup) if self.settings.use_checksums else None
         if checksum is not None:
             logger.trace(f"Computed checksum of staged archive: {checksum}")
         created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)

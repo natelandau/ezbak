@@ -406,9 +406,9 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     assert config.aws_s3_bucket_name == "my-bucket"
 
 
-def test_create_no_write_checksums_flag(tmp_path):
-    """Verify --no-write-checksums maps to write_checksums=False in the built config."""
-    # Given a create command parsed with --no-write-checksums
+def test_create_no_use_checksums_flag(tmp_path):
+    """Verify --no-use-checksums maps to use_checksums=False in the built config."""
+    # Given a create command parsed with --no-use-checksums
     cli = cappa.parse(
         EZBakCLI,
         argv=[
@@ -419,15 +419,39 @@ def test_create_no_write_checksums_flag(tmp_path):
             "create",
             "--source",
             str(tmp_path),
-            "--no-write-checksums",
+            "--no-use-checksums",
         ],
     )
 
     # When building the config
     config = build_config(cli)
 
-    # Then write_checksums is False
-    assert config.write_checksums is False
+    # Then use_checksums is False
+    assert config.use_checksums is False
+
+
+def test_restore_no_use_checksums_flag(tmp_path):
+    """Verify --no-use-checksums maps to use_checksums=False on a restore command."""
+    # Given a restore command parsed with --no-use-checksums
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=[
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "restore",
+            "--restore-path",
+            str(tmp_path),
+            "--no-use-checksums",
+        ],
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then use_checksums is False
+    assert config.use_checksums is False
 
 
 def test_cli_invalid_config_exits_cleanly(monkeypatch, capsys):

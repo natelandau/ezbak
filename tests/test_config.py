@@ -164,10 +164,10 @@ def test_negative_keep_rule_rejected(field):
         BackupConfig(name="x", storage_paths=["/tmp"], **{field: -1})  # noqa: S108
 
 
-def test_write_checksums_defaults_true():
-    """Verify write_checksums defaults to True."""
-    # Given a minimal config with no explicit write_checksums
+def test_use_checksums_defaults_true():
+    """Verify use_checksums defaults to True."""
+    # Given a minimal config with no explicit use_checksums
     config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # noqa: S108
 
-    # Then it defaults to writing checksum sidecars
-    assert config.write_checksums is True
+    # Then it defaults to using checksum sidecars
+    assert config.use_checksums is True

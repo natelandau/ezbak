@@ -37,11 +37,11 @@ destination, so each copy carries its own independently checkable fingerprint.
 
 ## When ezbak writes one
 
-Every new backup gets a sidecar when `write_checksums` is enabled, which is the
+Every new backup gets a sidecar when `use_checksums` is enabled, which is the
 default. Turn it off, per run, to skip generating them:
 
 ```bash
-ezbak --name my-backup --storage ~/Backups create --source ~/data --no-write-checksums
+ezbak --name my-backup --storage ~/Backups create --source ~/data --no-use-checksums
 ```
 
 Writing a sidecar is best-effort. If the sidecar write fails, ezbak logs a
@@ -50,9 +50,11 @@ therefore exist without a sidecar, and restore handles that case.
 
 ## How restore uses it
 
-Before restoring, ezbak looks for the archive's sidecar, re-hashes the archive,
-and compares the two digests. The check runs before the restore path is touched,
-so a corrupt archive is rejected up front and never extracted.
+With `use_checksums` enabled, ezbak looks for the archive's sidecar before
+restoring, re-hashes the archive, and compares the two digests. The check runs
+before the restore path is touched, so a corrupt archive is rejected up front
+and never extracted. With `use_checksums` off, ezbak skips this step and does
+not read the sidecar at all.
 
 ```mermaid
 graph TD
@@ -75,10 +77,10 @@ extracted. A missing or unusable sidecar degrades to a warning, because a
 checksum is an added safeguard, not a requirement for restoring a backup that
 already exists.
 
-Verification depends on what is in storage, not on the current setting. A
-sidecar already present is always checked, even on a run where `write_checksums`
-is off. Setting it to `false` stops ezbak from generating new sidecars; it does
-not stop it from verifying existing ones.
+`use_checksums` governs both directions. With it enabled (the default), ezbak
+writes a sidecar for each new backup and verifies an archive against its sidecar
+on restore. Set it to `false` and ezbak does neither: it writes no new sidecars,
+and a restore ignores any sidecar already in storage instead of verifying it.
 
 ## Verify a backup yourself
 
@@ -107,5 +109,5 @@ Backups created before checksums existed have no sidecar. They restore normally,
 with a warning that the run could not verify them.
 
 See [Configuration reference](../reference/configuration.md) for the
-`write_checksums` field, flag, and environment variable, and
+`use_checksums` field, flag, and environment variable, and
 [Restore backups](../guides/restore.md) for the restore workflow.

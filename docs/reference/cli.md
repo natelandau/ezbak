@@ -47,7 +47,7 @@ Create a backup archive of one or more sources.
 | `--exclude-regex` | `-e` | Skip files whose path matches this regex. | |
 | `--strip-source-paths` | `-s` | Flatten directory sources in the archive. | `False` |
 | `--compression-level` | `-c` | gzip level, 1 to 9. | `9` |
-| `--write-checksums` / `--no-write-checksums` | | Write a `.sha256` sidecar next to each backup, verified on restore. | `True` |
+| `--use-checksums` / `--no-use-checksums` | | Write a `.sha256` sidecar for each backup and verify it on restore. | `True` |
 
 ```bash
 ezbak --name my-documents --storage ~/Backups create --source ~/Documents
@@ -113,6 +113,7 @@ name a point in time or use `--if-exists`.
 | `--if-exists` | | Exit cleanly instead of failing when no backup exists. | `False` |
 | `--uid` | `-u` | Set owner UID on restored files. | |
 | `--gid` | `-g` | Set owner GID on restored files. | |
+| `--use-checksums` / `--no-use-checksums` | | Verify the archive against its `.sha256` sidecar before extracting. | `True` |
 
 ```bash
 # Restore the latest backup

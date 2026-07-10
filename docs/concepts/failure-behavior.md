@@ -84,10 +84,11 @@ a download, read, or extract failure leaves the existing contents in place.
 
 ## Checksum verification on restore
 
-A restore re-hashes the archive against its `.sha256` sidecar before extracting.
-A mismatch aborts the restore up front with `RestoreFailedError`, so a corrupt
-archive is never extracted. A missing or unreadable sidecar logs a warning and
-restores without verification.
+With `use_checksums` enabled (the default), a restore re-hashes the archive
+against its `.sha256` sidecar before extracting. A mismatch aborts the restore
+up front with `RestoreFailedError`, so a corrupt archive is never extracted. A
+missing or unreadable sidecar logs a warning and restores without verification.
+With `use_checksums` off, ezbak skips verification entirely.
 
 See [Archive integrity checksums](checksums.md) for how sidecars are written,
 verified, and checked by hand.
