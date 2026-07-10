@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shutil
 import tarfile
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
 from typing import TYPE_CHECKING, Literal, NoReturn, assert_never
@@ -42,6 +41,8 @@ from ezbak.storage import LocalBackend, S3Backend, StorageBackend
 from ezbak.storage.aws import AWSService
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ezbak.backup import Backup, StorageLocation
 
 PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
@@ -332,56 +333,10 @@ class EZBak:
         Raises:
             ConfigurationError: If no source paths are configured or a source path is neither a file nor a directory.
         """
-
-        @dataclass
-        class FileToAdd:
-            """Pair a source path with the archive name it will be written under.
-
-            full_path is the file on disk; relative_path is the arcname inside the tar, which controls the directory layout of the resulting archive.
-            """
-
-            full_path: Path
-            relative_path: Path | str
-            is_dir: bool = False
-
-        logger.trace("Determining files to add to backup")
-        files_to_add = []
-
         if not self.settings.source_paths:
             msg = "No source paths provided"
             logger.error(msg)
             raise ConfigurationError(msg)
-
-        for source in self.settings.source_paths:
-            if source.is_dir():
-                files_to_add.extend(
-                    [
-                        FileToAdd(
-                            full_path=f,
-                            relative_path=f"{f.relative_to(source)}"
-                            if self.settings.strip_source_paths
-                            else f"{source.name}/{f.relative_to(source)}",
-                        )
-                        for f in source.rglob("*")
-                        if (f.is_file() or f.is_dir())
-                        and should_include_file(
-                            path=f,
-                            include_regex=self.settings.include_regex,
-                            exclude_regex=self.settings.exclude_regex,
-                        )
-                    ]
-                )
-            elif source.is_file() and not source.is_symlink():
-                if should_include_file(
-                    path=source,
-                    include_regex=self.settings.include_regex,
-                    exclude_regex=self.settings.exclude_regex,
-                ):
-                    files_to_add.append(FileToAdd(full_path=source, relative_path=source.name))
-            else:
-                msg = f"Not a file or directory: {source}"
-                logger.error(msg)
-                raise ConfigurationError(msg)
 
         temp_tarfile = self.tmp_dir / new_staging_filename()
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
@@ -389,20 +344,89 @@ class EZBak:
             with tarfile.open(
                 temp_tarfile, "w:gz", compresslevel=self.settings.compression_level
             ) as tar:
-                for file in files_to_add:
-                    logger.trace(f"Add to tar: {file.relative_path}")
-                    # The rglob walk already enumerates every file and directory and
-                    # applies the include/exclude filters, so add each entry
-                    # non-recursively. A recursive add would re-pull a filtered
-                    # directory's entire subtree, defeating the filter and duplicating
-                    # members.
-                    tar.add(file.full_path, arcname=file.relative_path, recursive=False)
-        except tarfile.TarError as e:
+                for source in self.settings.source_paths:
+                    self._archive_source(tar, source)
+        except (tarfile.TarError, OSError) as e:
+            # Fail the whole backup loudly rather than write a partial archive: an
+            # unreadable directory or a file that vanished mid-walk must not silently
+            # shrink the backup. OSError is not a TarError, so it needs its own clause.
             logger.error(f"Failed to create backup: {e}")
             return None
 
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile
+
+    def _tar_add_filter(
+        self, source: Path, *, strip: bool
+    ) -> Callable[[tarfile.TarInfo], tarfile.TarInfo | None]:
+        """Build a tarfile add-filter that applies the include/exclude rules per entry.
+
+        tarfile hands the filter a TarInfo whose name is the archive path, so map it back
+        to the real source path and reuse should_include_file, keeping the regex filters
+        matching the full filesystem path exactly as before. Directories are always kept
+        so a non-matching parent never prunes the matching files beneath it (tarfile stops
+        recursing when the filter drops a directory).
+
+        Args:
+            source (Path): The source directory the entries are walked from.
+            strip (bool): Whether the archive names omit the source directory name.
+
+        Returns:
+            Callable[[tarfile.TarInfo], tarfile.TarInfo | None]: The tarfile add-filter.
+        """
+
+        def _add_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
+            if tarinfo.isdir():
+                logger.trace(f"Add to tar: {tarinfo.name}")
+                return tarinfo
+            rel = Path(tarinfo.name) if strip else Path(tarinfo.name).relative_to(source.name)
+            if should_include_file(
+                path=source / rel,
+                include_regex=self.settings.include_regex,
+                exclude_regex=self.settings.exclude_regex,
+            ):
+                logger.trace(f"Add to tar: {tarinfo.name}")
+                return tarinfo
+            return None
+
+        return _add_filter
+
+    def _archive_source(self, tar: tarfile.TarFile, source: Path) -> None:
+        """Add one configured source (a file or a directory tree) to the open archive.
+
+        Delegate the recursive directory walk to tarfile so the complete subtree is always
+        archived. Building the file list with Path.rglob risked a silently truncated
+        backup: pathlib.glob swallows a traversal error (e.g. a transient NFS scandir
+        failure), and a non-recursive add then stored only the short list with no error.
+
+        Args:
+            tar (tarfile.TarFile): The open archive to add to.
+            source (Path): The configured source path.
+
+        Raises:
+            ConfigurationError: If source is neither a file nor a directory.
+        """
+        if source.is_dir():
+            # Add each top-level child under its arcname prefix so the strip_source_paths
+            # layout is preserved while tarfile recurses through the rest of the tree.
+            strip = self.settings.strip_source_paths
+            prefix = "" if strip else source.name
+            add_filter = self._tar_add_filter(source, strip=strip)
+            for child in sorted(source.iterdir()):
+                arcname = f"{prefix}/{child.name}" if prefix else child.name
+                tar.add(child, arcname=arcname, recursive=True, filter=add_filter)
+        elif source.is_file() and not source.is_symlink():
+            if should_include_file(
+                path=source,
+                include_regex=self.settings.include_regex,
+                exclude_regex=self.settings.exclude_regex,
+            ):
+                logger.trace(f"Add to tar: {source.name}")
+                tar.add(source, arcname=source.name, recursive=False)
+        else:
+            msg = f"Not a file or directory: {source}"
+            logger.error(msg)
+            raise ConfigurationError(msg)
 
     def _backend_for_type(self, storage_type: StorageType) -> StorageBackend:
         """Return the backend for a storage type, or fail with a clear message.

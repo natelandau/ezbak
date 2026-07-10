@@ -1,6 +1,7 @@
 """Test ezbak."""
 
 import shutil
+import tarfile
 from datetime import datetime
 from pathlib import Path
 from tempfile import mkdtemp
@@ -214,6 +215,48 @@ def test_create_backup_strip_path(filesystem, debug, capsys, tmp_path):
     # Then: All source files are restored correctly
     for file in src_dir.rglob("*"):
         assert (restore_dir / file.name).exists()
+
+
+@time_machine.travel(frozen_time, tick=False)
+def test_create_backup_complete_when_rglob_under_reports(filesystem, monkeypatch, tmp_path):
+    """Verify the archive holds every source file even when Path.rglob returns a partial listing."""
+    # Given: a source tree with three sibling subdirectories ("repos")
+    src_dir, dest1, _ = filesystem
+    for repo in ("repo_a", "repo_b", "repo_c"):
+        (src_dir / repo).mkdir()
+        (src_dir / repo / f"{repo}.txt").write_text(repo)
+
+    # Given: Path.rglob silently drops two of the repos, reproducing an NFS scandir
+    # error that pathlib.glob swallows mid-walk (the production OOM-adjacent bug).
+    original_rglob = Path.rglob
+
+    def partial_rglob(self, pattern, *args: object, **kwargs: object):
+        for entry in original_rglob(self, pattern, *args, **kwargs):
+            if "repo_b" not in entry.parts and "repo_c" not in entry.parts:
+                yield entry
+
+    monkeypatch.setattr(Path, "rglob", partial_rglob)
+
+    # Given: a backup manager writing to a local destination
+    backup_manager = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        write_checksums=False,
+        log_level="error",
+        tz="Etc/UTC",
+    )
+
+    # When: creating a backup
+    backup_manager.create_backup()
+
+    # Then: the archive still contains all three repos' files
+    archive = next(dest1.glob("test-*.tgz"))
+    with tarfile.open(archive) as tar:
+        names = set(tar.getnames())
+    assert "src/repo_a/repo_a.txt" in names
+    assert "src/repo_b/repo_b.txt" in names
+    assert "src/repo_c/repo_c.txt" in names
 
 
 def test_prune_keep_last(debug, capsys, tmp_path):
