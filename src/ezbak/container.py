@@ -16,21 +16,38 @@ from pydantic import ValidationError
 from ezbak.constants import Action, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
-from ezbak.exceptions import EZBakError, RestoreFailedError
+from ezbak.exceptions import EZBakError, HookFailedError, RestoreFailedError
+from ezbak.hooks import run_hook
 from ezbak.logging import log_validation_errors
 
 
-def do_backup(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
+def do_backup(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | None = None) -> None:
     """Create a backup of the service data directory and manage retention.
 
-    Performs a complete backup operation including creating the backup and pruning old backups based on retention policy.
+    Run the pre-backup hook first: a non-zero hook means the source is not in a safe
+    state to archive, so abort before creating anything. After a successful backup and
+    prune, run the post-backup hook; the archive is already stored, so a failing
+    post-backup hook fails the run loudly but keeps the backup.
+
+    Raises:
+        HookFailedError: A pre- or post-backup hook failed.
     """
+    if not run_hook(config.pre_backup_hook, phase="pre-backup", timeout=config.hook_timeout):
+        msg = "pre-backup hook failed; skipping backup"
+        raise HookFailedError(msg)
+
     try:
         app.create_backup()
     finally:
         # Prune even when a destination failed so retention keeps running and the
         # backups that did succeed do not accumulate unbounded on repeated cron runs.
         app.prune_backups()
+
+    # Reached only when create_backup did not raise, so post-backup cleanup never runs
+    # on a failed or partial backup.
+    if not run_hook(config.post_backup_hook, phase="post-backup", timeout=config.hook_timeout):
+        msg = "post-backup hook failed"
+        raise HookFailedError(msg)
 
     if scheduler:  # pragma: no cover
         job = scheduler.get_job(job_id="backup")
@@ -60,18 +77,21 @@ def _ping_healthcheck(url: str | None, *, failed: bool) -> None:
         logger.warning(f"Healthcheck ping failed: {e}")
 
 
-def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None:
+def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | None = None) -> None:
     """Restore a backup of the service data directory from the specified path.
 
-    Restores data from a previously created backup to recover from data loss or system failures. Requires RESTORE_DIR environment variable to be set.
-
-    Args:
-        app (EZBak): The configured backup manager.
-        scheduler (BackgroundScheduler | None): The scheduler, when run on a cron trigger. Defaults to None.
+    Run the pre-restore hook first; a non-zero hook aborts before restoring. Run the
+    post-restore hook only when a restore actually happened, so a restore_if_exists
+    no-op (no backup matched) skips it.
 
     Raises:
+        HookFailedError: A pre- or post-restore hook failed.
         RestoreFailedError: No backup matched the restore criteria and restore_if_exists is not set.
     """
+    if not run_hook(config.pre_restore_hook, phase="pre-restore", timeout=config.hook_timeout):
+        msg = "pre-restore hook failed; skipping restore"
+        raise HookFailedError(msg)
+
     if not app.restore_backup():
         # restore_backup() returns False (rather than raising) only when no backup
         # matches; a real download or extract error raises RestoreFailedError from within.
@@ -83,6 +103,12 @@ def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None
         msg = "Restore failed: no backup matched the restore criteria"
         raise RestoreFailedError(msg)
 
+    # Reached only after an actual restore, so the post-restore hook is skipped on a
+    # restore_if_exists no-op above.
+    if not run_hook(config.post_restore_hook, phase="post-restore", timeout=config.hook_timeout):
+        msg = "post-restore hook failed"
+        raise HookFailedError(msg)
+
     if scheduler:  # pragma: no cover
         job = scheduler.get_job(job_id="restore")
         if job and job.next_run_time:
@@ -92,8 +118,8 @@ def do_restore(app: EZBak, scheduler: BackgroundScheduler | None = None) -> None
 def _run_scheduled(
     app: EZBak,
     scheduler: BackgroundScheduler,
-    healthcheck_url: str | None,
-    run: Callable[[EZBak, BackgroundScheduler], None],
+    config: EnvConfig,
+    run: Callable[[EZBak, EnvConfig, BackgroundScheduler], None],
 ) -> None:
     """Run a scheduled backup or restore, signaling the outcome without stopping the scheduler.
 
@@ -102,12 +128,12 @@ def _run_scheduled(
     then ping the healthcheck monitor with the run's success or failure.
     """
     try:
-        run(app, scheduler)
+        run(app, config, scheduler)
     except EZBakError as e:
         logger.error(e)
-        _ping_healthcheck(healthcheck_url, failed=True)
+        _ping_healthcheck(config.healthcheck_url, failed=True)
     else:
-        _ping_healthcheck(healthcheck_url, failed=False)
+        _ping_healthcheck(config.healthcheck_url, failed=False)
 
 
 def _run_shutdown_backup(app: EZBak, scheduler: BackgroundScheduler, config: EnvConfig) -> None:
@@ -127,7 +153,7 @@ def _run_shutdown_backup(app: EZBak, scheduler: BackgroundScheduler, config: Env
         return
 
     logger.info("Taking a final backup before shutdown")
-    _run_scheduled(app, scheduler, config.healthcheck_url, do_backup)
+    _run_scheduled(app, scheduler, config, do_backup)
 
 
 def _run_cron(app: EZBak, config: EnvConfig, action: Action) -> None:
@@ -147,7 +173,7 @@ def _run_cron(app: EZBak, config: EnvConfig, action: Action) -> None:
     run = do_backup if action == Action.BACKUP else do_restore
     job = scheduler.add_job(
         func=_run_scheduled,
-        args=[app, scheduler, config.healthcheck_url, run],
+        args=[app, scheduler, config, run],
         trigger=CronTrigger.from_crontab(config.cron),
         jitter=config.cron_jitter,
         id=action.value,
@@ -255,7 +281,7 @@ def main() -> None:
 
     elif config.entrypoint_action == Action.BACKUP:
         try:
-            do_backup(app)
+            do_backup(app, config)
         except EZBakError as e:
             logger.error(e)
             sys.exit(1)
@@ -264,7 +290,7 @@ def main() -> None:
 
     elif config.entrypoint_action == Action.RESTORE:
         try:
-            do_restore(app)
+            do_restore(app, config)
         except EZBakError as e:
             logger.error(e)
             sys.exit(1)

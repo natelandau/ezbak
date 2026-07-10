@@ -16,10 +16,16 @@ from pydantic import ValidationError
 
 from ezbak import ezbak
 from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel
-from ezbak.container import _ping_healthcheck, _run_scheduled, _run_shutdown_backup, do_backup
+from ezbak.container import (
+    _ping_healthcheck,
+    _run_scheduled,
+    _run_shutdown_backup,
+    do_backup,
+    do_restore,
+)
 from ezbak.container import main as entrypoint
 from ezbak.env import EnvConfig
-from ezbak.exceptions import BackupFailedError
+from ezbak.exceptions import BackupFailedError, HookFailedError
 from ezbak.logging import instantiate_logger
 
 UTC = ZoneInfo("UTC")
@@ -273,12 +279,14 @@ def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
     # Given an app whose backup raises for a failed destination
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(name="test", source_paths=[src_dir], storage_paths=[dest1], _env_file=None)
     mocker.patch.object(app, "create_backup", side_effect=BackupFailedError(["dest1"]))
     prune_spy = mocker.patch.object(app, "prune_backups")
 
     # When running do_backup, then it re-raises the failure
     with pytest.raises(BackupFailedError):
-        do_backup(app)
+        do_backup(app, config)
 
     # Then pruning still ran despite the failed backup
     prune_spy.assert_called_once()
@@ -475,7 +483,7 @@ def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
     _run_shutdown_backup(app, scheduler, config)
 
     # Then the final backup runs through the same path as a scheduled run
-    mock_scheduled.assert_called_once_with(app, scheduler, config.healthcheck_url, do_backup)
+    mock_scheduled.assert_called_once_with(app, scheduler, config, do_backup)
 
 
 def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
@@ -582,15 +590,23 @@ def test_run_scheduled_pings_success(filesystem, mocker):
     # Given a scheduled run that succeeds
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        healthcheck_url="https://hc-ping.com/abc-123",
+        _env_file=None,
+    )
     run = mocker.MagicMock()
     mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
     scheduler = mocker.MagicMock()
 
     # When running the scheduled job
-    _run_scheduled(app, scheduler, "https://hc-ping.com/abc-123", run)
+    _run_scheduled(app, scheduler, config, run)
 
     # Then the run executed and it pings for success
-    run.assert_called_once_with(app, scheduler)
+    run.assert_called_once_with(app, config, scheduler)
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
 
 
@@ -599,12 +615,20 @@ def test_run_scheduled_pings_failure(filesystem, mocker):
     # Given a scheduled run that fails
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        healthcheck_url="https://hc-ping.com/abc-123",
+        _env_file=None,
+    )
     run = mocker.MagicMock(side_effect=BackupFailedError(["dest1"]))
     mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
     scheduler = mocker.MagicMock()
 
     # When running the scheduled job
-    _run_scheduled(app, scheduler, "https://hc-ping.com/abc-123", run)
+    _run_scheduled(app, scheduler, config, run)
 
     # Then it pings for failure
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
@@ -713,3 +737,134 @@ def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_p
     assert exc_info.value.code == 1
     output = capsys.readouterr().err
     assert "Backup restored" not in output
+
+
+def test_do_backup_runs_hooks_around_backup(filesystem, tmp_path):
+    """Verify pre- and post-backup hooks both run around a successful backup."""
+    # Given pre/post hooks that drop marker files and a real backup target
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    pre = tmp_path / "pre"
+    post = tmp_path / "post"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        pre_backup_hook=f"touch {pre}",
+        post_backup_hook=f"touch {post}",
+        _env_file=None,
+    )
+
+    # When running do_backup
+    do_backup(app, config)
+
+    # Then both hooks ran and a backup landed
+    assert pre.exists()
+    assert post.exists()
+    assert list(dest1.glob("*.tgz"))
+
+
+def test_do_backup_pre_hook_failure_skips_backup(filesystem, mocker):
+    """Verify a failing pre-backup hook aborts before create_backup runs."""
+    # Given a pre-backup hook that exits non-zero
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        pre_backup_hook="exit 1",
+        _env_file=None,
+    )
+    create_spy = mocker.patch.object(app, "create_backup")
+
+    # When running do_backup, then it raises and never creates a backup
+    with pytest.raises(HookFailedError):
+        do_backup(app, config)
+    create_spy.assert_not_called()
+
+
+def test_do_backup_post_hook_failure_keeps_backup(filesystem):
+    """Verify a failing post-backup hook fails the run but keeps the stored backup."""
+    # Given a post-backup hook that exits non-zero and a real backup target
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        post_backup_hook="exit 1",
+        _env_file=None,
+    )
+
+    # When running do_backup, then it raises but the archive was written first
+    with pytest.raises(HookFailedError):
+        do_backup(app, config)
+    assert list(dest1.glob("*.tgz"))
+
+
+def test_do_restore_pre_hook_failure_skips_restore(filesystem, mocker):
+    """Verify a failing pre-restore hook aborts before restore runs."""
+    # Given a pre-restore hook that exits non-zero
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        pre_restore_hook="exit 1",
+        _env_file=None,
+    )
+    restore_spy = mocker.patch.object(app, "restore_backup")
+
+    # When running do_restore, then it raises and never restores
+    with pytest.raises(HookFailedError):
+        do_restore(app, config)
+    restore_spy.assert_not_called()
+
+
+def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, mocker):
+    """Verify the post-restore hook runs after an actual restore."""
+    # Given a restore that succeeds and a post-restore marker hook
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    mocker.patch.object(app, "restore_backup", return_value=True)
+    marker = tmp_path / "post_restore"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        post_restore_hook=f"touch {marker}",
+        _env_file=None,
+    )
+
+    # When running do_restore, then the post hook ran
+    do_restore(app, config)
+    assert marker.exists()
+
+
+def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
+    """Verify the post-restore hook is skipped when no backup was restored."""
+    # Given a restore_if_exists no-op (restore_backup returns False)
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], restore_if_exists=True)
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    mocker.patch.object(app, "restore_backup", return_value=False)
+    marker = tmp_path / "post_restore"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        restore_if_exists=True,
+        post_restore_hook=f"touch {marker}",
+        _env_file=None,
+    )
+
+    # When running do_restore, then it returns cleanly and the post hook did not run
+    do_restore(app, config)
+    assert not marker.exists()
