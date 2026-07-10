@@ -163,11 +163,19 @@ have no CLI flag.
 | Action | `EZBAK_ACTION` | none |
 | Healthcheck URL | `EZBAK_HEALTHCHECK_URL` | `None` |
 | Backup on shutdown | `EZBAK_BACKUP_ON_SHUTDOWN` | `false` |
+| Pre-backup hook | `EZBAK_PRE_BACKUP_HOOK` | `None` |
+| Post-backup hook | `EZBAK_POST_BACKUP_HOOK` | `None` |
+| Pre-restore hook | `EZBAK_PRE_RESTORE_HOOK` | `None` |
+| Post-restore hook | `EZBAK_POST_RESTORE_HOOK` | `None` |
+| Hook timeout | `EZBAK_HOOK_TIMEOUT` | `300` |
 
 `EZBAK_ACTION` is `backup` or `restore` and is required to run the container.
 `EZBAK_HEALTHCHECK_URL` pings a monitor after each scheduled run. See
 [Monitoring](../orchestration/monitoring.md). `EZBAK_BACKUP_ON_SHUTDOWN` takes
 one final backup when a cron backup container receives `SIGTERM` or `SIGINT`;
-see [Environment variables](environment-variables.md).
+see [Environment variables](environment-variables.md). The four hook variables
+run a shell command before or after a container backup or restore, and
+`EZBAK_HOOK_TIMEOUT` bounds how long a hook may run; see [Container lifecycle
+hooks](../guides/hooks.md).
 
 *[gzip]: GNU zip compression

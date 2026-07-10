@@ -25,6 +25,8 @@ It stays small and focused, and does not aim to replace a full backup system lik
 - Restores the latest backup, or the newest backup at or before a point in time.
 - Runs scheduled backups in a container with a cron expression.
 - Pings a healthcheck monitor so a silent scheduled failure gets noticed.
+- Runs shell hooks before and after a container backup or restore. See
+  [Container lifecycle hooks](guides/hooks.md).
 
 ## Start here
 
