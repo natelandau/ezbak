@@ -10,18 +10,8 @@ from ezbak.checksums import (
     HashingWriter,
     format_sidecar,
     parse_sidecar,
-    sha256_file,
     sidecar_name,
 )
-
-
-def test_sha256_file_matches_hashlib(tmp_path: Path) -> None:
-    """Verify sha256_file computes the same digest as hashlib."""
-    # Given: a file with known bytes
-    f = tmp_path / "a.tgz"
-    f.write_bytes(b"hello world" * 1000)
-    # When/Then: sha256_file equals a one-shot hashlib digest
-    assert sha256_file(f) == hashlib.sha256(f.read_bytes()).hexdigest()
 
 
 def test_hashing_writer_tees_bytes_to_sink_and_digest(tmp_path: Path) -> None:

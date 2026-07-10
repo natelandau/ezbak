@@ -4,8 +4,6 @@ Single source of truth for how a backup's checksum sidecar is named, formatted,
 parsed, and computed, so the create and restore paths never disagree on the shape.
 """
 
-import hashlib
-from pathlib import Path
 from typing import IO, Protocol
 
 from ezbak.constants import CHECKSUM_EXTENSION
@@ -62,7 +60,7 @@ class HashingReader:
     single read pass, instead of a separate verify-then-extract double read. Call
     ``drain`` once the consumer stops (tarfile stops at the tar end-of-archive and
     leaves the gzip trailer, or everything past a corrupt header, unread) so the
-    digest still covers the whole file and matches ``sha256_file``.
+    digest still covers every byte of the file.
     """
 
     def __init__(self, fileobj: IO[bytes], hasher: _Hasher) -> None:
@@ -83,25 +81,6 @@ class HashingReader:
         """Feed any bytes the consumer left unread through the hash, up to EOF."""
         for chunk in iter(lambda: self._fileobj.read(_CHUNK_SIZE), b""):
             self._hasher.update(chunk)
-
-
-def sha256_file(path: Path) -> str:
-    """Return the lowercase hex SHA-256 of a file, read in fixed-size chunks.
-
-    Use to fingerprint a finished archive at creation and to re-fingerprint it on
-    restore, streaming so archive size does not drive memory use.
-
-    Args:
-        path (Path): The file to hash.
-
-    Returns:
-        str: The lowercase hex digest.
-    """
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(_CHUNK_SIZE), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def sidecar_name(archive_name: str) -> str:

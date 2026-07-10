@@ -1,5 +1,6 @@
 """Test ezbak."""
 
+import hashlib
 import shutil
 import tarfile
 from datetime import datetime
@@ -12,7 +13,6 @@ import time_machine
 
 from ezbak import ezbak
 from ezbak.backup import Backup
-from ezbak.checksums import sha256_file
 from ezbak.constants import DEFAULT_DATE_FORMAT, StorageType
 from ezbak.core import _commit_restore, _is_within, _merge_move
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
@@ -861,7 +861,7 @@ def test_create_writes_local_sidecar(filesystem) -> None:
     archive = backups[0].path
     sidecar = archive.parent / (archive.name + ".sha256")
     assert sidecar.exists()
-    assert sha256_file(archive) in sidecar.read_text()
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() in sidecar.read_text()
 
 
 def test_create_no_checksum_when_disabled(filesystem) -> None:
