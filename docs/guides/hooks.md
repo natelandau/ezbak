@@ -25,6 +25,38 @@ Hooks fire on every run the container makes: a one-shot run, each tick of
 `EZBAK_BACKUP_ON_SHUTDOWN` is set. See [Running in Docker](docker.md) for those
 run modes.
 
+## Tools your hooks need
+
+The container image is lean. It ships `sh`, `python3`, `curl`, `tar`, and the
+ezbak runtime, but not the database and sync tools most hooks reach for, such as
+`sqlite3`, `rsync`, or `pg_dump`. A hook that calls a tool the image lacks fails
+with a `not found` error, and a failing pre-hook aborts the backup.
+
+Bake the tools you need into your own image. The runtime is Debian-based and
+runs as root, so install them with `apt-get` in a Dockerfile that starts from
+ezbak:
+
+```dockerfile
+FROM ghcr.io/natelandau/ezbak:latest
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sqlite3 rsync postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Build that image and run it in place of the stock one. The tools are then
+present on every start, pinned to the versions you built, and available with no
+network access at runtime. This is the same pattern the Postgres and Airflow
+images document for extending a base image, and it keeps your deployment
+reproducible.
+
+!!! tip "Quick experiment without rebuilding"
+
+    To try a tool before committing to a Dockerfile, install it in the hook
+    itself: `EZBAK_PRE_BACKUP_HOOK='apt-get update && apt-get install -y sqlite3 && sqlite3 ...'`.
+    This re-installs on every run, needs network access each time, and runs as
+    root, so treat it as a stopgap and move the install into your image once the
+    hook works.
+
 ## Worked example: quiescing a SQLite database
 
 A running SQLite database can be mid-write when ezbak archives its file, so the
@@ -41,6 +73,9 @@ archive even while the application keeps writing to `/data/app.db`. Point
 `EZBAK_SOURCE_PATHS` at the directory containing the `.bak` file. The
 post-backup hook removes the copy once the backup exists, so a second run
 starts from a clean directory instead of archiving a stale leftover.
+
+The stock image does not ship `sqlite3`, so add it first. See [Tools your hooks
+need](#tools-your-hooks-need) for the Dockerfile that bakes it in.
 
 ## How a hook runs
 
