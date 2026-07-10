@@ -1,3 +1,17 @@
+## v1.1.0 (2026-07-10)
+
+### Feat
+
+- **checksums**: add use_checksums master switch
+
+### Fix
+
+- **backup**: archive the complete source tree
+
+### Perf
+
+- **checksums**: hash archive in one read pass (#63)
+
 ## v1.0.1 (2026-07-09)
 
 ### Fix
