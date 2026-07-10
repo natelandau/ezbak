@@ -24,7 +24,7 @@
     name = "ezbak"
     readme = "README.md"
     requires-python = ">=3.11, <3.15"
-    version = "1.1.0"
+    version = "1.2.0"
 
     [project.urls]
         Homepage   = "https://github.com/natelandau/ezbak"

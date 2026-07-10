@@ -1,3 +1,13 @@
+## v1.2.0 (2026-07-10)
+
+### Feat
+
+- **hooks**: add container backup and restore lifecycle hooks (#64)
+
+### Fix
+
+- **backup**: match backup set by exact name
+
 ## v1.1.0 (2026-07-10)
 
 ### Feat
