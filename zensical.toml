@@ -71,6 +71,7 @@ nav = [
     "guides/python.md",
     "guides/s3.md",
     "guides/restore.md",
+    "guides/hooks.md",
     { "Orchestration" = [
       "orchestration/index.md",
       "orchestration/nomad.md",

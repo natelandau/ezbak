@@ -43,11 +43,17 @@ CLI flag.
 | `EZBAK_CRON_JITTER` | seconds (integer) | Random delay added to each scheduled run so a fleet sharing one cron does not hit a destination at once. Default `60`; set `0` to disable. |
 | `EZBAK_HEALTHCHECK_URL` | a URL | Ping a monitor after each scheduled run. |
 | `EZBAK_BACKUP_ON_SHUTDOWN` | `true` or `false` | Take a final backup when a scheduled backup container shuts down. Default `false`. |
+| `EZBAK_PRE_BACKUP_HOOK` | a shell command | Run before the container creates a backup. Unset is a no-op. |
+| `EZBAK_POST_BACKUP_HOOK` | a shell command | Run after the container creates a backup. Unset is a no-op. |
+| `EZBAK_PRE_RESTORE_HOOK` | a shell command | Run before the container restores a backup. Unset is a no-op. |
+| `EZBAK_POST_RESTORE_HOOK` | a shell command | Run after the container restores a backup. Unset is a no-op. |
+| `EZBAK_HOOK_TIMEOUT` | seconds (integer) | Kill a hook that runs longer than this. Default `300`; set `0` to disable. |
 | `TZ` | an IANA timezone | System timezone for backup timestamps. |
 
 Without `EZBAK_ACTION`, the container logs an error and exits non-zero. Without
 `EZBAK_CRON`, the container runs the action once and exits. See
-[Running in Docker](../guides/docker.md).
+[Running in Docker](../guides/docker.md). For the five hook variables, see
+[Container lifecycle hooks](../guides/hooks.md).
 
 ## A one-shot backup
 
