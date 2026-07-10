@@ -316,7 +316,6 @@ def main() -> None:
         except EZBakError as e:
             logger.error(e)
             sys.exit(1)
-        time.sleep(1)
         logger.info("Backup complete. Exiting.")
 
     elif config.entrypoint_action == Action.RESTORE:
@@ -325,7 +324,6 @@ def main() -> None:
         except EZBakError as e:
             logger.error(e)
             sys.exit(1)
-        time.sleep(1)
         logger.info("Restore complete. Exiting.")
 
 
