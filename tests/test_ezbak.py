@@ -468,6 +468,22 @@ def test_prune_no_policy(debug, capsys, tmp_path):
         assert Path(tmp_path / filename).exists()
 
 
+def test_prune_no_policy_skips_reindex(filesystem, mocker):
+    """Verify prune with no retention policy does not re-index storage locations."""
+    # Given: a fresh backup, which invalidates the cached storage index
+    src_dir, dest1, _ = filesystem
+    backup_manager = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    backup_manager.create_backup()
+    index_spy = mocker.spy(backup_manager.backends[0], "index")
+
+    # When: pruning with no retention policy configured
+    backup_manager.prune_backups()
+
+    # Then: no backend re-index happened (nothing can be deleted, so a fresh
+    # index would be paid, an S3 LIST per cron tick, purely for logging)
+    assert index_spy.call_count == 0
+
+
 def test_prune_missing_file(debug, capsys, tmp_path, mocker):
     """Verify pruning tolerates a backup that vanished before deletion."""
     # Given: real backup files on disk

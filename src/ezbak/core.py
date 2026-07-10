@@ -996,10 +996,11 @@ class EZBak:
 
         # Dry run stops here: the caller inspects the returned targets (the CLI lists
         # them per-file) and nothing is deleted.
+        # Neither this log line nor the one below may touch self.storage_locations:
+        # after create_backup invalidates the cache, that property re-indexes every
+        # backend (a full S3 LIST), far too expensive to pay for a log message.
         if dry_run:
-            logger.info(
-                f"Dry run: would prune {len(backups_to_delete)} backups across {len(self.storage_locations)} storage locations"
-            )
+            logger.info(f"Dry run: would prune {len(backups_to_delete)} backups")
             return backups_to_delete
 
         # Collect the backups each backend confirms it deleted, so the return value and
@@ -1016,9 +1017,7 @@ class EZBak:
                 # block pruning the others; the backend already logged the details.
                 logger.error(f"Pruning failed for {backend.storage_type.value}: {e}")
 
-        logger.info(
-            f"Pruned {len(deleted_backups)} backups across {len(self.storage_locations)} storage locations"
-        )
+        logger.info(f"Pruned {len(deleted_backups)} backups")
 
         logger.trace("Require storage location re-index on next call")
         self.rebuild_storage_locations = True
