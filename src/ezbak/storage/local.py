@@ -29,8 +29,11 @@ class LocalBackend(StorageBackend):
         locations: list[StorageLocation] = []
         for storage_path in self.settings.storage_paths:
             logger.trace(f"Indexing: {storage_path}")
+            # Anchor on "{name}-" so a set does not swallow siblings that merely
+            # share its prefix (name "gitea" must not match "giteasave-*"). The
+            # naming grammar always joins name and timestamp with "-".
             found_files = find_files(
-                path=storage_path, globs=[f"*{self.settings.name}*.{BACKUP_EXTENSION}"]
+                path=storage_path, globs=[f"{self.settings.name}-*.{BACKUP_EXTENSION}"]
             )
             # The `.tgz` glob already excludes `.sha256` sidecars, but filter
             # explicitly through the shared definition so the exclusion cannot

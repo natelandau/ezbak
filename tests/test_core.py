@@ -47,6 +47,23 @@ def test_ezbak_create_backup_writes_archive(filesystem):
     assert len(app.list_backups()) == 1
 
 
+def test_index_excludes_names_sharing_a_prefix(tmp_path):
+    """Verify a backup set only matches names followed by the '-' separator."""
+    # Given a 'gitea' backup and an unrelated 'giteasave' backup with a later timestamp
+    shutil.copy2(fixture_archive_path, tmp_path / "gitea-20260709T131941.tgz")
+    shutil.copy2(fixture_archive_path, tmp_path / "giteasave-20260710T082850.tgz")
+    app = ezbak(name="gitea", source_paths=[tmp_path], storage_paths=[tmp_path])
+
+    # When listing backups and selecting the latest
+    names = {b.name for b in app.list_backups()}
+
+    # Then the 'giteasave' archive is not treated as a 'gitea' backup
+    assert names == {"gitea-20260709T131941.tgz"}
+    latest = app.get_latest_backup()
+    assert latest is not None
+    assert latest.name == "gitea-20260709T131941.tgz"
+
+
 def test_backends_local_only_from_storage_paths(filesystem):
     """Verify only a local backend is built when only storage_paths are set."""
     # Given a config with local destinations and no bucket

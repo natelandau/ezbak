@@ -42,7 +42,10 @@ class S3Backend(StorageBackend):
             list[StorageLocation]: A single-element list with the S3 storage location.
         """
         logger.trace("Indexing S3 storage location")
-        found_backups = self.aws_service.list_objects(prefix=self.settings.name)
+        # Anchor on "{name}-" so a set does not swallow keys that merely share its
+        # prefix (name "gitea" must not match "giteasave-*"). The naming grammar
+        # always joins name and timestamp with "-".
+        found_backups = self.aws_service.list_objects(prefix=f"{self.settings.name}-")
 
         # The prefix listing returns sidecars too; drop them so a .sha256 is never
         # parsed as a spurious Backup and counted against retention.
