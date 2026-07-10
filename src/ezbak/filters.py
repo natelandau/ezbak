@@ -47,35 +47,63 @@ def chown_files(directory: Path | str, uid: int, gid: int) -> None:
         logger.info(f"chown all restored files to '{uid}:{gid}'")
 
 
-def should_include_file(
-    *, path: Path, include_regex: str | None, exclude_regex: str | None
-) -> bool:
-    """Determine whether a file should be included in the backup based on configured regex filters.
+def compile_filter_patterns(
+    include_regex: str | None, exclude_regex: str | None
+) -> tuple[re.Pattern[str] | None, re.Pattern[str] | None]:
+    """Compile the configured include/exclude regexes once for a backup run.
 
-    Apply include and exclude regex patterns to filter files during backup creation. Use this to implement fine-grained control over which files are backed up, such as excluding temporary files or including only specific file types.
+    Compile up front so the per-entry filter does not pay a regex-cache lookup per
+    file, and so both the directory-walk filter and the single-file source path
+    share one compilation step.
 
     Args:
-        path (Path): The file path to evaluate against the configured regex patterns.
-        include_regex (str | None): The regex pattern to include files.
-        exclude_regex (str | None): The regex pattern to exclude files.
+        include_regex (str | None): The include regex, or None to include all.
+        exclude_regex (str | None): The exclude regex, or None to exclude none.
 
     Returns:
-        bool: True if the file should be included in the backup, False if it should be excluded.
+        tuple[re.Pattern[str] | None, re.Pattern[str] | None]: The compiled include and exclude patterns.
     """
-    if path.is_symlink():
-        logger.warning(f"Skip backup of symlink: {path}")
+    return (
+        re.compile(include_regex) if include_regex else None,
+        re.compile(exclude_regex) if exclude_regex else None,
+    )
+
+
+def passes_filters(
+    *,
+    path: Path | str,
+    include_pattern: re.Pattern[str] | None,
+    exclude_pattern: re.Pattern[str] | None,
+) -> bool:
+    """Apply the always-exclude and regex backup filters to a path without touching the filesystem.
+
+    The single definition of which files a backup includes, shared by the
+    directory add-filter and the single-file source path so the two can never
+    diverge. Accepts a plain string so the per-entry hot loop can pass a
+    prebuilt path string instead of constructing a Path per file, and trace
+    messages use loguru's deferred formatting so no log string is built per
+    file when TRACE is off.
+
+    Args:
+        path (Path | str): The full file path to evaluate.
+        include_pattern (re.Pattern[str] | None): Compiled include pattern, or None to include all.
+        exclude_pattern (re.Pattern[str] | None): Compiled exclude pattern, or None to exclude none.
+
+    Returns:
+        bool: True if the file should be included in the backup.
+    """
+    path_str = str(path)
+    name = path_str.rpartition("/")[2]
+    if name in ALWAYS_EXCLUDE_FILENAMES:
+        logger.trace("Excluded file: {}", name)
         return False
 
-    if path.name in ALWAYS_EXCLUDE_FILENAMES:
-        logger.trace(f"Excluded file: {path.name}")
+    if include_pattern and include_pattern.search(path_str) is None:
+        logger.trace("Exclude by include regex: {}", name)
         return False
 
-    if include_regex and re.search(include_regex, str(path)) is None:
-        logger.trace(f"Exclude by include regex: {path.name}")
-        return False
-
-    if exclude_regex and re.search(exclude_regex, str(path)):
-        logger.trace(f"Exclude by regex: {path.name}")
+    if exclude_pattern and exclude_pattern.search(path_str):
+        logger.trace("Exclude by regex: {}", name)
         return False
 
     return True

@@ -32,7 +32,8 @@ from ezbak.exceptions import (
 )
 from ezbak.filters import (
     chown_files,
-    should_include_file,
+    compile_filter_patterns,
+    passes_filters,
     validate_source_paths,
     validate_storage_paths,
 )
@@ -418,10 +419,16 @@ class EZBak:
         """Build a tarfile add-filter that applies the include/exclude rules per entry.
 
         tarfile hands the filter a TarInfo whose name is the archive path, so map it back
-        to the real source path and reuse should_include_file, keeping the regex filters
-        matching the full filesystem path exactly as before. Directories are always kept
-        so a non-matching parent never prunes the matching files beneath it (tarfile stops
-        recursing when the filter drops a directory).
+        to the real source path and reuse the shared filter rules, keeping the regex
+        filters matching the full filesystem path exactly as before. Directories are
+        always kept so a non-matching parent never prunes the matching files beneath it
+        (tarfile stops recursing when the filter drops a directory).
+
+        The filter runs once per archived entry, so the per-file costs are kept off the
+        hot loop: the regexes are compiled once here, the full filesystem path is a
+        single f-string on a precomputed prefix rather than Path parsing per entry, the
+        symlink check reads the TarInfo instead of an extra lstat per file, and trace
+        messages use loguru's deferred formatting.
 
         Args:
             source (Path): The source directory the entries are walked from.
@@ -430,18 +437,26 @@ class EZBak:
         Returns:
             Callable[[tarfile.TarInfo], tarfile.TarInfo | None]: The tarfile add-filter.
         """
+        include_pattern, exclude_pattern = compile_filter_patterns(
+            self.settings.include_regex, self.settings.exclude_regex
+        )
+        # With strip, archive names are relative to the source itself; without, they
+        # start with the source's own directory name, so anchor one level higher.
+        prefix = str(source if strip else source.parent)
 
         def _add_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
             if tarinfo.isdir():
-                logger.trace(f"Add to tar: {tarinfo.name}")
+                logger.trace("Add to tar: {}", tarinfo.name)
                 return tarinfo
-            rel = Path(tarinfo.name) if strip else Path(tarinfo.name).relative_to(source.name)
-            if should_include_file(
-                path=source / rel,
-                include_regex=self.settings.include_regex,
-                exclude_regex=self.settings.exclude_regex,
+            if tarinfo.issym():
+                logger.warning(f"Skip backup of symlink: {prefix}/{tarinfo.name}")
+                return None
+            if passes_filters(
+                path=f"{prefix}/{tarinfo.name}",
+                include_pattern=include_pattern,
+                exclude_pattern=exclude_pattern,
             ):
-                logger.trace(f"Add to tar: {tarinfo.name}")
+                logger.trace("Add to tar: {}", tarinfo.name)
                 return tarinfo
             return None
 
@@ -472,10 +487,13 @@ class EZBak:
                 arcname = f"{prefix}/{child.name}" if prefix else child.name
                 tar.add(child, arcname=arcname, recursive=True, filter=add_filter)
         elif source.is_file() and not source.is_symlink():
-            if should_include_file(
+            include_pattern, exclude_pattern = compile_filter_patterns(
+                self.settings.include_regex, self.settings.exclude_regex
+            )
+            if passes_filters(
                 path=source,
-                include_regex=self.settings.include_regex,
-                exclude_regex=self.settings.exclude_regex,
+                include_pattern=include_pattern,
+                exclude_pattern=exclude_pattern,
             ):
                 logger.trace(f"Add to tar: {source.name}")
                 tar.add(source, arcname=source.name, recursive=False)

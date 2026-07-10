@@ -124,7 +124,7 @@ class StorageLocation:
         timestamp = now.to_stdlib().strftime(DEFAULT_DATE_FORMAT)
         filename = build_backup_name(name=self.name, timestamp=timestamp)
 
-        if filename in [x.name for x in self.backups]:
+        if any(x.name == filename for x in self.backups):
             filename = add_uid_suffix(filename)
 
         logger.trace(f"Backup name: {filename}")
