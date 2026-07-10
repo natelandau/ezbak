@@ -1,3 +1,22 @@
+## v1.2.1 (2026-07-10)
+
+### Fix
+
+- **s3**: harden S3 transfers and restores
+- **restore**: never chown a symlink's target
+- **hooks**: log configured hooks at boot
+
+### Refactor
+
+- **checksums**: drop unused sha256_file
+
+### Perf
+
+- **container**: drop delay after one-shot runs
+- **backup**: avoid re-index when logging prunes
+- **backup**: cut per-file cost of tar filtering
+- **backup**: default gzip compression to 6
+
 ## v1.2.0 (2026-07-10)
 
 ### Feat
