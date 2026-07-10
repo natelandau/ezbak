@@ -74,6 +74,19 @@ def test_run_hook_spawn_error_returns_false(mocker):
     assert result is False
 
 
+def test_run_hook_supports_shell_operators(tmp_path):
+    """Verify a hook command runs through a shell so pipes and && work."""
+    # Given a marker path and a command that uses a pipe and &&
+    marker = tmp_path / "shell_ops"
+
+    # When running a hook that pipes and chains commands
+    result = run_hook(f"echo hi | tr a-z A-Z > {marker} && true", phase="pre-backup", timeout=300)
+
+    # Then the shell interpreted the operators and the hook succeeded
+    assert result is True
+    assert marker.read_text().strip() == "HI"
+
+
 def test_run_hook_timeout_zero_disables_timeout(mocker):
     """Verify timeout=0 passes no timeout to subprocess.run."""
     # Given a spy on subprocess.run returning a clean exit
