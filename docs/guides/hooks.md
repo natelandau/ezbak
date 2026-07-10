@@ -66,6 +66,14 @@ you repeating them.
     exit code and output before wiring it into `EZBAK_PRE_BACKUP_HOOK` or
     `EZBAK_POST_BACKUP_HOOK`.
 
+!!! warning "Don't put secrets in the command"
+
+    ezbak logs the hook command and its captured output verbatim, so a secret
+    written directly into `EZBAK_PRE_BACKUP_HOOK` or any other hook variable
+    ends up in the container logs. Pass secrets through environment variables
+    the command reads instead, so the value never appears in the logged
+    command line.
+
 ## Failure semantics
 
 A pre-hook and a post-hook fail differently, because a pre-hook runs before
@@ -114,3 +122,7 @@ same pre- or post-hook semantics described above.
     them once they finish, but it does not send them a kill signal. Keep hook
     commands foreground-only, or have them clean up after themselves, if you
     rely on the timeout to bound total run time.
+
+On the final backup at shutdown, the pre- and post-hooks run synchronously
+before the container stops, so a long-running or disabled (`0`) hook timeout
+extends how long shutdown takes, up to the orchestrator's kill grace period.
