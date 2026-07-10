@@ -6,12 +6,83 @@ parsed, and computed, so the create and restore paths never disagree on the shap
 
 import hashlib
 from pathlib import Path
+from typing import IO, Protocol
 
 from ezbak.constants import CHECKSUM_EXTENSION
 
 # Read archives in 64 KiB blocks so a multi-gigabyte file is never held in memory.
 _CHUNK_SIZE = 65536
 _DIGEST_LEN = 64
+
+
+class _Hasher(Protocol):
+    """The slice of a hashlib object the tee wrappers depend on."""
+
+    def update(self, data: bytes, /) -> None: ...
+
+
+class HashingWriter:
+    """Write-through file wrapper that digests bytes as they are written.
+
+    Wrap an archive's output file so its digest is computed during the single
+    write pass tarfile already makes, instead of re-reading the finished archive.
+    Dropping that second full read keeps a multi-gigabyte backup from inflating
+    the container's page-cache footprint (the checksum re-read was OOM-killing it).
+
+    Only ``write`` carries data; ``tell``/``flush`` exist because the gzip layer
+    tarfile wraps around this object may call them.
+    """
+
+    def __init__(self, fileobj: IO[bytes], hasher: _Hasher) -> None:
+        self._fileobj = fileobj
+        self._hasher = hasher
+
+    def write(self, data: bytes) -> int:
+        """Digest `data`, then write it through to the wrapped file.
+
+        Returns:
+            int: The number of bytes written.
+        """
+        self._hasher.update(data)
+        return self._fileobj.write(data)
+
+    def tell(self) -> int:
+        """Return the wrapped file's current position."""
+        return self._fileobj.tell()
+
+    def flush(self) -> None:
+        """Flush the wrapped file."""
+        self._fileobj.flush()
+
+
+class HashingReader:
+    """Read-through file wrapper that digests bytes as they are read.
+
+    Wrap an archive's input file so its digest is computed during extraction's
+    single read pass, instead of a separate verify-then-extract double read. Call
+    ``drain`` once the consumer stops (tarfile stops at the tar end-of-archive and
+    leaves the gzip trailer, or everything past a corrupt header, unread) so the
+    digest still covers the whole file and matches ``sha256_file``.
+    """
+
+    def __init__(self, fileobj: IO[bytes], hasher: _Hasher) -> None:
+        self._fileobj = fileobj
+        self._hasher = hasher
+
+    def read(self, size: int = -1) -> bytes:
+        """Read up to `size` bytes from the wrapped file, digesting them first.
+
+        Returns:
+            bytes: The bytes read (empty at EOF).
+        """
+        data = self._fileobj.read(size)
+        self._hasher.update(data)
+        return data
+
+    def drain(self) -> None:
+        """Feed any bytes the consumer left unread through the hash, up to EOF."""
+        for chunk in iter(lambda: self._fileobj.read(_CHUNK_SIZE), b""):
+            self._hasher.update(chunk)
 
 
 def sha256_file(path: Path) -> str:

@@ -255,7 +255,7 @@ class RestoreCommand:
         bool,
         cappa.Arg(
             long="--use-checksums/--no-use-checksums",
-            help="Verify the archive against its .sha256 sidecar before extracting.",
+            help="Verify the archive against its .sha256 sidecar on restore.",
             group=(3, "Optional"),
             show_default=True,
         ),
