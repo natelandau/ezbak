@@ -9,14 +9,14 @@
     ]
     dependencies = [
         "apscheduler>=3.11.3,<4.0.0",
-        "boto3>=1.43.44,<2.0.0",
+        "boto3>=1.43.54,<2.0.0",
         "cappa>=0.32.1,<1.0.0",
         "loguru>=0.7.3",
         "nclutils>=3.4.2,<4.0.0",
         "pydantic-settings>=2.14.2,<3.0.0",
         "pydantic>=2.13.4,<3.0.0",
         "rich>=15.0.0",
-        "whenever>=0.10.2,<1.0.0",
+        "whenever>=0.10.3,<1.0.0",
     ]
     description = "A simple tool to backup and restore data as tgz files."
     license = "MIT"
@@ -35,12 +35,12 @@
 
 [dependency-groups]
     dev = [
-        "commitizen>=4.16.4",
-        "coverage>=7.15.0",
+        "commitizen>=4.16.5",
+        "coverage>=7.15.2",
         "duty>=1.9.0",
         "moto[s3]>=5.2.2",
-        "mypy>=2.2.0",
-        "prek>=0.4.8",
+        "mypy>=2.3.0",
+        "prek>=0.4.10",
         "pytest-clarity>=1.0.1",
         "pytest-cov>=7.1.0",
         "pytest-devtools>=1.2.0",
@@ -48,11 +48,11 @@
         "pytest-sugar>=1.1.1",
         "pytest>=9.1.1",
         "rich>=15.0.0",
-        "ruff>=0.15.20",
+        "ruff>=0.15.22",
         "time-machine>=3.2.0",
         "typos>=1.48.0",
         "yamllint>=1.38.0",
-        "zensical>=0.0.50",
+        "zensical>=0.0.51",
     ]
 
 [build-system]
@@ -136,53 +136,53 @@
 
     [tool.ruff.lint]
         ignore = [
-            "ANN204", # missing return type annotation for special method `__init__`
-            "B006",   # mutable-argument-default
-            "B008",   # function-call-in-default-argument
-            "COM812", # Trailing comma missing"
-            "CPY001", # Missing copyright notice at top of file
-            "D107",   # undocumented-public-init
-            "D213",   # multi-line-summary-second-line
-            "E501",   # line-too-long
-            "FIX002", # Line contains TODO, consider resolving the issue
-            "TD002",  # Missing author in TODO
-            "TD003",  # Missing issue link on the line following this TODO
-            "UP007",  # non-pep604-annotation
+            "missing-return-type-special-method", # missing return type annotation for special method `__init__`
+            "mutable-argument-default",   # mutable-argument-default
+            "function-call-in-default-argument",   # function-call-in-default-argument
+            "missing-trailing-comma", # Trailing comma missing"
+            "missing-copyright-notice", # Missing copyright notice at top of file
+            "undocumented-public-init",   # undocumented-public-init
+            "multi-line-summary-second-line",   # multi-line-summary-second-line
+            "line-too-long",   # line-too-long
+            "line-contains-todo", # Line contains TODO, consider resolving the issue
+            "missing-todo-author",  # Missing author in TODO
+            "missing-todo-link",  # Missing issue link on the line following this TODO
+            "non-pep604-annotation-union",  # non-pep604-annotation
         ]
         per-file-ignores = { "tests/*.py" = [
-            "A002",
-            "A003",
-            "ANN001",
-            "ANN003",
-            "ANN201",
-            "ANN202",
-            "ANN205",
-            "ARG001",
-            "ARG002",
-            "ARG005",
-            "D102",
-            "D417",
-            "DTZ001",  #datetime called without a `tzinfo` argument
-            "E712",
-            "ERA001",
-            "F403",
-            "PGH003",
-            "PLC2701",
-            "PLR0913",
-            "PLR0917",
-            "PLR2004",
-            "PLR6301",
-            "S101",
-            "S106",    # Possible hardcoded password
-            "SLF001",
+            "builtin-argument-shadowing",
+            "builtin-attribute-shadowing",
+            "missing-type-function-argument",
+            "missing-type-kwargs",
+            "missing-return-type-undocumented-public-function",
+            "missing-return-type-private-function",
+            "missing-return-type-static-method",
+            "unused-function-argument",
+            "unused-method-argument",
+            "unused-lambda-argument",
+            "undocumented-public-method",
+            "undocumented-param",
+            "call-datetime-without-tzinfo",  #datetime called without a `tzinfo` argument
+            "true-false-comparison",
+            "commented-out-code",
+            "undefined-local-with-import-star",
+            "blanket-type-ignore",
+            "import-private-name",
+            "too-many-arguments",
+            "too-many-positional-arguments",
+            "magic-value-comparison",
+            "no-self-use",
+            "assert",
+            "hardcoded-password-func-arg",    # Possible hardcoded password
+            "private-member-access",
 
-        ], "duties.py" = ["ANN001"] }
+        ], "duties.py" = ["missing-type-function-argument"] }
         preview = true
         select = ["ALL"]
         unfixable = [
-            "ERA001", # Commented out code
-            "F401",   # unused-import
-            "F841",   # unused-variable
+            "commented-out-code", # Commented out code
+            "unused-import",   # unused-import
+            "unused-variable",   # unused-variable
         ]
         [tool.ruff.lint.mccabe]
             max-complexity = 10

@@ -1,7 +1,7 @@
 """Scratchpad for testing ezbak.
 
 Copy this file into .dev and run `python eztest.py` to test ezbak.
-"""  # noqa: INP001
+"""  # ruff:ignore[implicit-namespace-package]
 
 from ezbak import ezbak
 

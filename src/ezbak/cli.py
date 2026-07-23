@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # Runtime import (not TYPE_CHECKING-only): cappa resolves annotations via get_type_hints
 # at collection time, which needs Path in the module namespace.
-from pathlib import Path  # noqa: TC003
+from pathlib import Path  # ruff:ignore[typing-only-standard-library-import]
 from typing import TYPE_CHECKING, Annotated, Any
 
 import cappa
@@ -452,7 +452,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
 
 
 def main() -> None:  # pragma: no cover
-    """Main function."""  # noqa: DOC501
+    """Main function."""  # ruff:ignore[docstring-missing-exception]
     try:
         cappa.invoke(obj=EZBakCLI, completion=False)
     except KeyboardInterrupt as e:

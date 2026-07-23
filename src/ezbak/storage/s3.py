@@ -247,7 +247,7 @@ class S3Backend(StorageBackend):
             raise StorageReadError(msg) from e
         return tmp_file
 
-    def cleanup_restore_artifact(self, path: Path) -> None:  # noqa: PLR6301
+    def cleanup_restore_artifact(self, path: Path) -> None:  # ruff:ignore[no-self-use]
         """Delete the downloaded archive copy staged by `prepare_for_restore`.
 
         The staging dir only vanishes at process exit, so without this a

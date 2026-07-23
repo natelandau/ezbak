@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess  # noqa: S404
+import subprocess  # ruff:ignore[suspicious-subprocess-import]
 
 from loguru import logger
 
@@ -43,7 +43,7 @@ def run_hook(command: str | None, *, phase: str, timeout: int) -> bool:
     try:
         # timeout or None: a configured 0 means "run to completion" (subprocess treats
         # None as no timeout). shell=False; the shell is the explicit `/bin/sh -c` argv.
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true]
             ["/bin/sh", "-c", command],
             timeout=timeout or None,
             capture_output=True,

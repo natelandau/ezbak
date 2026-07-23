@@ -147,7 +147,7 @@ class AWSService:
             logger.warning("S3: No keys provided for deletion")
             return []
 
-        if len(keys) > 1000:  # noqa: PLR2004
+        if len(keys) > 1000:  # ruff:ignore[magic-value-comparison]
             msg = "S3: Cannot delete more than 1000 objects at once"
             logger.error(msg)
             raise ValueError(msg)

@@ -20,7 +20,7 @@ def test_backupconfig_requires_name():
     # When constructing the config
     # Then validation fails
     with pytest.raises(ValidationError):
-        BackupConfig(storage_paths=["/tmp"])  # noqa: S108
+        BackupConfig(storage_paths=["/tmp"])  # ruff:ignore[hardcoded-temp-file]
 
 
 def test_backupconfig_does_not_read_env(monkeypatch):
@@ -29,7 +29,7 @@ def test_backupconfig_does_not_read_env(monkeypatch):
     monkeypatch.setenv("EZBAK_NAME", "from-env")
 
     # When building a plain BackupConfig with an explicit name
-    config = BackupConfig(name="explicit", storage_paths=["/tmp"])  # noqa: S108
+    config = BackupConfig(name="explicit", storage_paths=["/tmp"])  # ruff:ignore[hardcoded-temp-file]
 
     # Then the env var is not consulted
     assert config.name == "explicit"
@@ -39,7 +39,7 @@ def test_envconfig_reads_env(monkeypatch):
     """Verify EnvConfig loads EZBAK_-prefixed environment variables."""
     # Given EZBAK_ env vars
     monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # noqa: S108
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # ruff:ignore[hardcoded-temp-file]
 
     # When building an EnvConfig
     config = EnvConfig()
@@ -66,7 +66,7 @@ def test_envconfig_reads_restore_date(monkeypatch):
     """Verify EnvConfig loads EZBAK_RESTORE_DATE into restore_date."""
     # Given the env var set alongside the required fields
     monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # noqa: S108
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # ruff:ignore[hardcoded-temp-file]
     monkeypatch.setenv("EZBAK_RESTORE_DATE", "20250102")
 
     # When building an EnvConfig
@@ -120,25 +120,25 @@ def test_envconfig_reads_region_and_endpoint(monkeypatch):
 def test_coerce_path_list_skips_blank_segments():
     """Verify blank comma segments do not inject a phantom cwd path."""
     # Given a comma list with an empty middle segment
-    result = coerce_path_list("/tmp/a,,/tmp/b")  # noqa: S108
+    result = coerce_path_list("/tmp/a,,/tmp/b")  # ruff:ignore[hardcoded-temp-file]
 
     # Then only the two real paths are returned, no cwd entry
-    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # noqa: S108
+    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # ruff:ignore[hardcoded-temp-file]
 
 
 def test_coerce_path_list_strips_whitespace_around_entries():
     """Verify padded comma entries resolve to the real path, not a cwd-relative one."""
     # Given a comma list with spaces around each entry (e.g. "/tmp/a, /tmp/b")
-    result = coerce_path_list("/tmp/a, /tmp/b")  # noqa: S108
+    result = coerce_path_list("/tmp/a, /tmp/b")  # ruff:ignore[hardcoded-temp-file]
 
     # Then each entry is stripped to an absolute path, not Path(" /tmp/b") under cwd
-    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # noqa: S108
+    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # ruff:ignore[hardcoded-temp-file]
 
 
 def test_retention_policy_derivation_keep_last():
     """Verify keep_last yields an active retention policy."""
     # Given a config with keep_last
-    config = BackupConfig(name="x", storage_paths=["/tmp"], keep_last=5)  # noqa: S108
+    config = BackupConfig(name="x", storage_paths=["/tmp"], keep_last=5)  # ruff:ignore[hardcoded-temp-file]
 
     # When reading the derived policy
     policy = config.retention_policy
@@ -166,13 +166,13 @@ def test_negative_keep_rule_rejected(field):
     # When constructing it
     # Then validation fails rather than accepting the negative count
     with pytest.raises(ValidationError):
-        BackupConfig(name="x", storage_paths=["/tmp"], **{field: -1})  # noqa: S108
+        BackupConfig(name="x", storage_paths=["/tmp"], **{field: -1})  # ruff:ignore[hardcoded-temp-file]
 
 
 def test_use_checksums_defaults_true():
     """Verify use_checksums defaults to True."""
     # Given a minimal config with no explicit use_checksums
-    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # noqa: S108
+    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # ruff:ignore[hardcoded-temp-file]
 
     # Then it defaults to using checksum sidecars
     assert config.use_checksums is True
@@ -182,7 +182,7 @@ def test_compression_level_defaults_to_six():
     """Verify the default gzip level is 6, the speed/size sweet spot."""
     # Given a minimal config with no explicit compression_level
     # When constructing the config
-    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # noqa: S108
+    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # ruff:ignore[hardcoded-temp-file]
 
     # Then it defaults to gzip level 6
     assert config.compression_level == 6

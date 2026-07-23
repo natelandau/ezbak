@@ -134,7 +134,7 @@ class LocalBackend(StorageBackend):
             return False
         return True
 
-    def _write_sidecar(self, *, backup: Backup, content: str) -> None:  # noqa: PLR6301
+    def _write_sidecar(self, *, backup: Backup, content: str) -> None:  # ruff:ignore[no-self-use]
         """Write the sidecar file next to a local archive; a failure warns and is tolerated.
 
         Args:
@@ -150,7 +150,7 @@ class LocalBackend(StorageBackend):
             # Best-effort: the archive is intact, just unverifiable later.
             logger.warning(f"Failed to write checksum sidecar '{sidecar_path}': {e}")
 
-    def _remove_sidecar(self, backup: Backup) -> None:  # noqa: PLR6301
+    def _remove_sidecar(self, backup: Backup) -> None:  # ruff:ignore[no-self-use]
         """Remove the checksum sidecar next to a local archive; tolerate its absence.
 
         Args:
@@ -176,7 +176,7 @@ class LocalBackend(StorageBackend):
         logger.debug(f"Deleting {len(backups)} local backups")
         return [backup for backup in backups if self.delete(backup)]
 
-    def prepare_for_restore(self, backup: Backup) -> Path | None:  # noqa: PLR6301
+    def prepare_for_restore(self, backup: Backup) -> Path | None:  # ruff:ignore[no-self-use]
         """Return the on-disk path of a local backup.
 
         Args:
@@ -188,7 +188,7 @@ class LocalBackend(StorageBackend):
         logger.info(f"Restoring backup from local: {backup.name}")
         return backup.path
 
-    def _read_sidecar(self, backup: Backup) -> str | None:  # noqa: PLR6301
+    def _read_sidecar(self, backup: Backup) -> str | None:  # ruff:ignore[no-self-use]
         """Return the raw sidecar content next to a local archive, or None if unreadable.
 
         Args:

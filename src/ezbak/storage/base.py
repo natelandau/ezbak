@@ -137,7 +137,7 @@ class StorageBackend(ABC):
     def prepare_for_restore(self, backup: Backup) -> Path | None:
         """Return a local path to the backup archive, or None if it cannot be retrieved."""
 
-    def cleanup_restore_artifact(self, path: Path) -> None:  # noqa: B027
+    def cleanup_restore_artifact(self, path: Path) -> None:  # ruff:ignore[empty-method-without-abstract-decorator]
         """Reclaim any staging copy `prepare_for_restore` created for `path`.
 
         Default no-op: a backend whose `prepare_for_restore` returns the stored

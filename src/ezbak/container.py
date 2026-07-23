@@ -71,7 +71,7 @@ def _ping_healthcheck(url: str | None, *, failed: bool) -> None:
     ping_url = f"{base_url}/fail" if failed else base_url
     try:
         # Config-supplied URL; a monitoring ping must never fail the backup it reports on.
-        with urllib.request.urlopen(ping_url, timeout=10):  # noqa: S310
+        with urllib.request.urlopen(ping_url, timeout=10):  # ruff:ignore[suspicious-url-open-usage]
             pass
     except (OSError, ValueError) as e:
         logger.warning(f"Healthcheck ping failed: {e}")

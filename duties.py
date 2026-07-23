@@ -72,7 +72,7 @@ def ruff(ctx: Context) -> None:
 
 
 @duty
-def format(ctx: Context) -> None:  # noqa: A001
+def format(ctx: Context) -> None:  # ruff:ignore[builtin-variable-shadowing]
     """Format the code with ruff."""
     ctx.run(
         tools.ruff.format(*PY_SRC_LIST, check=True, config="pyproject.toml"),
@@ -160,7 +160,7 @@ def test(ctx: Context, *cli_args: str) -> None:
 
 
 @duty()
-def dev_clean(ctx: Context) -> None:  # noqa: ARG001
+def dev_clean(ctx: Context) -> None:  # ruff:ignore[unused-function-argument]
     """Clean the development environment."""
     if DEV_DIR.exists():
         shutil.rmtree(DEV_DIR)
@@ -173,7 +173,7 @@ def dev_clean(ctx: Context) -> None:  # noqa: ARG001
 
 
 @duty(pre=[dev_clean])
-def dev_setup(ctx: Context) -> None:  # noqa: ARG001
+def dev_setup(ctx: Context) -> None:  # ruff:ignore[unused-function-argument]
     """Provision a mock development environment."""
     project_1 = DEV_DIR / "source" / "project1"
     project_2 = DEV_DIR / "source" / "project2"
