@@ -1067,7 +1067,8 @@ class EZBak:
 
         Raises:
             ConfigurationError: If no restore path is provided and none is configured, the restore path does not exist or is not a directory, or the restore path overlaps a storage location.
-        """
+            RestoreFailedError: If the backup archive is missing or corrupt, extraction fails, or the restore target cannot be read to check whether it is populated.
+        """  # noqa: DOC502
         target_path = restore_path or self.settings.restore_path
 
         try:
