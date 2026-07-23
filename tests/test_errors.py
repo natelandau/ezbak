@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from ezbak import EZBak, ezbak
 from ezbak.backup import Backup
 from ezbak.config import BackupConfig
-from ezbak.constants import StorageType
+from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.exceptions import (
     BackendNotFoundError,
     BackupFailedError,
@@ -143,7 +143,7 @@ def test_restore_no_backup(filesystem, tmp_path, debug, capsys):
         log_level="DEBUG",
     )
     # backup_manager.create_backup()
-    assert not backup_manager.restore_backup(tmp_path)
+    assert backup_manager.restore_backup(tmp_path) is RestoreOutcome.NO_BACKUP
     output = capsys.readouterr().err
     # debug(output)
     assert "ERROR    | No backup found to restore" in output
@@ -187,7 +187,7 @@ def test_restore_backup_missing_local_storage_path(filesystem, tmp_path):
     result = app.restore_backup(restore_path=tmp_path)
 
     # Then no backup is found, but the storage path now exists (created during indexing)
-    assert result is False
+    assert result is RestoreOutcome.NO_BACKUP
     assert missing_storage_path.exists()
 
 
@@ -201,7 +201,7 @@ def test_list_and_restore_without_source_paths(filesystem, tmp_path):
     assert app.list_backups() == []
 
     # When restoring, then no backup is found and no "No source paths provided" error is raised
-    assert app.restore_backup(restore_path=tmp_path) is False
+    assert app.restore_backup(restore_path=tmp_path) is RestoreOutcome.NO_BACKUP
 
 
 def test_local_backend_write_raises_storage_write_error(filesystem, mocker):
@@ -316,7 +316,7 @@ def test_create_backup_uncreatable_local_path_fails_loudly(filesystem, mocker):
 
 
 def test_restore_backup_raises_when_archive_corrupt(filesystem, tmp_path):
-    """Verify a corrupt archive fails the restore loudly instead of a silent False."""
+    """Verify a corrupt archive fails the restore loudly instead of a silent NO_BACKUP."""
     # Given a valid backup that has since been corrupted on disk
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
@@ -387,8 +387,8 @@ def test_restore_backup_does_not_clean_when_no_backup(filesystem, tmp_path):
     keep = restore_dir / "keep.txt"
     keep.write_text("important")
 
-    # When restoring with no backup available, then it returns False without wiping the target
-    assert app.restore_backup(restore_dir) is False
+    # When restoring with no backup available, then it returns NO_BACKUP without wiping the target
+    assert app.restore_backup(restore_dir) is RestoreOutcome.NO_BACKUP
     assert keep.exists()
 
 

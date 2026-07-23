@@ -63,7 +63,7 @@ object. Reach for `ezbak(**kwargs)` in quick scripts.
 | `create_backup()` | `list[Backup]` | Archive the sources and write to every storage location. |
 | `list_backups()` | `list[Backup]` | Every backup, oldest to newest. |
 | `prune_backups(dry_run=False)` | `list[Backup]` | Delete backups the keep rules no longer keep. |
-| `restore_backup(restore_path=None, *, clean_before_restore=False, backup=None)` | `bool` | Restore a backup into a directory. |
+| `restore_backup(restore_path=None, *, clean_before_restore=False, backup=None)` | `RestoreOutcome` | Restore a backup into a directory. |
 | `get_latest_backup()` | `Backup \| None` | The newest backup, or `None` if there are none. |
 | `get_backup_as_of(point_in_time)` | `Backup \| None` | The newest backup at or before a point in time. |
 
@@ -77,9 +77,59 @@ backups.restore_backup(restore_path="/restore")
 `prune_backups(dry_run=True)` returns the backups the policy would delete without
 removing any of them. A real prune returns the backups it confirmed deleted.
 
-`restore_backup()` returns `False` only when there is no backup to restore. It
-raises `RestoreFailedError` on a real download or extract failure, so a failed
-restore never looks like a success.
+`restore_backup()` returns a `RestoreOutcome` member instead of raising for the
+two cases that are not errors: no backup to restore, and a target ezbak declined
+to overwrite. It still raises `RestoreFailedError` on a real download or extract
+failure, so a failed restore never looks like a success.
+
+!!! warning "Breaking change: restore_backup() no longer returns a bool"
+
+    `restore_backup()` used to return `True` on a successful restore and `False`
+    when there was no backup to restore. It now returns a `RestoreOutcome`
+    member. Update code that checked the return value as a boolean:
+
+    ```python
+    # Before
+    if not backups.restore_backup():
+        print("Nothing to restore")
+
+    # After
+    from ezbak.constants import RestoreOutcome
+
+    outcome = backups.restore_backup()
+    if outcome is RestoreOutcome.NO_BACKUP:
+        print("Nothing to restore")
+    ```
+
+### RestoreOutcome
+
+`restore_backup()` returns one of three `RestoreOutcome` members, so a caller can
+tell an actual restore apart from a no-op:
+
+| Member | Meaning |
+| --- | --- |
+| `RestoreOutcome.RESTORED` | A backup was extracted into the target. |
+| `RestoreOutcome.NO_BACKUP` | No backup matched the restore criteria. |
+| `RestoreOutcome.SKIPPED_POPULATED` | `skip_restore_if_populated` is set and the target already contained data, so ezbak left it alone. |
+
+Import `RestoreOutcome` from `ezbak.constants`:
+
+```python
+from ezbak.constants import RestoreOutcome
+
+outcome = backups.restore_backup(restore_path="/restore")
+match outcome:
+    case RestoreOutcome.RESTORED:
+        print("Restored")
+    case RestoreOutcome.NO_BACKUP:
+        print("Nothing to restore")
+    case RestoreOutcome.SKIPPED_POPULATED:
+        print("Target already had data; left it alone")
+```
+
+See [Restore backups](../guides/restore.md) for `skip_restore_if_populated` and
+[Fresh deploys](../orchestration/fresh-deploys.md) for the pre-start restore use
+case both outcomes support.
 
 ### Point-in-time restore
 

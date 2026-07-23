@@ -104,8 +104,12 @@ except RestoreFailedError as error:
     print(f"Restore failed: {error}")
 ```
 
-`restore_backup()` returns `False`, and raises nothing, when there is simply no
-backup to restore. A library caller checks the return value and decides what to
-do, so the `restore_if_exists` option is only for the CLI and container. See
-[Failure behavior](../concepts/failure-behavior.md) and the full [Python API
+`restore_backup()` returns a `RestoreOutcome` member and raises nothing for two
+non-error cases: `RestoreOutcome.NO_BACKUP` when there is simply no backup to
+restore, and `RestoreOutcome.SKIPPED_POPULATED` when `skip_restore_if_populated`
+is set and the target already has data. A library caller checks the return
+value and decides what to do, so `restore_if_exists` and
+`skip_restore_if_populated` mainly matter to the CLI and container, which turn
+those results into an exit code. See [Failure
+behavior](../concepts/failure-behavior.md) and the full [Python API
 reference](../reference/python-api.md).

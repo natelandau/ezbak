@@ -502,6 +502,22 @@ def test_build_config_maps_if_exists():
     assert config.restore_if_exists is True
 
 
+def test_build_config_restore_skip_if_populated():
+    """Verify --skip-if-populated maps onto the config field."""
+    # Given a restore command with --skip-if-populated set
+    cli = EZBakCLI(
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_populated=True),  # noqa: S108
+        name="test",
+        storage_paths=[Path("/tmp")],  # noqa: S108
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then the guard is enabled
+    assert config.skip_restore_if_populated is True
+
+
 def test_prune_flags_map_to_keep_fields():
     """Verify --keep-* flags populate the matching keep_* config fields."""
     # Given a prune command carrying keep_last and keep_daily

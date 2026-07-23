@@ -6,7 +6,7 @@ from enum import Enum
 __version__ = "1.2.1"
 
 DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
-# whenever's parse pattern equivalent of DEFAULT_DATE_FORMAT — Y/M/D for date, h/m/s for time, 'T' is a quoted literal
+# whenever's parse pattern equivalent of DEFAULT_DATE_FORMAT, Y/M/D for date, h/m/s for time, 'T' is a quoted literal
 DEFAULT_DATE_PATTERN = "YYYYMMDD'T'hhmmss"
 TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
 # Accepts the no-dash filename timestamp shape at any granularity:
@@ -26,6 +26,10 @@ ALWAYS_EXCLUDE_FILENAMES = (
     "Thumbs.db",
     "IconCache.db",
 )
+# Entries that do not count as "data" when skip_restore_if_populated guards a restore.
+# Reuses the OS cruft we already refuse to back up, plus lost+found (shipped on every
+# fresh ext mount). Extend this tuple to teach the guard about more benign noise.
+RESTORE_POPULATED_IGNORE_FILENAMES = (*ALWAYS_EXCLUDE_FILENAMES, "lost+found")
 
 
 class CLILogLevel(Enum):
@@ -73,3 +77,16 @@ class Action(Enum):
 
     BACKUP = "backup"
     RESTORE = "restore"
+
+
+class RestoreOutcome(Enum):
+    """Result of a restore attempt.
+
+    Distinguishes an actual restore from a no-op so callers can react correctly: the
+    container suppresses its post-restore hook on a skip and treats a missing backup as a
+    failure unless restore_if_exists is set.
+    """
+
+    RESTORED = "restored"  # a backup was extracted into the target
+    NO_BACKUP = "no_backup"  # nothing matched the restore criteria
+    SKIPPED_POPULATED = "skipped"  # guard tripped; target already held data

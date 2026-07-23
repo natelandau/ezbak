@@ -8,7 +8,7 @@ from boto3.exceptions import RetriesExceededError, S3UploadFailedError
 
 from ezbak import ezbak
 from ezbak.backup import Backup
-from ezbak.constants import StorageType
+from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.exceptions import (
     BackupFailedError,
     RestoreFailedError,
@@ -90,7 +90,7 @@ def test_s3_restore_removes_downloaded_archive(s3_bucket: str, filesystem, tmp_p
     # When: restoring the backup
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    assert app.restore_backup(restore_path=restore_dir)
+    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
     # Then: the staging dir is empty again, so a cron restore container does not
     # accumulate one archive-sized file per tick
@@ -136,7 +136,7 @@ def test_s3_restore_missing_sidecar_warns_and_succeeds(
     # When: restoring the backup
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    assert app.restore_backup(restore_path=restore_dir)
+    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
     # Then: the restore succeeded and warned about the missing sidecar
     output = capsys.readouterr().err
@@ -230,7 +230,7 @@ def test_local_restore_keeps_stored_archive(filesystem, tmp_path) -> None:
     # When: restoring the backup
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    assert app.restore_backup(restore_path=restore_dir)
+    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
     # Then: the archive is still in storage (prepare_for_restore returned the
     # stored file itself, not a staged copy)

@@ -13,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 from pydantic import ValidationError
 
-from ezbak.constants import Action, __version__
+from ezbak.constants import Action, RestoreOutcome, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
 from ezbak.exceptions import EZBakError, HookFailedError, RestoreFailedError
@@ -81,8 +81,8 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
     """Restore a backup of the service data directory from the specified path.
 
     Run the pre-restore hook first; a non-zero hook aborts before restoring. Run the
-    post-restore hook only when a restore actually happened, so a restore_if_exists
-    no-op (no backup matched) skips it.
+    post-restore hook only when a restore actually wrote files, so a no-op (no backup
+    matched, or the target was already populated) skips it.
 
     Raises:
         HookFailedError: A pre- or post-restore hook failed.
@@ -92,19 +92,25 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
         msg = "pre-restore hook failed; skipping restore"
         raise HookFailedError(msg)
 
-    if not app.restore_backup():
-        # restore_backup() returns False (rather than raising) only when no backup
-        # matches; a real download or extract error raises RestoreFailedError from within.
-        # With restore_if_exists, a missing backup is a clean no-op (a fresh deployment).
+    outcome = app.restore_backup()
+
+    if outcome is RestoreOutcome.NO_BACKUP:
+        # A missing backup is a clean no-op only with restore_if_exists (a fresh
+        # deployment); otherwise a failed restore must not look like a success.
         if app.settings.restore_if_exists:
             logger.info("No backup matched and restore_if_exists is set; exiting without error")
             return
-        # Raise here to keep a failed restore from looking like a success.
         msg = "Restore failed: no backup matched the restore criteria"
         raise RestoreFailedError(msg)
 
-    # Reached only after an actual restore, so the post-restore hook is skipped on a
-    # restore_if_exists no-op above.
+    if outcome is RestoreOutcome.SKIPPED_POPULATED:
+        # Target already holds data; nothing was written, so the post-restore hook
+        # (which preps freshly restored files) must not run.
+        logger.info("Restore target already contains data; skipping restore and post-restore hook")
+        return
+
+    # Reached only after an actual restore: both no-op paths above (no backup
+    # matched, or the target was already populated) have already returned.
     if not run_hook(config.post_restore_hook, phase="post-restore", timeout=config.hook_timeout):
         msg = "post-restore hook failed"
         raise HookFailedError(msg)
