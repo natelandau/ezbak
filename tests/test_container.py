@@ -871,6 +871,28 @@ def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
     assert not marker.exists()
 
 
+def test_do_restore_post_hook_skipped_on_populated(filesystem, tmp_path, mocker):
+    """Verify the post-restore hook does not run when the target was already populated."""
+    # Given a restore that skips because the target already holds data
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], restore_if_exists=True)
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.SKIPPED_POPULATED)
+    marker = tmp_path / "post_restore"
+    config = EnvConfig(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        restore_if_exists=True,
+        post_restore_hook=f"touch {marker}",
+        _env_file=None,
+    )
+
+    # When running do_restore, then it returns cleanly and the post hook did not run
+    do_restore(app, config)
+    assert not marker.exists()
+
+
 def test_log_configured_hooks_logs_active_hook_at_info(filesystem, capsys):
     """Verify a configured hook matching the action is announced at INFO on boot."""
     # Given a backup container with a pre-backup hook configured

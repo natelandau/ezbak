@@ -130,8 +130,13 @@ class BackupConfig(BaseModel):
     # A pre-start restore on a fresh deployment has no backup yet. When set, the CLI and
     # container treat "no backup matched" as a successful no-op instead of a failure, so an
     # orchestrator can still start the job. A real download or extract failure still fails.
-    # Library callers get the same signal from restore_backup()'s NO_BACKUP return value.
+    # Library callers get the same signal from a RestoreOutcome.NO_BACKUP return.
     restore_if_exists: bool = False
+    # Skip the restore when the target already holds data, so a pre-start restore never
+    # overlays live state with an older snapshot. clean_before_restore bypasses this (an
+    # explicit replace). "Populated" ignores RESTORE_POPULATED_IGNORE_FILENAMES and ezbak's
+    # own staging dirs; restore_backup() then returns RestoreOutcome.SKIPPED_POPULATED.
+    skip_restore_if_populated: bool = False
     chown_uid: int | None = None
     chown_gid: int | None = None
 

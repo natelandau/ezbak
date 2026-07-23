@@ -81,8 +81,8 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
     """Restore a backup of the service data directory from the specified path.
 
     Run the pre-restore hook first; a non-zero hook aborts before restoring. Run the
-    post-restore hook only when a restore actually happened, so a restore_if_exists
-    no-op (no backup matched) skips it.
+    post-restore hook only when a restore actually wrote files, so a no-op (no backup
+    matched, or the target was already populated) skips it.
 
     Raises:
         HookFailedError: A pre- or post-restore hook failed.
@@ -103,8 +103,14 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
         msg = "Restore failed: no backup matched the restore criteria"
         raise RestoreFailedError(msg)
 
-    # Reached only after an actual restore, so the post-restore hook is skipped on a
-    # restore_if_exists no-op above.
+    if outcome is RestoreOutcome.SKIPPED_POPULATED:
+        # Target already holds data; nothing was written, so the post-restore hook
+        # (which preps freshly restored files) must not run.
+        logger.info("Restore target already contains data; skipping restore and post-restore hook")
+        return
+
+    # Reached only after an actual restore: both no-op paths above (no backup
+    # matched, or the target was already populated) have already returned.
     if not run_hook(config.post_restore_hook, phase="post-restore", timeout=config.hook_timeout):
         msg = "post-restore hook failed"
         raise HookFailedError(msg)

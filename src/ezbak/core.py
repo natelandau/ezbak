@@ -19,6 +19,7 @@ from ezbak.config import BackupConfig
 from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
     RESTORE_DATE_REGEX,
+    RESTORE_POPULATED_IGNORE_FILENAMES,
     RestoreOutcome,
     StorageType,
 )
@@ -214,6 +215,25 @@ def _assert_restore_path_clear_of_storage(dest: Path, storage_paths: list[Path] 
                 f"Choose a restore path that does not contain a storage location."
             )
             raise ConfigurationError(msg)
+
+
+def _is_restore_target_populated(dest: Path) -> bool:
+    """Return True if `dest` holds real data, ignoring benign noise and ezbak staging dirs.
+
+    Lets the skip_restore_if_populated guard treat an orchestrator-provisioned volume
+    (which ships lost+found) or a target littered with a hard-killed restore's staging dir
+    as empty, so only genuine application data blocks a restore.
+    """
+    try:
+        for entry in dest.iterdir():
+            if entry.name in RESTORE_POPULATED_IGNORE_FILENAMES:
+                continue
+            if entry.name.startswith(_STAGING_PREFIX):
+                continue
+            return True
+    except OSError as e:
+        _fail_restore(f"Failed to inspect restore target '{dest}': {e}", e)
+    return False
 
 
 def _reap_orphaned_staging(destination: Path) -> None:
@@ -1042,7 +1062,8 @@ class EZBak:
 
         Returns:
             RestoreOutcome: RESTORED when a backup was extracted; NO_BACKUP when no backup
-                matched the restore criteria.
+                matched the restore criteria; SKIPPED_POPULATED when skip_restore_if_populated
+                is set and the target already contains data.
 
         Raises:
             ConfigurationError: If no restore path is provided and none is configured, the restore path does not exist or is not a directory, or the restore path overlaps a storage location.
@@ -1074,6 +1095,16 @@ class EZBak:
         # alone; a clean one must not target a storage location.
         if effective_clean:
             _assert_restore_path_clear_of_storage(dest, self.settings.storage_paths)
+
+        # Leave existing data alone: a populated target is a success no-op.
+        # clean_before_restore bypasses it (an explicit replace).
+        if (
+            self.settings.skip_restore_if_populated
+            and not effective_clean
+            and _is_restore_target_populated(dest)
+        ):
+            logger.info(f"Restore target '{dest}' already contains data; skipping restore")
+            return RestoreOutcome.SKIPPED_POPULATED
 
         # A blank restore_date (empty or whitespace, e.g. an unset EZBAK_RESTORE_DATE
         # templated to "") means no point in time was requested: fall through to the

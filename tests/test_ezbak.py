@@ -649,6 +649,94 @@ def test_restore_overlay_reaps_orphaned_staging(tmp_path, filesystem):
     assert not any(p.name.startswith(".ezbak-restore-") for p in restore_dir.iterdir())
 
 
+def test_restore_skips_populated_target(tmp_path, filesystem):
+    """Verify a restore is a no-op when the target holds data and the guard is set."""
+    # Given a backup and a restore target that already contains a live file
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        skip_restore_if_populated=True,
+        log_level="error",
+    )
+    mgr.create_backup()
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "live.txt").write_text("live")
+
+    # When restoring into the populated target
+    outcome = mgr.restore_backup(restore_dir)
+
+    # Then nothing is extracted and the existing data is untouched
+    assert outcome is RestoreOutcome.SKIPPED_POPULATED
+    assert (restore_dir / "live.txt").read_text() == "live"
+    assert not (restore_dir / src_dir.name).exists()
+
+
+def test_restore_populated_ignores_benign_entries(tmp_path, filesystem):
+    """Verify lost+found and staging dirs do not count as data for the guard."""
+    # Given a target holding only ignored noise and an orphaned staging dir
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        skip_restore_if_populated=True,
+        log_level="error",
+    )
+    mgr.create_backup()
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "lost+found").mkdir()
+    (restore_dir / ".ezbak-restore-abc123").mkdir()
+
+    # When restoring, then the guard treats the target as empty and restores
+    assert mgr.restore_backup(restore_dir) is RestoreOutcome.RESTORED
+    for file in src_dir.rglob("*"):
+        assert (restore_dir / src_dir.name / file.name).exists()
+
+
+def test_restore_populated_guard_bypassed_by_clean(tmp_path, filesystem):
+    """Verify clean_before_restore overrides the populated guard and replaces data."""
+    # Given a populated target with both the guard and clean set
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        skip_restore_if_populated=True,
+        log_level="error",
+    )
+    mgr.create_backup()
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "stale.txt").write_text("stale")
+
+    # When restoring with clean_before_restore
+    outcome = mgr.restore_backup(restore_dir, clean_before_restore=True)
+
+    # Then the guard is bypassed: the target is wiped and restored
+    assert outcome is RestoreOutcome.RESTORED
+    assert not (restore_dir / "stale.txt").exists()
+
+
+def test_restore_populated_guard_off_overlays(tmp_path, filesystem):
+    """Verify the default (guard off) still overlays into a populated target."""
+    # Given a populated target and the guard left at its default (off)
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], log_level="error")
+    mgr.create_backup()
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+    (restore_dir / "live.txt").write_text("live")
+
+    # When restoring, then it overlays and reports RESTORED
+    assert mgr.restore_backup(restore_dir) is RestoreOutcome.RESTORED
+    assert (restore_dir / "live.txt").read_text() == "live"
+    assert (restore_dir / src_dir.name).exists()
+
+
 def test_restore_preserves_staging_on_commit_failure(tmp_path, filesystem, monkeypatch):
     """Verify a commit failure keeps the extracted staging tree for manual recovery."""
     src_dir, dest1, _ = filesystem
