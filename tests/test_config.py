@@ -6,6 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from ezbak.config import BackupConfig, coerce_path_list
+from ezbak.constants import (
+    ALWAYS_EXCLUDE_FILENAMES,
+    RESTORE_POPULATED_IGNORE_FILENAMES,
+    RestoreOutcome,
+)
 from ezbak.env import EnvConfig
 
 
@@ -181,3 +186,17 @@ def test_compression_level_defaults_to_six():
 
     # Then it defaults to gzip level 6
     assert config.compression_level == 6
+
+
+def test_restore_outcome_members():
+    """Verify RestoreOutcome exposes the three restore result states."""
+    # Given/Then the enum carries exactly the three outcomes
+    assert {o.value for o in RestoreOutcome} == {"restored", "no_backup", "skipped"}
+
+
+def test_restore_populated_ignore_filenames():
+    """Verify the populated-ignore list extends the always-excluded names with lost+found."""
+    # Given the always-excluded OS cruft
+    # Then the populated-ignore list is a superset that adds lost+found
+    assert set(ALWAYS_EXCLUDE_FILENAMES).issubset(RESTORE_POPULATED_IGNORE_FILENAMES)
+    assert "lost+found" in RESTORE_POPULATED_IGNORE_FILENAMES

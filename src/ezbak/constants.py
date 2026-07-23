@@ -26,6 +26,10 @@ ALWAYS_EXCLUDE_FILENAMES = (
     "Thumbs.db",
     "IconCache.db",
 )
+# Entries that do not count as "data" when skip_restore_if_populated guards a restore.
+# Reuses the OS cruft we already refuse to back up, plus lost+found (shipped on every
+# fresh ext mount). Extend this tuple to teach the guard about more benign noise.
+RESTORE_POPULATED_IGNORE_FILENAMES = (*ALWAYS_EXCLUDE_FILENAMES, "lost+found")
 
 
 class CLILogLevel(Enum):
@@ -73,3 +77,16 @@ class Action(Enum):
 
     BACKUP = "backup"
     RESTORE = "restore"
+
+
+class RestoreOutcome(Enum):
+    """Result of a restore attempt.
+
+    Distinguishes an actual restore from a no-op so callers can react correctly: the
+    container suppresses its post-restore hook on a skip and treats a missing backup as a
+    failure unless restore_if_exists is set.
+    """
+
+    RESTORED = "restored"  # a backup was extracted into the target
+    NO_BACKUP = "no_backup"  # nothing matched the restore criteria
+    SKIPPED_POPULATED = "skipped"  # guard tripped; target already held data
