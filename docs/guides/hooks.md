@@ -114,11 +114,10 @@ you repeating them.
 A pre-hook and a post-hook fail differently, because a pre-hook runs before
 anything is written and a post-hook runs after.
 
-- **A failing pre-hook aborts the operation.** ezbak never starts a backup or
-  restore whose source or target the hook could not prepare.
-- **A failing post-hook fails the run but keeps the backup or restore.** The
-  archive was already written, or the restore already landed, before the
-  post-hook ran, so ezbak keeps that result and reports the run as failed.
+| Hook | On failure |
+| --- | --- |
+| Pre-hook | Aborts the operation. ezbak never starts a backup or restore whose source or target the hook could not prepare. |
+| Post-hook | Fails the run but keeps the backup or restore. The archive was already written, or the restore already landed, before the post-hook ran, so ezbak keeps that result and reports the run as failed. |
 
 Either failure fails the run the same way: a one-shot run exits non-zero, and a
 scheduled run logs the error, keeps the container alive for the next tick, and

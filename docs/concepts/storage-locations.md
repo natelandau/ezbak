@@ -40,12 +40,6 @@ bucket, or a local directory ezbak cannot create, the run fails rather than
 reporting success. ezbak still writes to every location that works, so a partial
 failure keeps the copies that succeeded.
 
-The failure surfaces differently on each interface:
-
-- The library raises `BackupFailedError`.
-- The `ezbak create` command and a one-shot container exit non-zero.
-- A scheduled container logs the error, pings its failure endpoint, and keeps
-  running so the next scheduled run retries.
-
-See [Failure behavior](failure-behavior.md) for the full picture, and
-[Back up to S3](../guides/s3.md) for S3 setup.
+How that failure surfaces on each interface, and the errors it raises, is covered
+in [Failure behavior](failure-behavior.md). See [Back up to S3](../guides/s3.md)
+for S3 setup.

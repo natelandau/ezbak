@@ -147,8 +147,8 @@ which in turn takes priority over the latest backup.
 
 ## Exceptions
 
-Every ezbak error subclasses `EZBakError`, so one `except EZBakError` catches any
-failure.
+Every exception the library raises subclasses `EZBakError`, so one
+`except EZBakError` catches any failure.
 
 ```mermaid
 classDiagram

@@ -53,9 +53,8 @@ next run retries. It does not crash the container.
 
 !!! bug "Scheduled failures need a monitor to be noticed"
 
-    A scheduled job's own exceptions travel through Python's standard logging,
-    which is separate from ezbak's log sink. ezbak catches those exceptions and
-    re-logs them so they stay visible, then pings the failure endpoint. Set
+    A failed scheduled run stays visible in the logs and pings the failure
+    endpoint, but nothing crashes to draw your attention. Set
     `EZBAK_HEALTHCHECK_URL` so you are alerted when a scheduled run fails or stops
     happening. See [Monitoring](orchestration/monitoring.md).
 

@@ -8,6 +8,10 @@ ezbak takes the same options three ways: as `EZBAK_` environment variables (the
 container), as command-line flags, or as arguments to the Python library's
 `BackupConfig`. Each table below gives an option's library field, environment
 variable, CLI flag, and default, so you never have to translate between surfaces.
+Every ezbak option appears in one of these tables. For how `EZBAK_` variables are
+read from the environment and `.env` files, see [Environment
+variables](environment-variables.md); for runnable container commands, see
+[Running in Docker](../guides/docker.md).
 
 The environment variable is the field name uppercased with an `EZBAK_` prefix, so
 `source_paths` becomes `EZBAK_SOURCE_PATHS`. CLI flags use their own names, which
@@ -18,9 +22,9 @@ A few things to know before the tables:
 - Credentials and a couple of other options are read only from the environment,
   with no CLI flag (`aws_access_key`, `aws_secret_key`, `tz`). This keeps
   credentials out of your shell history.
-- Some options apply only to the container (`cron`, `EZBAK_ACTION`,
-  `healthcheck_url`). See the [environment variables](environment-variables.md)
-  reference.
+- Some options apply only to the container (`EZBAK_ACTION`, `healthcheck_url`).
+  They have no library field or CLI flag and are collected in
+  [Container-only options](#container-only-options) below.
 - At least one storage location is required: set `storage_paths`,
   `aws_s3_bucket_name`, or both.
 
@@ -138,11 +142,13 @@ set together. See [Restore backups](../guides/restore.md).
 | --- | --- | --- | --- |
 | `cron` | `EZBAK_CRON` | container only | `None` |
 | `tz` | `EZBAK_TZ` | environment only | `None` |
+| system timezone | `TZ` | container only | `Etc/UTC` |
 
 `cron` turns the container into a scheduled service. `tz` sets the timezone for
 backup timestamps. When `tz` is unset, ezbak uses the system timezone, which the
-`TZ` environment variable controls inside a container. See
-[Environment variables](environment-variables.md).
+`TZ` environment variable controls inside a container. `TZ` is a standard system
+variable, not an `EZBAK_` option, so it has no library field or CLI flag. See
+[TZ and EZBAK_TZ](environment-variables.md#tz-and-ezbak_tz).
 
 ## Logging
 
@@ -165,6 +171,7 @@ have no CLI flag.
 | Setting | Environment variable | Default |
 | --- | --- | --- |
 | Action | `EZBAK_ACTION` | none |
+| Cron jitter | `EZBAK_CRON_JITTER` | `60` |
 | Healthcheck URL | `EZBAK_HEALTHCHECK_URL` | `None` |
 | Backup on shutdown | `EZBAK_BACKUP_ON_SHUTDOWN` | `false` |
 | Pre-backup hook | `EZBAK_PRE_BACKUP_HOOK` | `None` |
@@ -174,10 +181,13 @@ have no CLI flag.
 | Hook timeout | `EZBAK_HOOK_TIMEOUT` | `300` |
 
 `EZBAK_ACTION` is `backup` or `restore` and is required to run the container.
-`EZBAK_HEALTHCHECK_URL` pings a monitor after each scheduled run. See
-[Monitoring](../orchestration/monitoring.md). `EZBAK_BACKUP_ON_SHUTDOWN` takes
-one final backup when a cron backup container receives `SIGTERM` or `SIGINT`;
-see [Environment variables](environment-variables.md). The four hook variables
+`EZBAK_CRON_JITTER` sets the seconds of random delay added to each scheduled run,
+so a fleet sharing one cron does not hit a destination at the same instant; set
+`0` to disable it. `EZBAK_HEALTHCHECK_URL` pings a monitor after each scheduled
+run. See [Monitoring](../orchestration/monitoring.md).
+`EZBAK_BACKUP_ON_SHUTDOWN` takes one final backup when a cron backup container
+receives `SIGTERM` or `SIGINT`; see [Final backup on
+shutdown](../guides/docker.md#final-backup-on-shutdown). The four hook variables
 run a shell command before or after a container backup or restore, and
 `EZBAK_HOOK_TIMEOUT` bounds how long a hook may run; see [Container lifecycle
 hooks](../guides/hooks.md).

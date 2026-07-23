@@ -160,7 +160,7 @@ A populated-target skip does not run the post-restore hook: nothing was
 written, so there is nothing for the hook to act on. See [Container lifecycle
 hooks](hooks.md).
 
-`skip_restore_if_populated` is independent of `--skip-if-no-backup`. `--skip-if-no-backup`
+`--skip-if-populated` is independent of `--skip-if-no-backup`. `--skip-if-no-backup`
 handles a *missing* backup; `--skip-if-populated` handles an *already-occupied*
 target. Use either alone or both together, most commonly on a pre-start restore
 task. See [Fresh deploys](../orchestration/fresh-deploys.md).

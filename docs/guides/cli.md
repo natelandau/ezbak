@@ -10,9 +10,9 @@ terminal for a one-off backup, a local test, or a scripted job.
 
 ## Command shape
 
-The global options come before the subcommand: `--name`, `--storage`,
-`--s3-bucket`, `--s3-bucket-prefix`, `-v`/`-vv`, `--log-file`, and
-`--log-prefix`. Each subcommand's own options come after it.
+The global options come before the subcommand, including `--name`, `--storage`,
+the `--s3-*` options, `-v`/`-vv`, `--log-file`, and `--log-prefix`. Each
+subcommand's own options come after it.
 
 ```bash
 ezbak --name my-documents --storage ~/Backups <command> [options]

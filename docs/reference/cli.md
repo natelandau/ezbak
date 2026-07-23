@@ -55,16 +55,16 @@ ezbak --name my-documents --storage ~/Backups create --source ~/Documents
 
 ## list
 
-List every backup in the configured storage locations, oldest to newest. The
-command takes no options beyond the global ones.
+List the backups in the configured storage locations, grouped into local and S3
+sets. The command takes no options beyond the global ones.
 
 ```bash
 ezbak --name my-documents --storage ~/Backups list
 ```
 
-Each line shows the backup's filename, which includes the full
-`YYYYMMDDTHHMMSS` timestamp. Pass that timestamp to `restore --restore-date` to
-restore that exact backup.
+Each entry includes the full `YYYYMMDDTHHMMSS` timestamp: local backups show the
+full path, S3 backups the object name. Pass that timestamp to
+`restore --restore-date` to restore that exact backup.
 
 ## prune
 
