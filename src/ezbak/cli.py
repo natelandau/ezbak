@@ -221,6 +221,15 @@ class RestoreCommand:
         ),
     ] = False
 
+    skip_if_populated: Annotated[
+        bool,
+        cappa.Arg(
+            long="skip-if-populated",
+            help="Skip the restore when the target already contains data.",
+            group=(3, "Optional"),
+        ),
+    ] = False
+
     uid: Annotated[
         int,
         cappa.Arg(
@@ -417,6 +426,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "restore_date": cmd.restore_date,
             "clean_before_restore": cmd.clean_before_restore,
             "restore_if_exists": cmd.if_exists,
+            "skip_restore_if_populated": cmd.skip_if_populated,
             "chown_uid": cmd.uid,
             "chown_gid": cmd.gid,
             "use_checksums": cmd.use_checksums,
