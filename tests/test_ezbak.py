@@ -737,6 +737,41 @@ def test_restore_populated_guard_off_overlays(tmp_path, filesystem):
     assert (restore_dir / src_dir.name).exists()
 
 
+def test_restore_populated_guard_fails_on_unreadable_target(tmp_path, filesystem, monkeypatch):
+    """Verify an unreadable restore target fails loudly instead of restoring silently."""
+    # Given a populated-guard restore where the target cannot be listed
+    src_dir, dest1, _ = filesystem
+    mgr = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        skip_restore_if_populated=True,
+        log_level="error",
+    )
+    mgr.create_backup()
+
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    # Only restore_dir's own iterdir() raises; staging's iterdir() (used later
+    # by the merge-move commit) must keep working, or the failure would come
+    # from the commit step instead of the guard.
+    real_iterdir = Path.iterdir
+
+    def boom(self, *args: object, **kwargs: object):
+        if self == restore_dir:
+            msg = "simulated permission denied listing restore target"
+            raise OSError(msg)
+        return real_iterdir(self, *args, **kwargs)
+
+    monkeypatch.setattr("pathlib.Path.iterdir", boom)
+
+    # When restoring, then the guard aborts loudly rather than treating the
+    # unreadable target as empty and restoring into it
+    with pytest.raises(RestoreFailedError):
+        mgr.restore_backup(restore_dir)
+
+
 def test_restore_preserves_staging_on_commit_failure(tmp_path, filesystem, monkeypatch):
     """Verify a commit failure keeps the extracted staging tree for manual recovery."""
     src_dir, dest1, _ = filesystem
