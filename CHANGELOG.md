@@ -1,3 +1,20 @@
+## v1.3.0 (2026-07-23)
+
+### BREAKING CHANGE
+
+- the "no backup is a clean no-op" option is renamed.
+- config field: restore_if_exists -> skip_if_no_backup
+- env var: EZBAK_RESTORE_IF_EXISTS -> EZBAK_SKIP_IF_NO_BACKUP
+- CLI flag: --if-exists -> --skip-if-no-backup
+- restore_backup() now returns a RestoreOutcome enum
+instead of a bool. Replace `if not app.restore_backup()` with a check
+against RestoreOutcome.NO_BACKUP.
+
+### Feat
+
+- **restore**: rename option to skip-if-no-backup
+- **restore**: skip restore when target has data (#65)
+
 ## v1.2.1 (2026-07-10)
 
 ### Fix
