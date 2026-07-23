@@ -13,7 +13,7 @@ import time_machine
 
 from ezbak import ezbak
 from ezbak.backup import Backup
-from ezbak.constants import DEFAULT_DATE_FORMAT, StorageType
+from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome, StorageType
 from ezbak.core import _commit_restore, _is_within, _merge_move
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
 
@@ -564,7 +564,7 @@ def test_restore_clean_is_atomic(tmp_path, filesystem):
     restore_dir.mkdir()
     (restore_dir / "stale.txt").write_text("stale")
 
-    assert mgr.restore_backup(restore_dir, clean_before_restore=True) is True
+    assert mgr.restore_backup(restore_dir, clean_before_restore=True) is RestoreOutcome.RESTORED
 
     for file in src_dir.rglob("*"):
         assert (restore_dir / src_dir.name / file.name).exists()
@@ -642,7 +642,7 @@ def test_restore_overlay_reaps_orphaned_staging(tmp_path, filesystem):
     (orphan / "leftover.txt").write_text("leftover")
 
     # Overlay restore (no clean): must still reap the orphan.
-    assert mgr.restore_backup(restore_dir) is True
+    assert mgr.restore_backup(restore_dir) is RestoreOutcome.RESTORED
 
     assert (restore_dir / "keep.txt").read_text() == "keep"  # overlay preserved existing file
     assert not orphan.exists()  # orphaned staging reaped
@@ -914,7 +914,7 @@ def test_restore_skips_verification_when_checksums_disabled(filesystem, tmp_path
     )
 
     # When/Then: the mismatching sidecar is ignored and the restore succeeds
-    assert app_off.restore_backup(restore_path=restore_dir) is True
+    assert app_off.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
 
 def test_restore_missing_sidecar_warns_and_succeeds(filesystem, tmp_path, capsys) -> None:
@@ -926,7 +926,7 @@ def test_restore_missing_sidecar_warns_and_succeeds(filesystem, tmp_path, capsys
 
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    assert app.restore_backup(restore_path=restore_dir) is True
+    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
     assert "without integrity verification" in capsys.readouterr().err
 
 
@@ -941,7 +941,7 @@ def test_restore_non_utf8_sidecar_warns_and_succeeds(filesystem, tmp_path, capsy
 
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    assert app.restore_backup(restore_path=restore_dir) is True
+    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
     assert "without integrity verification" in capsys.readouterr().err
 
 
@@ -952,7 +952,7 @@ def test_restore_verifies_good_archive(filesystem, tmp_path) -> None:
     app.create_backup()
     restore_dir = tmp_path / "restore"
     restore_dir.mkdir()
-    assert app.restore_backup(restore_path=restore_dir) is True
+    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
     # strip_source_paths defaults to False, so the archive nests files under the
     # source directory's own name (matches the convention used by other restore
     # tests in this file, e.g. test_exclude_regex).

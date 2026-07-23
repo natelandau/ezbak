@@ -13,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 from pydantic import ValidationError
 
-from ezbak.constants import Action, __version__
+from ezbak.constants import Action, RestoreOutcome, __version__
 from ezbak.core import EZBak
 from ezbak.env import EnvConfig
 from ezbak.exceptions import EZBakError, HookFailedError, RestoreFailedError
@@ -92,14 +92,14 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
         msg = "pre-restore hook failed; skipping restore"
         raise HookFailedError(msg)
 
-    if not app.restore_backup():
-        # restore_backup() returns False (rather than raising) only when no backup
-        # matches; a real download or extract error raises RestoreFailedError from within.
-        # With restore_if_exists, a missing backup is a clean no-op (a fresh deployment).
+    outcome = app.restore_backup()
+
+    if outcome is RestoreOutcome.NO_BACKUP:
+        # A missing backup is a clean no-op only with restore_if_exists (a fresh
+        # deployment); otherwise a failed restore must not look like a success.
         if app.settings.restore_if_exists:
             logger.info("No backup matched and restore_if_exists is set; exiting without error")
             return
-        # Raise here to keep a failed restore from looking like a success.
         msg = "Restore failed: no backup matched the restore criteria"
         raise RestoreFailedError(msg)
 

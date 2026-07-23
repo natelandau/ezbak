@@ -15,7 +15,7 @@ import time_machine
 from pydantic import ValidationError
 
 from ezbak import ezbak
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel
+from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel, RestoreOutcome
 from ezbak.container import (
     _ping_healthcheck,
     _run_scheduled,
@@ -834,7 +834,7 @@ def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, m
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
-    mocker.patch.object(app, "restore_backup", return_value=True)
+    mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.RESTORED)
     marker = tmp_path / "post_restore"
     config = EnvConfig(
         name="test",
@@ -851,11 +851,11 @@ def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, m
 
 def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
     """Verify the post-restore hook is skipped when no backup was restored."""
-    # Given a restore_if_exists no-op (restore_backup returns False)
+    # Given a restore_if_exists no-op (restore_backup returns NO_BACKUP)
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], restore_if_exists=True)
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
-    mocker.patch.object(app, "restore_backup", return_value=False)
+    mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.NO_BACKUP)
     marker = tmp_path / "post_restore"
     config = EnvConfig(
         name="test",

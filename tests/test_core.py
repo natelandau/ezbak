@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from ezbak.constants import StorageType
+from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.core import EZBak, ezbak
 from ezbak.exceptions import ConfigurationError
 
@@ -216,7 +216,7 @@ def test_restore_backup_uses_restore_date(tmp_path, mocker):
     assert spy.call_args.kwargs["backup"].name == "test-20250102T090000.tgz"
 
 
-def test_restore_backup_restore_date_unresolvable_returns_false(tmp_path, mocker):
+def test_restore_backup_restore_date_unresolvable_returns_no_backup(tmp_path, mocker):
     """Verify an unresolvable restore_date fails instead of restoring the latest."""
     # Given a backup and a restore_date before it
     _seed_backups(tmp_path, ["20250102T090000"])
@@ -234,7 +234,7 @@ def test_restore_backup_restore_date_unresolvable_returns_false(tmp_path, mocker
     result = app.restore_backup(restore_dir)
 
     # Then it fails and never restores the newest backup
-    assert result is False
+    assert result is RestoreOutcome.NO_BACKUP
     spy.assert_not_called()
 
 
@@ -300,7 +300,7 @@ def test_restore_backup_blank_restore_date_uses_latest(tmp_path, mocker):
     result = app.restore_backup(restore_dir)
 
     # Then the latest backup is restored (blank treated as "no point in time requested")
-    assert result is True
+    assert result is RestoreOutcome.RESTORED
     assert spy.call_args.kwargs["backup"].name == "test-20250103T090000.tgz"
 
 

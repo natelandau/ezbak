@@ -19,6 +19,7 @@ from ezbak.config import BackupConfig
 from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
     RESTORE_DATE_REGEX,
+    RestoreOutcome,
     StorageType,
 )
 from ezbak.exceptions import (
@@ -1029,7 +1030,7 @@ class EZBak:
         *,
         clean_before_restore: bool = False,
         backup: Backup | None = None,
-    ) -> bool:
+    ) -> RestoreOutcome:
         """Restore the latest or specified backup to `restore_path`.
 
         Decompress and extract the latest backup archive to recover files and directories to their original structure. Use this for disaster recovery, file restoration, or migrating backup contents to a new location.
@@ -1040,8 +1041,8 @@ class EZBak:
             backup (Backup | None): Restore this specific backup instead of selecting one. When None, use the configured restore_date if set, else the latest backup. Defaults to None.
 
         Returns:
-            bool: True when a backup is successfully restored; False when there is no
-                backup to restore.
+            RestoreOutcome: RESTORED when a backup was extracted; NO_BACKUP when no backup
+                matched the restore criteria.
 
         Raises:
             ConfigurationError: If no restore path is provided and none is configured, the restore path does not exist or is not a directory, or the restore path overlaps a storage location.
@@ -1092,11 +1093,13 @@ class EZBak:
                 # restore the wrong data. A miss is a failure for a plain restore but a
                 # tolerated no-op when restore_if_exists is set (like the latest branch).
                 self._log_no_backup(f"No backup at or before {restore_date}")
-                return False
+                return RestoreOutcome.NO_BACKUP
         else:
             target = self.get_latest_backup()
             if target is None:
                 self._log_no_backup("No backup found to restore")
-                return False
+                return RestoreOutcome.NO_BACKUP
 
-        return self._do_restore(backup=target, destination=dest, clean=effective_clean)
+        # _do_restore returns True or raises RestoreFailedError; a return means success.
+        self._do_restore(backup=target, destination=dest, clean=effective_clean)
+        return RestoreOutcome.RESTORED

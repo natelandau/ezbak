@@ -130,7 +130,7 @@ class BackupConfig(BaseModel):
     # A pre-start restore on a fresh deployment has no backup yet. When set, the CLI and
     # container treat "no backup matched" as a successful no-op instead of a failure, so an
     # orchestrator can still start the job. A real download or extract failure still fails.
-    # Library callers get the same signal from restore_backup()'s False return value.
+    # Library callers get the same signal from restore_backup()'s NO_BACKUP return value.
     restore_if_exists: bool = False
     chown_uid: int | None = None
     chown_gid: int | None = None
