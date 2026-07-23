@@ -147,7 +147,7 @@ ezbak --name my-service --storage ~/Backups \
 !!! info "What counts as populated"
 
     ezbak ignores the same OS cruft it never backs up (`.DS_Store`, `@eaDir`,
-    `.Trashes`, `__pycache__`, `Thumbs.db`), plus `lost+found` (present on a
+    `.Trashes`, `__pycache__`, `Thumbs.db`, `IconCache.db`), plus `lost+found` (present on a
     fresh ext-filesystem mount) and its own `.ezbak-restore-*` staging
     directories. Only files beyond that list count as data. An empty target, or
     one holding just that benign noise, still restores normally.
