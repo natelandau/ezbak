@@ -126,5 +126,60 @@ ezbak --name my-backup --storage ~/Backups \
 A real download or extract failure still fails, with or without `--if-exists`.
 See [Fresh deploys](../orchestration/fresh-deploys.md) for the orchestration case.
 
-A library caller does not need this option: `restore_backup()` returns `False`
-when there is nothing to restore, and the caller decides how to react.
+A library caller does not need this option: `restore_backup()` returns
+`RestoreOutcome.NO_BACKUP` when there is nothing to restore, and the caller
+decides how to react.
+
+## Skip the restore when the target already has data
+
+`--skip-if-populated` (`EZBAK_SKIP_RESTORE_IF_POPULATED`) skips the restore when
+the target directory already contains data, and treats the skip as success. This
+protects a pre-start restore that must not overlay live application state with an
+older snapshot: if the job's data volume already has files in it, whether from a
+service that already started or an orchestrator retry, ezbak leaves them alone
+instead of extracting on top of them.
+
+```bash
+ezbak --name my-service --storage ~/Backups \
+  restore --restore-path /data --skip-if-populated
+```
+
+!!! info "What counts as populated"
+
+    ezbak ignores the same OS cruft it never backs up (`.DS_Store`, `@eaDir`,
+    `.Trashes`, `__pycache__`, `Thumbs.db`), plus `lost+found` (present on a
+    fresh ext-filesystem mount) and its own `.ezbak-restore-*` staging
+    directories. Only files beyond that list count as data. An empty target, or
+    one holding just that benign noise, still restores normally.
+
+`clean_before_restore` bypasses this guard. Emptying the target and restoring
+into it is an explicit replace, so it always runs even when the target is
+populated. Setting both options together means "wipe and restore, always."
+
+A populated-target skip does not run the post-restore hook: nothing was
+written, so there is nothing for the hook to act on. See [Container lifecycle
+hooks](hooks.md).
+
+`skip_restore_if_populated` is independent of `--if-exists`. `--if-exists`
+handles a *missing* backup; `--skip-if-populated` handles an *already-occupied*
+target. Use either alone or both together, most commonly on a pre-start restore
+task. See [Fresh deploys](../orchestration/fresh-deploys.md).
+
+A library caller sets `skip_restore_if_populated=True` on `BackupConfig` and
+checks the return value:
+
+```python
+from ezbak import BackupConfig, EZBak
+from ezbak.constants import RestoreOutcome
+
+backups = EZBak(BackupConfig(
+    name="my-service",
+    storage_paths=["/backups"],
+    restore_path="/data",
+    skip_restore_if_populated=True,
+))
+
+outcome = backups.restore_backup()
+if outcome is RestoreOutcome.SKIPPED_POPULATED:
+    print("Target already had data; left it alone")
+```

@@ -129,13 +129,16 @@ behavior](../concepts/failure-behavior.md) for how each interface signals a
 failure and [Monitoring](../orchestration/monitoring.md) for the healthcheck
 ping.
 
-!!! warning "pre-restore fires even when there is nothing to restore"
+!!! warning "pre-restore fires even when nothing gets restored"
 
     `EZBAK_PRE_RESTORE_HOOK` runs before ezbak checks whether a matching backup
-    exists. On a fresh deployment with `EZBAK_RESTORE_IF_EXISTS` set, the
-    pre-restore hook still runs, but the post-restore hook does not, because no
-    restore happened. Write a pre-restore hook that tolerates running with
-    nothing to restore. See [Fresh deploys](../orchestration/fresh-deploys.md).
+    exists or whether the target already has data. On a fresh deployment with
+    `EZBAK_RESTORE_IF_EXISTS` set, or on a populated target with
+    `EZBAK_SKIP_RESTORE_IF_POPULATED` set, the pre-restore hook still runs, but
+    the post-restore hook does not, because no restore happened. Write a
+    pre-restore hook that tolerates running with nothing to restore. See [Fresh
+    deploys](../orchestration/fresh-deploys.md) and [Restore
+    backups](restore.md).
 
 ## Debugging a hook
 

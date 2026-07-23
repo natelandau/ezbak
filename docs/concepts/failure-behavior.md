@@ -34,9 +34,10 @@ The same failure surfaces three ways.
 === "Library"
 
     `create_backup()` raises `BackupFailedError`; `restore_backup()` raises
-    `RestoreFailedError`. `restore_backup()` returns `False` when there is simply
-    no backup to restore, which is not an error. Catch `EZBakError` to handle any
-    failure.
+    `RestoreFailedError`. `restore_backup()` returns `RestoreOutcome.NO_BACKUP`
+    when there is simply no backup to restore, and
+    `RestoreOutcome.SKIPPED_POPULATED` when it declines to overwrite a populated
+    target; neither is an error. Catch `EZBakError` to handle any failure.
 
     ```python
     from ezbak.exceptions import EZBakError
@@ -97,8 +98,8 @@ verified, and checked by hand.
 ## The "nothing to restore" case
 
 A missing backup is different from a failed restore. When there is no backup to
-restore, `restore_backup()` returns `False` and raises nothing. The CLI and
-container turn that result into an exit code:
+restore, `restore_backup()` returns `RestoreOutcome.NO_BACKUP` and raises
+nothing. The CLI and container turn that result into an exit code:
 
 - Without `restore_if_exists`, no backup is a failure and the exit code is
   non-zero.
@@ -106,3 +107,12 @@ container turn that result into an exit code:
 
 This distinction is what lets a pre-start restore run on a fresh deployment that
 has no backup yet. See [Fresh deploys](../orchestration/fresh-deploys.md).
+
+## The "target already has data" case
+
+A populated target is also not a failure. When `skip_restore_if_populated` is
+set and the target already contains data, `restore_backup()` returns
+`RestoreOutcome.SKIPPED_POPULATED`, logs an info message, and exits zero, again
+without running the post-restore hook. `clean_before_restore` bypasses this
+guard, since emptying the target and restoring into it is an explicit replace.
+See [Restore backups](../guides/restore.md).

@@ -110,22 +110,26 @@ to `0`, marks nothing for that rule. See [Retention policies](../concepts/retent
 | `restore_date` | `EZBAK_RESTORE_DATE` | `restore -t`, `--restore-date` | `None` |
 | `clean_before_restore` | `EZBAK_CLEAN_BEFORE_RESTORE` | `restore --clean-before-restore` | `False` |
 | `restore_if_exists` | `EZBAK_RESTORE_IF_EXISTS` | `restore --if-exists` | `False` |
+| `skip_restore_if_populated` | `EZBAK_SKIP_RESTORE_IF_POPULATED` | `restore --skip-if-populated` | `False` |
 | `chown_uid` | `EZBAK_CHOWN_UID` | `restore -u`, `--uid` | `None` |
 | `chown_gid` | `EZBAK_CHOWN_GID` | `restore -g`, `--gid` | `None` |
 
 `restore_date` selects the newest backup at or before a point in time.
 `clean_before_restore` empties the target as part of the restore, after a
 successful extract, and refuses to target a storage location. `restore_if_exists`
-turns a missing backup into a clean no-op instead of a failure. `chown_uid` and
-`chown_gid` set ownership on restored files, and both must be set together. See
-[Restore backups](../guides/restore.md).
+turns a missing backup into a clean no-op instead of a failure.
+`skip_restore_if_populated` skips the restore, as a success, when the target
+already holds data other than benign noise (OS cruft, `lost+found`, ezbak's own
+`.ezbak-restore-*` staging dirs); `clean_before_restore` bypasses this guard.
+`chown_uid` and `chown_gid` set ownership on restored files, and both must be
+set together. See [Restore backups](../guides/restore.md).
 
 !!! note "restore_if_exists is for the CLI and container"
 
     A library caller does not need `restore_if_exists`. `restore_backup()`
-    returns `False` when there is nothing to restore, so the caller decides how
-    to react. The setting exists so the CLI and container can turn that same
-    "nothing to restore" result into a zero exit code. See
+    returns `RestoreOutcome.NO_BACKUP` when there is nothing to restore, so the
+    caller decides how to react. The setting exists so the CLI and container can
+    turn that same "nothing to restore" result into a zero exit code. See
     [Fresh deploys](../orchestration/fresh-deploys.md).
 
 ## Scheduling and timezone
