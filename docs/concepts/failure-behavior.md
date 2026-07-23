@@ -52,7 +52,7 @@ The same failure surfaces three ways.
 
     `ezbak create` and `ezbak restore` exit non-zero on failure and log the
     reason. A restore that finds no backup exits non-zero too, unless you pass
-    `--if-exists`.
+    `--skip-if-no-backup`.
 
 === "Container (one-shot)"
 
@@ -101,9 +101,9 @@ A missing backup is different from a failed restore. When there is no backup to
 restore, `restore_backup()` returns `RestoreOutcome.NO_BACKUP` and raises
 nothing. The CLI and container turn that result into an exit code:
 
-- Without `restore_if_exists`, no backup is a failure and the exit code is
+- Without `skip_if_no_backup`, no backup is a failure and the exit code is
   non-zero.
-- With `restore_if_exists`, no backup is a clean no-op and the exit code is zero.
+- With `skip_if_no_backup`, no backup is a clean no-op and the exit code is zero.
 
 This distinction is what lets a pre-start restore run on a fresh deployment that
 has no backup yet. See [Fresh deploys](../orchestration/fresh-deploys.md).

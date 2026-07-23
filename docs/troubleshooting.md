@@ -20,7 +20,7 @@ a failure in itself.
   [Restore backups](guides/restore.md).
 
 On a fresh deployment with no backup yet, this is expected. Set
-`EZBAK_RESTORE_IF_EXISTS=true` (CLI `--if-exists`) so it exits cleanly. See
+`EZBAK_SKIP_IF_NO_BACKUP=true` (CLI `--skip-if-no-backup`) so it exits cleanly. See
 [Fresh deploys](orchestration/fresh-deploys.md).
 
 ## A backup fails with bad S3 credentials or an unreachable bucket

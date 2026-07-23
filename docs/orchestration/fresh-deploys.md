@@ -6,7 +6,7 @@ icon: lucide/sparkles
 
 The first time you deploy a job, there is no backup yet. A pre-start restore has
 nothing to fetch. Without care, that restore would fail and block the job from
-ever starting. The `restore_if_exists` option solves this.
+ever starting. The `skip_if_no_backup` option solves this.
 
 A pre-start restore can also run into the opposite problem: a backup does
 exist, but the target already holds data, for example from a job that
@@ -26,13 +26,13 @@ never start. A deadlock.
 graph TD
   A["Pre-start restore"] --> B{"Backup exists?"}
   B -->|yes| C["Stage it, exit 0"]
-  B -->|no, and if_exists unset| D["Exit non-zero,<br/>job never starts"]
-  B -->|no, and if_exists set| E["Clean no-op, exit 0,<br/>job starts empty"]
+  B -->|no, and skip_if_no_backup unset| D["Exit non-zero,<br/>job never starts"]
+  B -->|no, and skip_if_no_backup set| E["Clean no-op, exit 0,<br/>job starts empty"]
 ```
 
 ## The fix
 
-Set `EZBAK_RESTORE_IF_EXISTS=true` (CLI `restore --if-exists`) on the pre-start
+Set `EZBAK_SKIP_IF_NO_BACKUP=true` (CLI `restore --skip-if-no-backup`) on the pre-start
 task. A missing backup becomes a clean no-op that exits zero, so the job starts
 with an empty data directory and the sidecar begins taking backups from there.
 
@@ -43,7 +43,7 @@ docker run -it \
     -e EZBAK_NAME=my-service \
     -e EZBAK_AWS_S3_BUCKET_NAME=my-backups \
     -e EZBAK_RESTORE_PATH=/data \
-    -e EZBAK_RESTORE_IF_EXISTS=true \
+    -e EZBAK_SKIP_IF_NO_BACKUP=true \
     ghcr.io/natelandau/ezbak:latest
 ```
 
@@ -52,7 +52,7 @@ their restore task.
 
 !!! warning "A real failure still fails"
 
-    `restore_if_exists` only changes the "no backup found" case. If a backup
+    `skip_if_no_backup` only changes the "no backup found" case. If a backup
     exists but cannot be downloaded or extracted, the restore still fails and
     exits non-zero, so a genuine problem is never hidden. See [Failure
     behavior](../concepts/failure-behavior.md).
@@ -84,7 +84,7 @@ docker run -it \
     -e EZBAK_NAME=my-service \
     -e EZBAK_AWS_S3_BUCKET_NAME=my-backups \
     -e EZBAK_RESTORE_PATH=/data \
-    -e EZBAK_RESTORE_IF_EXISTS=true \
+    -e EZBAK_SKIP_IF_NO_BACKUP=true \
     -e EZBAK_SKIP_RESTORE_IF_POPULATED=true \
     ghcr.io/natelandau/ezbak:latest
 ```
@@ -100,6 +100,6 @@ A Python caller gets the same information from the return value.
 `restore_backup()` returns `RestoreOutcome.NO_BACKUP` when there is nothing to
 restore, and `RestoreOutcome.SKIPPED_POPULATED` when it declined to overwrite an
 already-populated target. The caller decides what to do with either result.
-`restore_if_exists` and `skip_restore_if_populated` exist so the CLI and
+`skip_if_no_backup` and `skip_restore_if_populated` exist so the CLI and
 container can turn those same results into an exit code an orchestrator
 understands.

@@ -486,11 +486,11 @@ def test_build_config_maps_restore_date():
     assert config.restore_date == "20250102"
 
 
-def test_build_config_maps_if_exists():
-    """Verify --if-exists is mapped onto restore_if_exists in the built config."""
-    # Given a restore command with --if-exists set
+def test_build_config_maps_skip_if_no_backup():
+    """Verify --skip-if-no-backup is mapped onto skip_if_no_backup in the built config."""
+    # Given a restore command with --skip-if-no-backup set
     cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), if_exists=True),  # noqa: S108
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_no_backup=True),  # noqa: S108
         name="test",
         storage_paths=[Path("/tmp")],  # noqa: S108
     )
@@ -498,8 +498,8 @@ def test_build_config_maps_if_exists():
     # When building the config
     config = build_config(cli)
 
-    # Then restore_if_exists is set
-    assert config.restore_if_exists is True
+    # Then skip_if_no_backup is set
+    assert config.skip_if_no_backup is True
 
 
 def test_build_config_restore_skip_if_populated():
@@ -535,14 +535,14 @@ def test_prune_flags_map_to_keep_fields():
     assert config.keep_daily == 4
 
 
-def test_cli_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):
-    """Verify restore --if-exists exits cleanly when no backup exists yet."""
+def test_cli_restore_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
+    """Verify restore --skip-if-no-backup exits cleanly when no backup exists yet."""
     # Given an empty storage path, a fresh deployment with no backup to restore
     _, dest1, _ = filesystem
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    # When restoring with --if-exists and no backup present, then it does not raise
+    # When restoring with --skip-if-no-backup and no backup present, then it does not raise
     cappa.invoke(
         obj=EZBakCLI,
         argv=[
@@ -553,7 +553,7 @@ def test_cli_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):
             str(dest1),
             "--restore-path",
             str(restore_path),
-            "--if-exists",
+            "--skip-if-no-backup",
         ],
     )
 
@@ -563,15 +563,15 @@ def test_cli_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):
     assert "Backup restored" not in output
 
 
-def test_cli_restore_if_exists_date_miss_is_noop(filesystem, capsys, tmp_path):
-    """Verify restore --if-exists is a clean no-op on a restore-date miss, without an error log."""
+def test_cli_restore_skip_if_no_backup_date_miss_is_noop(filesystem, capsys, tmp_path):
+    """Verify restore --skip-if-no-backup is a clean no-op on a restore-date miss, without an error log."""
     # Given a backup exists but none is old enough for the requested date
     _, dest1, _ = filesystem
     shutil.copy2(fixture_archive_path, dest1 / "test-20250103T090000.tgz")
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    # When restoring as of 2024 (before the only backup) with --if-exists, it does not raise
+    # When restoring as of 2024 (before the only backup) with --skip-if-no-backup, it does not raise
     cappa.invoke(
         obj=EZBakCLI,
         argv=[
@@ -584,7 +584,7 @@ def test_cli_restore_if_exists_date_miss_is_noop(filesystem, capsys, tmp_path):
             str(restore_path),
             "--restore-date",
             "2024",
-            "--if-exists",
+            "--skip-if-no-backup",
         ],
     )
 

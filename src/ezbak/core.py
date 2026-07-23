@@ -837,7 +837,7 @@ class EZBak:
         all_backups = [x for y in self.storage_locations for x in y.backups]
         if not all_backups:
             # A getter finding nothing is not itself an error; the caller decides the
-            # severity (a plain restore treats it as a failure, restore_if_exists does not).
+            # severity (a plain restore treats it as a failure, skip_if_no_backup does not).
             logger.debug("No backups found")
             return None
 
@@ -978,7 +978,7 @@ class EZBak:
         ]
         if not candidates:
             # A getter finding nothing is not itself an error; the caller decides the
-            # severity (a plain restore treats it as a failure, restore_if_exists does not).
+            # severity (a plain restore treats it as a failure, skip_if_no_backup does not).
             logger.debug(f"No backup at or before {point_in_time}")
             return None
 
@@ -990,10 +990,10 @@ class EZBak:
         """Log a "nothing to restore" outcome at the severity the config implies.
 
         A missing backup is an error for a plain restore, but an expected no-op when
-        restore_if_exists is set (a fresh deployment), so keep it out of the error stream
+        skip_if_no_backup is set (a fresh deployment), so keep it out of the error stream
         in that case to avoid a misleading error line on a successful run.
         """
-        if self.settings.restore_if_exists:
+        if self.settings.skip_if_no_backup:
             logger.debug(message)
         else:
             logger.error(message)
@@ -1123,7 +1123,7 @@ class EZBak:
             if target is None:
                 # Fail rather than silently falling back to the newest backup, which would
                 # restore the wrong data. A miss is a failure for a plain restore but a
-                # tolerated no-op when restore_if_exists is set (like the latest branch).
+                # tolerated no-op when skip_if_no_backup is set (like the latest branch).
                 self._log_no_backup(f"No backup at or before {restore_date}")
                 return RestoreOutcome.NO_BACKUP
         else:

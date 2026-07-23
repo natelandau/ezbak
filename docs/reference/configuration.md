@@ -109,14 +109,14 @@ to `0`, marks nothing for that rule. See [Retention policies](../concepts/retent
 | `restore_path` | `EZBAK_RESTORE_PATH` | `restore -d`, `--restore-path` | `None` |
 | `restore_date` | `EZBAK_RESTORE_DATE` | `restore -t`, `--restore-date` | `None` |
 | `clean_before_restore` | `EZBAK_CLEAN_BEFORE_RESTORE` | `restore --clean-before-restore` | `False` |
-| `restore_if_exists` | `EZBAK_RESTORE_IF_EXISTS` | `restore --if-exists` | `False` |
+| `skip_if_no_backup` | `EZBAK_SKIP_IF_NO_BACKUP` | `restore --skip-if-no-backup` | `False` |
 | `skip_restore_if_populated` | `EZBAK_SKIP_RESTORE_IF_POPULATED` | `restore --skip-if-populated` | `False` |
 | `chown_uid` | `EZBAK_CHOWN_UID` | `restore -u`, `--uid` | `None` |
 | `chown_gid` | `EZBAK_CHOWN_GID` | `restore -g`, `--gid` | `None` |
 
 `restore_date` selects the newest backup at or before a point in time.
 `clean_before_restore` empties the target as part of the restore, after a
-successful extract, and refuses to target a storage location. `restore_if_exists`
+successful extract, and refuses to target a storage location. `skip_if_no_backup`
 turns a missing backup into a clean no-op instead of a failure.
 `skip_restore_if_populated` skips the restore, as a success, when the target
 already holds data other than benign noise (OS cruft, `lost+found`, ezbak's own
@@ -124,9 +124,9 @@ already holds data other than benign noise (OS cruft, `lost+found`, ezbak's own
 `chown_uid` and `chown_gid` set ownership on restored files, and both must be
 set together. See [Restore backups](../guides/restore.md).
 
-!!! note "restore_if_exists is for the CLI and container"
+!!! note "skip_if_no_backup is for the CLI and container"
 
-    A library caller does not need `restore_if_exists`. `restore_backup()`
+    A library caller does not need `skip_if_no_backup`. `restore_backup()`
     returns `RestoreOutcome.NO_BACKUP` when there is nothing to restore, so the
     caller decides how to react. The setting exists so the CLI and container can
     turn that same "nothing to restore" result into a zero exit code. See

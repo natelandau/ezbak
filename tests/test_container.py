@@ -58,7 +58,7 @@ def mock_os_environ(mocker):
     os.environ["EZBAK_LOG_FILE"] = ""
     os.environ["EZBAK_LOG_LEVEL"] = ""
     os.environ["EZBAK_LOG_PREFIX"] = ""
-    os.environ["EZBAK_RESTORE_IF_EXISTS"] = "false"
+    os.environ["EZBAK_SKIP_IF_NO_BACKUP"] = "false"
     os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
     os.environ["EZBAK_TZ"] = "Etc/UTC"
 
@@ -664,8 +664,8 @@ def test_entrypoint_restore_fails_when_no_backup_for_date(filesystem, capsys, tm
     assert "Restore complete" not in output
 
 
-def test_entrypoint_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_path):
-    """Verify EZBAK_RESTORE_IF_EXISTS exits cleanly when no backup exists yet."""
+def test_entrypoint_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
+    """Verify EZBAK_SKIP_IF_NO_BACKUP exits cleanly when no backup exists yet."""
     # Given an empty storage path, a fresh deployment with no backup to restore
     src_dir, dest1, _ = filesystem
 
@@ -678,7 +678,7 @@ def test_entrypoint_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_
     os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
     os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
     os.environ["EZBAK_RESTORE_DATE"] = ""
-    os.environ["EZBAK_RESTORE_IF_EXISTS"] = "true"
+    os.environ["EZBAK_SKIP_IF_NO_BACKUP"] = "true"
     os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
 
     # When running the entrypoint, then it completes without exiting non-zero
@@ -686,12 +686,12 @@ def test_entrypoint_restore_if_exists_no_backup_is_noop(filesystem, capsys, tmp_
 
     # Then it reports the no-op instead of failing the pre-start task
     output = capsys.readouterr().err
-    assert "restore_if_exists is set" in output
+    assert "skip_if_no_backup is set" in output
     assert "Backup restored" not in output
 
 
-def test_entrypoint_restore_if_exists_still_fails_on_corrupt_archive(filesystem, tmp_path):
-    """Verify EZBAK_RESTORE_IF_EXISTS still fails a restore when the archive is corrupt."""
+def test_entrypoint_skip_if_no_backup_still_fails_on_corrupt_archive(filesystem, tmp_path):
+    """Verify EZBAK_SKIP_IF_NO_BACKUP still fails a restore when the archive is corrupt."""
     # Given a corrupt backup archive, a real error rather than a missing backup
     src_dir, dest1, _ = filesystem
     backup_path = dest1 / f"test-{frozen_time_str}-yearly.tgz"
@@ -706,7 +706,7 @@ def test_entrypoint_restore_if_exists_still_fails_on_corrupt_archive(filesystem,
     os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
     os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
     os.environ["EZBAK_RESTORE_DATE"] = ""
-    os.environ["EZBAK_RESTORE_IF_EXISTS"] = "true"
+    os.environ["EZBAK_SKIP_IF_NO_BACKUP"] = "true"
     os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
 
     # When running the entrypoint, then a real failure still exits non-zero
@@ -851,9 +851,9 @@ def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, m
 
 def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
     """Verify the post-restore hook is skipped when no backup was restored."""
-    # Given a restore_if_exists no-op (restore_backup returns NO_BACKUP)
+    # Given a skip_if_no_backup no-op (restore_backup returns NO_BACKUP)
     src_dir, dest1, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], restore_if_exists=True)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], skip_if_no_backup=True)
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
     mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.NO_BACKUP)
     marker = tmp_path / "post_restore"
@@ -861,7 +861,7 @@ def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
         name="test",
         source_paths=[src_dir],
         storage_paths=[dest1],
-        restore_if_exists=True,
+        skip_if_no_backup=True,
         post_restore_hook=f"touch {marker}",
         _env_file=None,
     )
@@ -875,7 +875,7 @@ def test_do_restore_post_hook_skipped_on_populated(filesystem, tmp_path, mocker)
     """Verify the post-restore hook does not run when the target was already populated."""
     # Given a restore that skips because the target already holds data
     src_dir, dest1, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], restore_if_exists=True)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], skip_if_no_backup=True)
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
     mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.SKIPPED_POPULATED)
     marker = tmp_path / "post_restore"
@@ -883,7 +883,7 @@ def test_do_restore_post_hook_skipped_on_populated(filesystem, tmp_path, mocker)
         name="test",
         source_paths=[src_dir],
         storage_paths=[dest1],
-        restore_if_exists=True,
+        skip_if_no_backup=True,
         post_restore_hook=f"touch {marker}",
         _env_file=None,
     )

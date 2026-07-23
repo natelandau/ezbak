@@ -103,14 +103,14 @@ ezbak --name my-documents --storage ~/Backups prune --keep-last 10 --force
 ## restore
 
 Restore a backup into a target directory. Restores the latest backup unless you
-name a point in time or use `--if-exists`.
+name a point in time or use `--skip-if-no-backup`.
 
 | Option | Short | Description | Default |
 | --- | --- | --- | --- |
 | `--restore-path` | `-d` | Directory to restore into. Required. | |
 | `--restore-date` | `-t` | Restore the newest backup at or before this time. | |
 | `--clean-before-restore` | | Empty the restore path as part of the restore. Refuses to target a storage location. | `False` |
-| `--if-exists` | | Exit cleanly instead of failing when no backup exists. | `False` |
+| `--skip-if-no-backup` | | Exit cleanly instead of failing when no backup exists. | `False` |
 | `--skip-if-populated` | | Skip the restore, as success, when the target already contains data. `--clean-before-restore` bypasses this. | `False` |
 | `--uid` | `-u` | Set owner UID on restored files. | |
 | `--gid` | `-g` | Set owner GID on restored files. | |
@@ -135,5 +135,5 @@ rule.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | The command succeeded. A restore with `--if-exists` and no backup, or with `--skip-if-populated` and a populated target, also exits `0`. |
+| `0` | The command succeeded. A restore with `--skip-if-no-backup` and no backup, or with `--skip-if-populated` and a populated target, also exits `0`. |
 | `1` | The command failed: invalid configuration, a storage location that could not be used, or a restore that could not download or extract an archive. |

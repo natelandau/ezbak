@@ -76,11 +76,11 @@ ezbak --name my-documents --storage ~/Backups \
 
 # Exit cleanly if no backup exists yet
 ezbak --name my-documents --storage ~/Backups \
-  restore --restore-path ~/restore --if-exists
+  restore --restore-path ~/restore --skip-if-no-backup
 ```
 
 See [Restore backups](restore.md) for the point-in-time matching rule and
-`--if-exists`.
+`--skip-if-no-backup`.
 
 ## Back up to S3
 

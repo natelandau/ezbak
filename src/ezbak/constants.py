@@ -84,7 +84,7 @@ class RestoreOutcome(Enum):
 
     Distinguishes an actual restore from a no-op so callers can react correctly: the
     container suppresses its post-restore hook on a skip and treats a missing backup as a
-    failure unless restore_if_exists is set.
+    failure unless skip_if_no_backup is set.
     """
 
     RESTORED = "restored"  # a backup was extracted into the target

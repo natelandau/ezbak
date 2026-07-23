@@ -49,7 +49,7 @@ spec:
               value: "my-backups"
             - name: EZBAK_RESTORE_PATH
               value: "/data"
-            - name: EZBAK_RESTORE_IF_EXISTS
+            - name: EZBAK_SKIP_IF_NO_BACKUP
               value: "true" # (2)!
           volumeMounts:
             - name: data
@@ -104,7 +104,7 @@ spec:
 
 1.  An init container runs to completion before the app container starts, so the
     restored data is in place first.
-2.  On a fresh deployment there is no backup yet. `EZBAK_RESTORE_IF_EXISTS` makes
+2.  On a fresh deployment there is no backup yet. `EZBAK_SKIP_IF_NO_BACKUP` makes
     a missing backup a clean no-op so the pod can still start. See [Fresh
     deploys](fresh-deploys.md).
 3.  `restartPolicy: Always` on an init container makes it a native sidecar

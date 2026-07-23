@@ -41,7 +41,7 @@ job "my-service" {
         EZBAK_NAME                = "my-service"
         EZBAK_AWS_S3_BUCKET_NAME  = "my-backups"
         EZBAK_RESTORE_PATH        = "/data"
-        EZBAK_RESTORE_IF_EXISTS   = "true" # (2)!
+        EZBAK_SKIP_IF_NO_BACKUP   = "true" # (2)!
       }
     }
 
@@ -114,7 +114,7 @@ job "my-service" {
 
 1.  `hook = "prestart"` with `sidecar = false` runs this task to completion before
     the main task starts, so the data is in place first.
-2.  On a fresh deployment there is no backup yet. `EZBAK_RESTORE_IF_EXISTS`
+2.  On a fresh deployment there is no backup yet. `EZBAK_SKIP_IF_NO_BACKUP`
     makes a missing backup a clean no-op so the job can still start. See [Fresh
     deploys](fresh-deploys.md).
 3.  `hook = "poststart"` with `sidecar = true` keeps this task running alongside

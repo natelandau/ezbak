@@ -131,7 +131,7 @@ class BackupConfig(BaseModel):
     # container treat "no backup matched" as a successful no-op instead of a failure, so an
     # orchestrator can still start the job. A real download or extract failure still fails.
     # Library callers get the same signal from a RestoreOutcome.NO_BACKUP return.
-    restore_if_exists: bool = False
+    skip_if_no_backup: bool = False
     # Skip the restore when the target already holds data, so a pre-start restore never
     # overlays live state with an older snapshot. clean_before_restore bypasses this (an
     # explicit replace). "Populated" ignores RESTORE_POPULATED_IGNORE_FILENAMES and ezbak's

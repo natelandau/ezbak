@@ -133,7 +133,7 @@ ping.
 
     `EZBAK_PRE_RESTORE_HOOK` runs before ezbak checks whether a matching backup
     exists or whether the target already has data. On a fresh deployment with
-    `EZBAK_RESTORE_IF_EXISTS` set, or on a populated target with
+    `EZBAK_SKIP_IF_NO_BACKUP` set, or on a populated target with
     `EZBAK_SKIP_RESTORE_IF_POPULATED` set, the pre-restore hook still runs, but
     the post-restore hook does not, because no restore happened. Write a
     pre-restore hook that tolerates running with nothing to restore. See [Fresh

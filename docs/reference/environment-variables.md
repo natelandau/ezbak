@@ -169,7 +169,7 @@ want an older backup, a restore date.
 | --- | --- |
 | `EZBAK_RESTORE_PATH` | Directory a restore writes into. |
 | `EZBAK_RESTORE_DATE` | Restore the newest backup at or before this point in time. |
-| `EZBAK_RESTORE_IF_EXISTS` | Treat "no backup to restore" as success. |
+| `EZBAK_SKIP_IF_NO_BACKUP` | Treat "no backup to restore" as success. |
 | `EZBAK_SKIP_RESTORE_IF_POPULATED` | Skip the restore, as success, when the target already contains data. `EZBAK_CLEAN_BEFORE_RESTORE` bypasses this. |
 | `EZBAK_CLEAN_BEFORE_RESTORE` | Empty the restore path before extracting. |
 | `EZBAK_USE_CHECKSUMS` | Verify the archive against its `.sha256` sidecar on restore. Set `false` to skip verification. Default `true`. |

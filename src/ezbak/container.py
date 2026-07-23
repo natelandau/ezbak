@@ -86,7 +86,7 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
 
     Raises:
         HookFailedError: A pre- or post-restore hook failed.
-        RestoreFailedError: No backup matched the restore criteria and restore_if_exists is not set.
+        RestoreFailedError: No backup matched the restore criteria and skip_if_no_backup is not set.
     """
     if not run_hook(config.pre_restore_hook, phase="pre-restore", timeout=config.hook_timeout):
         msg = "pre-restore hook failed; skipping restore"
@@ -95,10 +95,10 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
     outcome = app.restore_backup()
 
     if outcome is RestoreOutcome.NO_BACKUP:
-        # A missing backup is a clean no-op only with restore_if_exists (a fresh
+        # A missing backup is a clean no-op only with skip_if_no_backup (a fresh
         # deployment); otherwise a failed restore must not look like a success.
-        if app.settings.restore_if_exists:
-            logger.info("No backup matched and restore_if_exists is set; exiting without error")
+        if app.settings.skip_if_no_backup:
+            logger.info("No backup matched and skip_if_no_backup is set; exiting without error")
             return
         msg = "Restore failed: no backup matched the restore criteria"
         raise RestoreFailedError(msg)

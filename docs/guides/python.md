@@ -108,7 +108,7 @@ except RestoreFailedError as error:
 non-error cases: `RestoreOutcome.NO_BACKUP` when there is simply no backup to
 restore, and `RestoreOutcome.SKIPPED_POPULATED` when `skip_restore_if_populated`
 is set and the target already has data. A library caller checks the return
-value and decides what to do, so `restore_if_exists` and
+value and decides what to do, so `skip_if_no_backup` and
 `skip_restore_if_populated` mainly matter to the CLI and container, which turn
 those results into an exit code. See [Failure
 behavior](../concepts/failure-behavior.md) and the full [Python API

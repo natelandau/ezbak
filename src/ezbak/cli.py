@@ -212,10 +212,10 @@ class RestoreCommand:
         ),
     ] = False
 
-    if_exists: Annotated[
+    skip_if_no_backup: Annotated[
         bool,
         cappa.Arg(
-            long="if-exists",
+            long="skip-if-no-backup",
             help="Exit cleanly instead of failing when no backup exists to restore.",
             group=(3, "Optional"),
         ),
@@ -425,7 +425,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "restore_path": cmd.restore_path,
             "restore_date": cmd.restore_date,
             "clean_before_restore": cmd.clean_before_restore,
-            "restore_if_exists": cmd.if_exists,
+            "skip_if_no_backup": cmd.skip_if_no_backup,
             "skip_restore_if_populated": cmd.skip_if_populated,
             "chown_uid": cmd.uid,
             "chown_gid": cmd.gid,

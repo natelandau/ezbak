@@ -75,7 +75,7 @@ that exact backup.
 
     If a restore date resolves to no backup, ezbak reports that no backup was
     found rather than silently restoring the latest. Restoring newer data than
-    you asked for would be the wrong result. Combine it with `--if-exists` to turn
+    you asked for would be the wrong result. Combine it with `--skip-if-no-backup` to turn
     a miss into a clean no-op instead of a failure.
 
 ## Empty the target before restoring
@@ -114,16 +114,16 @@ ezbak --name my-backup --storage ~/Backups \
 
 ## Skip cleanly when no backup exists
 
-`--if-exists` (`EZBAK_RESTORE_IF_EXISTS`) turns a missing backup into a clean
+`--skip-if-no-backup` (`EZBAK_SKIP_IF_NO_BACKUP`) turns a missing backup into a clean
 no-op that exits zero, instead of a failure. This is what lets a pre-start restore
 run on a fresh deployment with no backup yet.
 
 ```bash
 ezbak --name my-backup --storage ~/Backups \
-  restore --restore-path ~/restore --if-exists
+  restore --restore-path ~/restore --skip-if-no-backup
 ```
 
-A real download or extract failure still fails, with or without `--if-exists`.
+A real download or extract failure still fails, with or without `--skip-if-no-backup`.
 See [Fresh deploys](../orchestration/fresh-deploys.md) for the orchestration case.
 
 A library caller does not need this option: `restore_backup()` returns
@@ -160,7 +160,7 @@ A populated-target skip does not run the post-restore hook: nothing was
 written, so there is nothing for the hook to act on. See [Container lifecycle
 hooks](hooks.md).
 
-`skip_restore_if_populated` is independent of `--if-exists`. `--if-exists`
+`skip_restore_if_populated` is independent of `--skip-if-no-backup`. `--skip-if-no-backup`
 handles a *missing* backup; `--skip-if-populated` handles an *already-occupied*
 target. Use either alone or both together, most commonly on a pre-start restore
 task. See [Fresh deploys](../orchestration/fresh-deploys.md).
