@@ -1,5 +1,6 @@
 """Tests for the merged EZBak core class."""
 
+import os
 import shutil
 import tarfile
 from pathlib import Path
@@ -8,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from ezbak.constants import RestoreOutcome, StorageType
-from ezbak.core import EZBak, ezbak
+from ezbak.core import EZBak, _FsyncTarFile, ezbak
 from ezbak.exceptions import ConfigurationError
 
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
@@ -346,3 +347,75 @@ def test_create_backup_has_no_duplicate_members(filesystem):
     # Then no archive member appears more than once
     members = _archive_file_members(dest1)
     assert len(members) == len(set(members))
+
+
+def test_fsync_tarfile_fsyncs_large_members(tmp_path, mocker):
+    """Verify extraction fsyncs a member larger than the flush interval."""
+    # Given an archive containing a member spanning multiple fsync intervals
+    payload = bytes(range(256)) * 40
+    src = tmp_path / "big.bin"
+    src.write_bytes(payload)
+    archive_path = tmp_path / "archive.tgz"
+    with tarfile.open(archive_path, "w:gz") as tar:
+        tar.add(src, arcname="big.bin")
+    mocker.patch.object(_FsyncTarFile, "fsync_interval", 4 * 1024)
+    mocker.patch.object(_FsyncTarFile, "chunk_size", 1024)
+    fsync_spy = mocker.spy(os, "fsync")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    # When extracting with the fsync-aware tarfile
+    with _FsyncTarFile.open(archive_path) as tar:
+        tar.extractall(path=staging, filter="data")
+
+    # Then fsync fired at interval boundaries and the content is intact
+    assert fsync_spy.call_count >= 2
+    assert (staging / "big.bin").read_bytes() == payload
+
+
+def test_restore_backup_fsyncs_large_files(filesystem, tmp_path, mocker):
+    """Verify a checksum-verified restore fsyncs large extracted files."""
+    # Given a backup containing a file larger than the flush interval
+    src, dest1, _ = filesystem
+    payload = bytes(range(256)) * 40
+    (src / "big.bin").write_bytes(payload)
+    app = ezbak(name="test", source_paths=[src], storage_paths=[dest1])
+    app.create_backup()
+    mocker.patch.object(_FsyncTarFile, "fsync_interval", 4 * 1024)
+    mocker.patch.object(_FsyncTarFile, "chunk_size", 1024)
+    fsync_spy = mocker.spy(os, "fsync")
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    # When restoring
+    result = app.restore_backup(restore_path=restore_dir)
+
+    # Then extraction fsynced and the file round-tripped
+    assert result is RestoreOutcome.RESTORED
+    assert fsync_spy.call_count >= 2
+    assert next(restore_dir.rglob("big.bin")).read_bytes() == payload
+
+
+def test_restore_backup_without_checksum_fsyncs_large_files(filesystem, tmp_path, mocker):
+    """Verify a restore with no checksum sidecar still fsyncs large files."""
+    # Given a backup with its checksum sidecar removed
+    src, dest1, _ = filesystem
+    payload = bytes(range(256)) * 40
+    (src / "big.bin").write_bytes(payload)
+    app = ezbak(name="test", source_paths=[src], storage_paths=[dest1])
+    app.create_backup()
+    for sidecar in dest1.glob("*.sha256"):
+        sidecar.unlink()
+    mocker.patch.object(_FsyncTarFile, "fsync_interval", 4 * 1024)
+    mocker.patch.object(_FsyncTarFile, "chunk_size", 1024)
+    fsync_spy = mocker.spy(os, "fsync")
+    restore_dir = tmp_path / "restore"
+    restore_dir.mkdir()
+
+    # When restoring
+    result = app.restore_backup(restore_path=restore_dir)
+
+    # Then extraction fsynced and the file round-tripped
+    assert result is RestoreOutcome.RESTORED
+    assert fsync_spy.call_count >= 2
+    assert next(restore_dir.rglob("big.bin")).read_bytes() == payload

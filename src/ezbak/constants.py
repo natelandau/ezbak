@@ -15,6 +15,12 @@ TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
 # just before a final `\n`, which would pass a value like "20250101\n".
 RESTORE_DATE_REGEX = re.compile(r"^\d{4}(\d{2}(\d{2}(T\d{2}(\d{2}(\d{2})?)?)?)?)?\Z")
 DEFAULT_COMPRESSION_LEVEL = 6
+# Chunk and flush sizes for file writes that must bound dirty page cache: NFS has no
+# per-cgroup writeback accounting, so a memory-limited container writing a large file
+# to NFS accumulates unreclaimable dirty pages until the kernel OOM-kills it unless
+# the writer fsyncs as it goes.
+COPY_CHUNK_SIZE = 4 * 2**20
+COPY_FSYNC_INTERVAL = 64 * 2**20
 ENVAR_PREFIX = "EZBAK_"
 BACKUP_EXTENSION = "tgz"
 CHECKSUM_EXTENSION = "sha256"

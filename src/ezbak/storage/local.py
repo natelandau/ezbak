@@ -9,13 +9,15 @@ from nclutils.fs import find_files
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import is_sidecar, sidecar_name
-from ezbak.constants import BACKUP_EXTENSION, StorageType
+from ezbak.constants import (
+    BACKUP_EXTENSION,
+    COPY_CHUNK_SIZE,
+    COPY_FSYNC_INTERVAL,
+    StorageType,
+)
 from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
 from ezbak.storage.base import StorageBackend
-
-COPY_CHUNK_SIZE = 4 * 2**20
-COPY_FSYNC_INTERVAL = 64 * 2**20
 
 
 def copy_with_periodic_fsync(
