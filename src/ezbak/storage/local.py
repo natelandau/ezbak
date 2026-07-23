@@ -1,9 +1,11 @@
 """Local-filesystem storage backend for backup operations."""
 
+import os
+import shutil
 from pathlib import Path
 
 from loguru import logger
-from nclutils.fs import copy_file, find_files
+from nclutils.fs import find_files
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import is_sidecar, sidecar_name
@@ -11,6 +13,45 @@ from ezbak.constants import BACKUP_EXTENSION, StorageType
 from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
 from ezbak.storage.base import StorageBackend
+
+COPY_CHUNK_SIZE = 4 * 2**20
+COPY_FSYNC_INTERVAL = 64 * 2**20
+
+
+def copy_with_periodic_fsync(
+    *,
+    src: Path,
+    dst: Path,
+    fsync_interval: int = COPY_FSYNC_INTERVAL,
+    chunk_size: int = COPY_CHUNK_SIZE,
+) -> None:
+    """Copy `src` to `dst`, forcing dirty pages to storage every `fsync_interval` bytes.
+
+    NFS has no per-cgroup writeback accounting, so a memory-limited container
+    copying a large archive to an NFS destination accumulates dirty page cache
+    charged to its cgroup until the kernel OOM-kills it; periodic fsync caps the
+    dirty footprint at the interval size regardless of archive size. The final
+    fsync also guarantees the archive is durable before the copy is reported
+    successful.
+
+    Args:
+        src (Path): Source file to copy.
+        dst (Path): Destination path for the copy.
+        fsync_interval (int): Bytes written between forced flushes.
+        chunk_size (int): Bytes read per iteration.
+    """
+    with src.open("rb") as fsrc, dst.open("wb") as fdst:
+        unsynced = 0
+        while chunk := fsrc.read(chunk_size):
+            fdst.write(chunk)
+            unsynced += len(chunk)
+            if unsynced >= fsync_interval:
+                fdst.flush()
+                os.fsync(fdst.fileno())
+                unsynced = 0
+        fdst.flush()
+        os.fsync(fdst.fileno())
+    shutil.copymode(src, dst)
 
 
 class LocalBackend(StorageBackend):
@@ -80,7 +121,7 @@ class LocalBackend(StorageBackend):
         backup_path = Path(storage_location.storage_path) / backup_name
         logger.debug(f"Copy tmp backup to local: {backup_path}")
         try:
-            copy_file(src=tmp_backup, dst=backup_path)
+            copy_with_periodic_fsync(src=tmp_backup, dst=backup_path)
         except OSError as e:
             msg = f"Local write failed for '{backup_path}': {e}"
             logger.error(msg)

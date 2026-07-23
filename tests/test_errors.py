@@ -215,7 +215,7 @@ def test_local_backend_write_raises_storage_write_error(filesystem, mocker):
     tmp_backup.write_bytes(b"data")
 
     # Given the underlying copy fails
-    mocker.patch("ezbak.storage.local.copy_file", side_effect=OSError("disk full"))
+    mocker.patch("ezbak.storage.local.copy_with_periodic_fsync", side_effect=OSError("disk full"))
 
     # When writing, then a StorageWriteError is raised
     with pytest.raises(StorageWriteError, match="Local write failed"):
