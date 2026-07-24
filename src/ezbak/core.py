@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tarfile
 from pathlib import Path
@@ -17,6 +18,8 @@ from whenever import PlainDateTime
 from ezbak.checksums import HashingReader, HashingWriter
 from ezbak.config import BackupConfig
 from ezbak.constants import (
+    COPY_CHUNK_SIZE,
+    COPY_FSYNC_INTERVAL,
     DEFAULT_DATE_PATTERN,
     RESTORE_DATE_REGEX,
     RESTORE_POPULATED_IGNORE_FILENAMES,
@@ -119,6 +122,59 @@ def _expected_checksum(backend: StorageBackend, backup: Backup) -> str | None:
     return expected
 
 
+class _FsyncTarFile(tarfile.TarFile):
+    """TarFile that fsyncs periodically while writing large extracted members.
+
+    NFS restore targets flush each file's dirty pages at close, but a single member
+    larger than the container's memory limit dirties its full size before close and
+    gets the extraction OOM-killed (NFS has no per-cgroup writeback accounting, so
+    the kernel never starts writeback early). Interval-based fsync inside the write
+    bounds the dirty footprint; small members never fsync, so restores of many
+    small files pay no extra cost.
+    """
+
+    chunk_size = COPY_CHUNK_SIZE
+    fsync_interval = COPY_FSYNC_INTERVAL
+
+    def makefile(
+        self,
+        tarinfo: tarfile.TarInfo,
+        targetpath: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+    ) -> None:
+        """Write a regular member to `targetpath`, fsyncing every `fsync_interval` bytes.
+
+        Mirrors the stock implementation (same forward-only seek, so the non-seekable
+        checksum reader keeps working) apart from the periodic flush.
+
+        Args:
+            tarinfo (tarfile.TarInfo): The member being extracted.
+            targetpath (str | bytes | os.PathLike): Filesystem path to write the member to.
+
+        Raises:
+            tarfile.ReadError: If the archive ends before the member's declared size.
+        """
+        if tarinfo.sparse is not None:  # ezbak never creates sparse members
+            super().makefile(tarinfo, targetpath)
+            return
+        source = self.fileobj
+        source.seek(tarinfo.offset_data)
+        remaining = tarinfo.size
+        with open(targetpath, "wb") as target:  # ruff:ignore[builtin-open] - bytes paths, like stock makefile
+            unsynced = 0
+            while remaining > 0:
+                chunk = source.read(min(self.chunk_size, remaining))
+                if not chunk:
+                    msg = "unexpected end of data"
+                    raise tarfile.ReadError(msg)
+                target.write(chunk)
+                remaining -= len(chunk)
+                unsynced += len(chunk)
+                if unsynced >= self.fsync_interval:
+                    target.flush()
+                    os.fsync(target.fileno())
+                    unsynced = 0
+
+
 def _extract_archive(
     *, tarfile_path: Path, staging: Path, expected_checksum: str | None, backup_name: str
 ) -> None:
@@ -132,7 +188,7 @@ def _extract_archive(
     mismatch aborts via `_fail_restore`, which logs and raises RestoreFailedError.
     """
     if expected_checksum is None:
-        with tarfile.open(tarfile_path) as archive:
+        with _FsyncTarFile.open(tarfile_path) as archive:
             archive.extractall(path=staging, filter="data")
             # getmembers() is cached by extractall, so this is not a re-read.
             logger.trace(
@@ -147,7 +203,7 @@ def _extract_archive(
         try:
             # Explicit "r:gz" (not auto-detect "r") reads the stream forward-only, so
             # the non-seekable HashingReader sees every compressed byte exactly once.
-            with tarfile.open(fileobj=cast("IO[bytes]", reader), mode="r:gz") as archive:
+            with _FsyncTarFile.open(fileobj=cast("IO[bytes]", reader), mode="r:gz") as archive:
                 archive.extractall(path=staging, filter="data")
                 logger.trace(
                     f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"

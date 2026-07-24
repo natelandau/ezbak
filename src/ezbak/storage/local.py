@@ -1,16 +1,92 @@
 """Local-filesystem storage backend for backup operations."""
 
+import os
+import shutil
 from pathlib import Path
+from uuid import uuid4
 
 from loguru import logger
-from nclutils.fs import copy_file, find_files
+from nclutils.fs import find_files
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import is_sidecar, sidecar_name
-from ezbak.constants import BACKUP_EXTENSION, StorageType
+from ezbak.constants import (
+    BACKUP_EXTENSION,
+    COPY_CHUNK_SIZE,
+    COPY_FSYNC_INTERVAL,
+    StorageType,
+)
 from ezbak.exceptions import StorageWriteError
 from ezbak.filters import validate_storage_paths
 from ezbak.storage.base import StorageBackend
+
+
+def copy_with_periodic_fsync(
+    *,
+    src: Path,
+    dst: Path,
+    fsync_interval: int = COPY_FSYNC_INTERVAL,
+    chunk_size: int = COPY_CHUNK_SIZE,
+) -> None:
+    """Copy `src` to `dst`, forcing dirty pages to storage every `fsync_interval` bytes.
+
+    NFS has no per-cgroup writeback accounting, so a memory-limited container
+    copying a large archive to an NFS destination accumulates dirty page cache
+    charged to its cgroup until the kernel OOM-kills it; periodic fsync caps the
+    dirty footprint at the interval size regardless of archive size. The final
+    fsync also guarantees the archive is durable before the copy is reported
+    successful.
+
+    Stage under a hidden unique name and publish with an atomic rename so a
+    failed or killed copy never leaves a truncated archive under the final
+    backup name, where the next index would treat it as the newest backup and
+    hand it to a restore.
+
+    Args:
+        src (Path): Source file to copy.
+        dst (Path): Destination path for the copy.
+        fsync_interval (int): Bytes written between forced flushes.
+        chunk_size (int): Bytes read per iteration.
+
+    Raises:
+        OSError: If the copy or the final rename fails; the staging file is
+            removed before re-raising.
+    """
+    # Unique per writer so concurrent backups to the same destination never
+    # clobber each other's staging file; the leading dot keeps it out of the
+    # `{name}-*.tgz` index glob.
+    tmp_dst = dst.with_name(f".{dst.name}.{uuid4().hex[:8]}.partial")
+    try:
+        _write_chunks_with_fsync(
+            src=src, dst=tmp_dst, fsync_interval=fsync_interval, chunk_size=chunk_size
+        )
+        shutil.copymode(src, tmp_dst)
+        tmp_dst.replace(dst)
+    except OSError:
+        tmp_dst.unlink(missing_ok=True)
+        raise
+
+
+def _write_chunks_with_fsync(*, src: Path, dst: Path, fsync_interval: int, chunk_size: int) -> None:
+    """Stream `src` into `dst` in chunks, fsyncing every `fsync_interval` bytes.
+
+    Args:
+        src (Path): Source file to copy.
+        dst (Path): Destination path for the copy.
+        fsync_interval (int): Bytes written between forced flushes.
+        chunk_size (int): Bytes read per iteration.
+    """
+    with src.open("rb") as fsrc, dst.open("wb") as fdst:
+        unsynced = 0
+        while chunk := fsrc.read(chunk_size):
+            fdst.write(chunk)
+            unsynced += len(chunk)
+            if unsynced >= fsync_interval:
+                fdst.flush()
+                os.fsync(fdst.fileno())
+                unsynced = 0
+        fdst.flush()
+        os.fsync(fdst.fileno())
 
 
 class LocalBackend(StorageBackend):
@@ -80,7 +156,7 @@ class LocalBackend(StorageBackend):
         backup_path = Path(storage_location.storage_path) / backup_name
         logger.debug(f"Copy tmp backup to local: {backup_path}")
         try:
-            copy_file(src=tmp_backup, dst=backup_path)
+            copy_with_periodic_fsync(src=tmp_backup, dst=backup_path)
         except OSError as e:
             msg = f"Local write failed for '{backup_path}': {e}"
             logger.error(msg)
