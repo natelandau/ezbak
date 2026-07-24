@@ -36,6 +36,10 @@ ALWAYS_EXCLUDE_FILENAMES = (
 # Reuses the OS cruft we already refuse to back up, plus lost+found (shipped on every
 # fresh ext mount). Extend this tuple to teach the guard about more benign noise.
 RESTORE_POPULATED_IGNORE_FILENAMES = (*ALWAYS_EXCLUDE_FILENAMES, "lost+found")
+# APScheduler discards a run that starts later than this. Its 1s default silently drops
+# a backup whenever the container is briefly busy; a late backup beats a missed one, and
+# the job's coalesce default collapses a backlog of missed runs into a single execution.
+MISFIRE_GRACE_PERIOD_SECONDS: int = 300
 
 
 class CLILogLevel(Enum):

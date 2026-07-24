@@ -160,4 +160,16 @@ data, and its `preStop` hook captures the final state. All three share the
     your workload needs; the ezbak tasks only require that the restore container
     can write to it and the backup containers can read it.
 
+## Forcing an on-demand backup
+
+Signal the sidecar to back up right now, without waiting for its cron
+schedule:
+
+```bash
+kubectl exec <pod> -c backup -- kill -USR1 1
+```
+
+See [Forcing an on-demand backup](../guides/docker.md#forcing-an-on-demand-backup)
+for what the signal does and how it behaves.
+
 For the same pattern on Nomad, see the [Nomad example](nomad.md).
