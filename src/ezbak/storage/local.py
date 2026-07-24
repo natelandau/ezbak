@@ -3,6 +3,7 @@
 import os
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 from loguru import logger
 from nclutils.fs import find_files
@@ -36,6 +37,39 @@ def copy_with_periodic_fsync(
     fsync also guarantees the archive is durable before the copy is reported
     successful.
 
+    Stage under a hidden unique name and publish with an atomic rename so a
+    failed or killed copy never leaves a truncated archive under the final
+    backup name, where the next index would treat it as the newest backup and
+    hand it to a restore.
+
+    Args:
+        src (Path): Source file to copy.
+        dst (Path): Destination path for the copy.
+        fsync_interval (int): Bytes written between forced flushes.
+        chunk_size (int): Bytes read per iteration.
+
+    Raises:
+        OSError: If the copy or the final rename fails; the staging file is
+            removed before re-raising.
+    """
+    # Unique per writer so concurrent backups to the same destination never
+    # clobber each other's staging file; the leading dot keeps it out of the
+    # `{name}-*.tgz` index glob.
+    tmp_dst = dst.with_name(f".{dst.name}.{uuid4().hex[:8]}.partial")
+    try:
+        _write_chunks_with_fsync(
+            src=src, dst=tmp_dst, fsync_interval=fsync_interval, chunk_size=chunk_size
+        )
+        shutil.copymode(src, tmp_dst)
+        tmp_dst.replace(dst)
+    except OSError:
+        tmp_dst.unlink(missing_ok=True)
+        raise
+
+
+def _write_chunks_with_fsync(*, src: Path, dst: Path, fsync_interval: int, chunk_size: int) -> None:
+    """Stream `src` into `dst` in chunks, fsyncing every `fsync_interval` bytes.
+
     Args:
         src (Path): Source file to copy.
         dst (Path): Destination path for the copy.
@@ -53,7 +87,6 @@ def copy_with_periodic_fsync(
                 unsynced = 0
         fdst.flush()
         os.fsync(fdst.fileno())
-    shutil.copymode(src, dst)
 
 
 class LocalBackend(StorageBackend):

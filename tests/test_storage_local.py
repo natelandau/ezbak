@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from ezbak import ezbak
 from ezbak.storage.local import copy_with_periodic_fsync
 
@@ -50,6 +52,22 @@ def test_copy_with_periodic_fsync_empty_file(tmp_path):
 
     # Then the destination exists and is empty
     assert dst.read_bytes() == b""
+
+
+def test_copy_with_periodic_fsync_failure_leaves_no_partial_archive(tmp_path, mocker):
+    """Verify a copy that fails mid-write publishes nothing under the backup name."""
+    # Given a source file and an fsync that fails partway through the copy
+    src = tmp_path / "src.tgz"
+    src.write_bytes(bytes(10 * 1024))
+    dst = tmp_path / "dst.tgz"
+    mocker.patch("ezbak.storage.local.os.fsync", autospec=True, side_effect=OSError("stale handle"))
+
+    # When copying, then the error propagates
+    with pytest.raises(OSError, match="stale handle"):
+        copy_with_periodic_fsync(src=src, dst=dst, fsync_interval=4 * 1024, chunk_size=1024)
+
+    # Then no truncated archive or staging litter remains, only the source
+    assert list(tmp_path.iterdir()) == [src]
 
 
 def test_local_backend_write_fsyncs_archive(filesystem, mocker):
