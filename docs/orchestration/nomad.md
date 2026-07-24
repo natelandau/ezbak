@@ -156,4 +156,16 @@ backups reachable from any host the job lands on.
     `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` from Nomad's Vault
     integration or a secrets store, not from a committed jobspec.
 
+## Forcing an on-demand backup
+
+Signal the sidecar to back up right now, without waiting for its cron
+schedule:
+
+```bash
+nomad alloc signal -s SIGUSR1 -task backup <alloc>
+```
+
+See [Forcing an on-demand backup](../guides/docker.md#forcing-an-on-demand-backup)
+for what the signal does and how it behaves.
+
 For the same pattern on Kubernetes, see the [Kubernetes example](kubernetes.md).

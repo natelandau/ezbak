@@ -73,11 +73,62 @@ old backups do not build up. A scheduled run also spreads its start time by up t
 60 seconds, so many containers waking at the same cron minute do not all hit
 storage at once. Widen or disable that spread with `EZBAK_CRON_JITTER` (seconds).
 
+A run that cannot start on time, because the host is loaded or the container was
+paused, still runs if it gets going within five minutes of its scheduled moment.
+Past that, the run is skipped and logged as `Skipped backup: missed by more than
+the grace period`. A backlog of missed runs collapses into one candidate run
+rather than one run per interval, and that candidate is the most recent scheduled
+time, which still has to fall inside the five-minute window. A container that
+resumes more than five minutes after its last scheduled time therefore comes back
+without backing up and waits for its next scheduled time.
+
 !!! warning "Scheduled failures do not stop the container"
 
     A scheduled run that fails logs the error and keeps the container running, so
     the next run retries. Set `EZBAK_HEALTHCHECK_URL` to get alerted when a
     scheduled run fails or stops happening. See [Monitoring](../orchestration/monitoring.md).
+
+## Forcing an on-demand backup
+
+A scheduled container waits for its cron time. Send it `SIGUSR1` to run the
+configured action right now, without waiting for the schedule.
+
+```bash
+docker kill --signal=SIGUSR1 <container>
+```
+
+The forced run takes the same path as a scheduled one: it runs the pre-backup
+hook, backs up to every configured destination, prunes under the retention
+policy, runs the post-backup hook, and pings `EZBAK_HEALTHCHECK_URL` if set.
+The cron trigger still computes its next run from the original schedule
+afterward, so forcing a run does not shift it. Look for `Trigger received;
+running backup now` in the logs to confirm the signal arrived.
+
+The signal forces whichever action the container is scheduled for, so a
+scheduled restore container is triggerable the same way and runs its configured
+restore.
+
+The same signal works under an orchestrator, sent to the ezbak task or
+container directly rather than to Docker:
+
+```bash
+nomad alloc signal -s SIGUSR1 -task <task> <alloc>
+kubectl exec <pod> -c <container> -- kill -USR1 1
+```
+
+!!! note "Only scheduled containers listen for the signal"
+
+    `SIGUSR1` only does something on a container running with `EZBAK_CRON`. A
+    one-shot container ignores it and finishes the run it is already doing, so
+    signaling the wrong container cannot cut a backup short.
+
+!!! warning "A trigger during a run is refused, not queued"
+
+    A container only runs one job at a time. A `SIGUSR1` that arrives while a
+    run is already in progress is refused and logged as a warning (`Skipped
+    backup: a run is already in progress`), not queued for after the run
+    finishes. Send the signal again once the current run completes if you
+    still want an immediate one.
 
 ## Final backup on shutdown
 
@@ -102,6 +153,11 @@ docker run -d \
 
 The flag applies only to a cron backup container. It does nothing for a restore
 container or a one-shot run, neither of which has a schedule to shut down.
+
+If a scheduled or forced run is still in progress when the signal arrives, that
+run is left to finish and the final backup is skipped, logged as `A backup is
+already running; skipping the final backup`. The running backup already covers
+the same data, and a container runs only one backup at a time.
 
 !!! warning "The final backup runs inside the kill grace period"
 

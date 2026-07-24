@@ -5,21 +5,41 @@ from __future__ import annotations
 import os
 import shutil
 import signal
+import threading
+import time
 import urllib.error
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import pytest
 import time_machine
+from apscheduler.events import (
+    EVENT_JOB_MAX_INSTANCES,
+    EVENT_JOB_MISSED,
+    JobExecutionEvent,
+    JobSubmissionEvent,
+)
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from pydantic import ValidationError
 
 from ezbak import ezbak
-from ezbak.constants import DEFAULT_COMPRESSION_LEVEL, DEFAULT_DATE_FORMAT, LogLevel, RestoreOutcome
+from ezbak.constants import (
+    DEFAULT_COMPRESSION_LEVEL,
+    DEFAULT_DATE_FORMAT,
+    MISFIRE_GRACE_PERIOD_SECONDS,
+    Action,
+    LogLevel,
+    RestoreOutcome,
+)
 from ezbak.container import (
+    _log_skipped_run,
     _ping_healthcheck,
     _run_scheduled,
     _run_shutdown_backup,
+    _trigger_now,
     do_backup,
     do_restore,
     log_configured_hooks,
@@ -28,6 +48,9 @@ from ezbak.container import main as entrypoint
 from ezbak.env import EnvConfig
 from ezbak.exceptions import BackupFailedError, HookFailedError
 from ezbak.logging import instantiate_logger
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
@@ -108,13 +131,25 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
     assert "Next scheduled run" in output
 
 
-def _run_entrypoint_with_sigterm(mocker):
-    """Run the cron entrypoint and deliver a SIGTERM once the scheduler loop starts.
+def _run_entrypoint_with_signals(
+    mocker, signals: list[signal.Signals | list[signal.Signals] | None]
+) -> MagicMock:
+    """Run the cron entrypoint, delivering signals to the scheduler loop pass by pass.
 
-    Keep the mocked scheduler reporting as running so only the delivered signal ends
-    the loop, then invoke the handler the entrypoint registered. This exercises the
-    real handler -> event -> loop-exit path without raising an OS signal that could
-    kill the test run if a regression left the handler unregistered.
+    Keep the mocked scheduler reporting as running so only the delivered signals end
+    the loop, then invoke the handler the entrypoint registered for each one in order.
+    This exercises the real handler -> event -> loop-exit path without raising an OS
+    signal that could kill the test run if a regression left the handler unregistered;
+    a `KeyError` here means the entrypoint never registered it.
+
+    Args:
+        mocker: The pytest-mock fixture.
+        signals: One entry per scheduler loop pass, in order. An entry is a single
+            signal, a list of signals delivered together in that pass, or None to
+            deliver nothing that pass.
+
+    Returns:
+        MagicMock: The mocked scheduler instance the entrypoint built.
     """
     scheduler = mocker.patch("ezbak.container.BackgroundScheduler").return_value
     scheduler.running = True
@@ -126,14 +161,30 @@ def _run_entrypoint_with_sigterm(mocker):
 
     mocker.patch("ezbak.container.signal.signal", side_effect=capture_handler)
 
-    # Deliver the signal the first time the loop sleeps. A KeyError here would mean the
-    # entrypoint never registered a SIGTERM handler, which fails the test cleanly.
-    def deliver_sigterm(*_args: object, **_kwargs: object) -> None:
-        handlers[signal.SIGTERM](signal.SIGTERM, None)
+    remaining = list(signals)
 
-    mocker.patch("time.sleep", side_effect=deliver_sigterm)
+    def deliver(*_args: object, **_kwargs: object) -> None:
+        batch = remaining.pop(0)
+        if batch is None:
+            return
+        for signum in batch if isinstance(batch, list) else [batch]:
+            handlers[signum](signum, None)
+
+    mocker.patch("time.sleep", side_effect=deliver)
 
     entrypoint()
+
+    return scheduler
+
+
+def _run_entrypoint_with_sigterm(mocker):
+    """Run the cron entrypoint and deliver a SIGTERM once the scheduler loop starts.
+
+    A thin wrapper over `_run_entrypoint_with_signals` for the common single-SIGTERM
+    shutdown case; see that helper for why signals are delivered through the captured
+    handler rather than raised as real OS signals.
+    """
+    _run_entrypoint_with_signals(mocker, [signal.SIGTERM])
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -201,6 +252,215 @@ def test_entrypoint_cron_no_shutdown_backup_without_signal(filesystem, capsys):
     output = capsys.readouterr().err
     assert "Taking a final backup before shutdown" not in output
     assert not Path(dest1 / f"test-{frozen_time_str}.tgz").exists()
+
+
+def test_entrypoint_cron_sigusr1_triggers_a_run(filesystem, mocker):
+    """Verify SIGUSR1 forces an immediate run in a cron container."""
+    # Given a cron backup container
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
+
+    # When the container runs and SIGUSR1 arrives, then SIGTERM ends the loop
+    scheduler = _run_entrypoint_with_signals(mocker, [signal.SIGUSR1, signal.SIGTERM])
+
+    # Then the run was forced exactly once, for the configured action
+    trigger_now.assert_called_once_with(scheduler, Action.BACKUP)
+
+
+def test_entrypoint_cron_no_run_without_sigusr1(filesystem, mocker):
+    """Verify a cron container forces no run when SIGUSR1 never arrives."""
+    # Given a cron backup container whose loop actually runs (scheduler.running stays
+    # True, unlike the autouse mock_run fixture, so the run_now_event check inside the
+    # loop body genuinely executes) and only SIGTERM is ever delivered
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
+
+    # When the container runs a loop pass with no SIGUSR1 delivered, then SIGTERM ends it
+    _run_entrypoint_with_signals(mocker, [signal.SIGTERM])
+
+    # Then no run was forced
+    trigger_now.assert_not_called()
+
+
+def test_entrypoint_cron_sigusr1_triggers_one_run_per_signal(filesystem, mocker):
+    """Verify one SIGUSR1 forces exactly one run, not one on every later loop pass."""
+    # Given a cron backup container
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
+
+    # When SIGUSR1 arrives and the loop then runs a further pass with no signal at all
+    scheduler = _run_entrypoint_with_signals(mocker, [signal.SIGUSR1, None, signal.SIGTERM])
+
+    # Then the trigger fired once and did not repeat on the signal-free pass
+    trigger_now.assert_called_once_with(scheduler, Action.BACKUP)
+
+
+def test_entrypoint_cron_sigusr1_lost_to_shutdown_is_reported(filesystem, mocker, capsys):
+    """Verify a trigger dropped in favor of a simultaneous shutdown is logged."""
+    # Given a cron backup container
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
+
+    # When SIGUSR1 and SIGTERM land in the same loop pass
+    _run_entrypoint_with_signals(mocker, [[signal.SIGUSR1, signal.SIGTERM]])
+
+    # Then shutdown wins, and the operator is told their trigger was dropped
+    trigger_now.assert_not_called()
+    assert "pending trigger" in capsys.readouterr().err
+
+
+def test_entrypoint_one_shot_ignores_sigusr1(filesystem, capsys):
+    """Verify a one-shot container ignores SIGUSR1 instead of being killed by it."""
+    # Given a one-shot backup container whose pre-backup hook signals the container
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_PRE_BACKUP_HOOK"] = f"kill -USR1 {os.getpid()}"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    previous_handler = signal.getsignal(signal.SIGUSR1)
+    # Start from the POSIX default (terminate), which is what a container process has
+    # before ezbak touches it. An earlier test may have leaked a live handler into this
+    # process, which would swallow the signal and hide a regression.
+    signal.signal(signal.SIGUSR1, signal.SIG_DFL)
+    try:
+        # When SIGUSR1 arrives mid-run
+        entrypoint()
+    finally:
+        os.environ.pop("EZBAK_PRE_BACKUP_HOOK", None)
+        signal.signal(signal.SIGUSR1, previous_handler)
+
+    # Then the run survived the signal and completed
+    assert "Backup complete" in capsys.readouterr().err
+    assert list(dest1.glob("*.tgz"))
+
+
+def test_entrypoint_cron_sigusr1_triggers_the_configured_action(filesystem, tmp_path, mocker):
+    """Verify SIGUSR1 forces the container's own action, not always a backup."""
+    # Given a cron restore container
+    src_dir, dest1, _ = filesystem
+    restore_path = Path(tmp_path / "restore")
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
+
+    # When the container runs and SIGUSR1 arrives, then SIGTERM ends the loop
+    scheduler = _run_entrypoint_with_signals(mocker, [signal.SIGUSR1, signal.SIGTERM])
+
+    # Then the restore, not a backup, was forced
+    trigger_now.assert_called_once_with(scheduler, Action.RESTORE)
+
+
+def test_log_skipped_run_reports_an_overlapping_run(capsys):
+    """Verify a run skipped for overlap is reported through the app's logger."""
+    # Given a max-instances event for the backup job
+    instantiate_logger(LogLevel.INFO)
+    event = JobSubmissionEvent(EVENT_JOB_MAX_INSTANCES, "backup", "default", [])
+
+    # When the listener handles it
+    _log_skipped_run(event)
+
+    # Then the skip is visible with its cause
+    output = capsys.readouterr().err
+    assert "backup" in output
+    assert "already in progress" in output
+
+
+def test_log_skipped_run_reports_a_missed_run(capsys):
+    """Verify a run skipped for arriving too late is reported through the app's logger."""
+    # Given a missed-run event for the backup job
+    instantiate_logger(LogLevel.INFO)
+    event = JobExecutionEvent(EVENT_JOB_MISSED, "backup", "default", None)
+
+    # When the listener handles it
+    _log_skipped_run(event)
+
+    # Then the skip is visible with its cause
+    output = capsys.readouterr().err
+    assert "backup" in output
+    assert "grace period" in output
+
+
+def test_entrypoint_cron_registers_the_skipped_run_listener(filesystem, mocker):
+    """Verify the cron loop subscribes to the scheduler's skipped-run events."""
+    # Given a cron backup container
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    scheduler = mocker.patch("ezbak.container.BackgroundScheduler").return_value
+    scheduler.running = False
+
+    # When the container starts
+    entrypoint()
+
+    # Then both skip events are subscribed
+    scheduler.add_listener.assert_called_once_with(
+        _log_skipped_run, EVENT_JOB_MAX_INSTANCES | EVENT_JOB_MISSED
+    )
+
+
+def test_entrypoint_cron_job_tolerates_a_late_start(filesystem, mocker):
+    """Verify the scheduled job is registered with a grace period for late starts."""
+    # Given a cron backup container
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_CRON"] = "0 3 * * *"
+    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+
+    scheduler = mocker.patch("ezbak.container.BackgroundScheduler").return_value
+    scheduler.running = False
+
+    # When the container starts
+    entrypoint()
+
+    # Then the job tolerates starting late rather than being discarded
+    assert scheduler.add_job.call_args.kwargs["misfire_grace_time"] == MISFIRE_GRACE_PERIOD_SECONDS
 
 
 def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
@@ -477,14 +737,14 @@ def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    mock_scheduled = mocker.patch("ezbak.container._run_scheduled", autospec=True)
+    mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
     scheduler = mocker.MagicMock()
 
-    # When shutting down
-    _run_shutdown_backup(app, scheduler, config)
+    # When shutting down with no run in flight
+    _run_shutdown_backup(app, scheduler, config, threading.Lock())
 
     # Then the final backup runs through the same path as a scheduled run
-    mock_scheduled.assert_called_once_with(app, scheduler, config, do_backup)
+    mock_report.assert_called_once_with(app, scheduler, config, do_backup)
 
 
 def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
@@ -499,11 +759,11 @@ def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    mock_scheduled = mocker.patch("ezbak.container._run_scheduled", autospec=True)
+    mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
 
     # When shutting down, then no final backup is taken
-    _run_shutdown_backup(app, mocker.MagicMock(), config)
-    mock_scheduled.assert_not_called()
+    _run_shutdown_backup(app, mocker.MagicMock(), config, threading.Lock())
+    mock_report.assert_not_called()
 
 
 def test_run_shutdown_backup_skips_for_restore_action(filesystem, mocker):
@@ -518,11 +778,83 @@ def test_run_shutdown_backup_skips_for_restore_action(filesystem, mocker):
     os.environ["EZBAK_LOG_LEVEL"] = "INFO"
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    mock_scheduled = mocker.patch("ezbak.container._run_scheduled", autospec=True)
+    mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
 
     # When shutting down, then no backup is taken
-    _run_shutdown_backup(app, mocker.MagicMock(), config)
-    mock_scheduled.assert_not_called()
+    _run_shutdown_backup(app, mocker.MagicMock(), config, threading.Lock())
+    mock_report.assert_not_called()
+
+
+def test_run_shutdown_backup_skips_while_a_run_is_in_flight(filesystem, mocker, capsys):
+    """Verify the final backup is skipped when a run is already in progress."""
+    # Given an opted-in backup container whose run lock is held by an in-flight run
+    instantiate_logger(LogLevel.INFO)
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(_env_file=None)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
+    run_lock = threading.Lock()
+    run_lock.acquire()
+
+    try:
+        # When shutting down
+        _run_shutdown_backup(app, mocker.MagicMock(), config, run_lock)
+    finally:
+        run_lock.release()
+
+    # Then the redundant final backup is skipped and the skip is reported
+    mock_report.assert_not_called()
+    assert "already running; skipping the final backup" in capsys.readouterr().err
+
+
+def test_run_scheduled_holds_the_run_lock_for_the_whole_run(filesystem, mocker):
+    """Verify a scheduled run holds the run lock so a shutdown backup cannot overlap it."""
+    # Given a scheduled run and the container's run lock
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(name="test", source_paths=[src_dir], storage_paths=[dest1], _env_file=None)
+    run_lock = threading.Lock()
+    held: list[bool] = []
+
+    def record_lock_state(*_args: object) -> None:
+        held.append(run_lock.locked())
+
+    # When the run executes
+    _run_scheduled(app, mocker.MagicMock(), config, record_lock_state, run_lock)
+
+    # Then the lock was held during the run and released afterward
+    assert held == [True]
+    assert not run_lock.locked()
+
+
+def test_run_scheduled_skips_when_the_run_lock_is_held(filesystem, mocker, capsys):
+    """Verify a scheduled run is dropped, not queued, while the shutdown backup holds the lock."""
+    # Given the container's run lock already held by the shutdown backup
+    instantiate_logger(LogLevel.INFO)
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    config = EnvConfig(name="test", source_paths=[src_dir], storage_paths=[dest1], _env_file=None)
+    run = mocker.MagicMock()
+    run_lock = threading.Lock()
+    run_lock.acquire()
+
+    try:
+        # When a job the executor already accepted reaches the run
+        _run_scheduled(app, mocker.MagicMock(), config, run, run_lock)
+    finally:
+        run_lock.release()
+
+    # Then it returns immediately instead of blocking, and the skip is reported
+    run.assert_not_called()
+    assert "already in progress; skipping this run" in capsys.readouterr().err
 
 
 def test_ping_healthcheck_success_pings_base_url(mocker):
@@ -604,7 +936,7 @@ def test_run_scheduled_pings_success(filesystem, mocker):
     scheduler = mocker.MagicMock()
 
     # When running the scheduled job
-    _run_scheduled(app, scheduler, config, run)
+    _run_scheduled(app, scheduler, config, run, threading.Lock())
 
     # Then the run executed and it pings for success
     run.assert_called_once_with(app, config, scheduler)
@@ -629,7 +961,7 @@ def test_run_scheduled_pings_failure(filesystem, mocker):
     scheduler = mocker.MagicMock()
 
     # When running the scheduled job
-    _run_scheduled(app, scheduler, config, run)
+    _run_scheduled(app, scheduler, config, run, threading.Lock())
 
     # Then it pings for failure
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
@@ -962,3 +1294,79 @@ def test_log_configured_hooks_silent_when_no_hooks(filesystem, capsys):
     # Then nothing about hooks is emitted
     output = capsys.readouterr().err
     assert "hook" not in output
+
+
+def _wait_until(predicate, timeout=5.0):
+    """Poll predicate until it is true or the timeout expires, returning the result.
+
+    time.sleep is patched out by the autouse mock_run fixture, so pace the loop with
+    an event wait instead.
+
+    Returns:
+        bool: Whether the predicate evaluated to true.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        threading.Event().wait(0.01)
+    return predicate()
+
+
+def test_trigger_now_runs_the_scheduled_job_immediately():
+    """Verify a forced trigger runs the job without waiting for its cron time."""
+    # Given a running scheduler holding a job that will not fire on its own for hours
+    ran = threading.Event()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(func=ran.set, trigger=CronTrigger.from_crontab("0 3 * * *"), id="backup")
+    scheduler.start()
+
+    try:
+        # When the job is triggered out of band
+        _trigger_now(scheduler, Action.BACKUP)
+
+        # Then it runs promptly
+        assert ran.wait(timeout=5)
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+def test_trigger_now_leaves_the_cron_schedule_unchanged():
+    """Verify forcing a run does not shift the job's next scheduled run time."""
+    # Given a running scheduler with a known next run time
+    ran = threading.Event()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(func=ran.set, trigger=CronTrigger.from_crontab("0 3 * * *"), id="backup")
+    scheduler.start()
+
+    try:
+        original_next_run = scheduler.get_job(job_id="backup").next_run_time
+
+        # When a run is forced and completes
+        _trigger_now(scheduler, Action.BACKUP)
+        assert ran.wait(timeout=5)
+
+        # Then the cron trigger has recomputed the same next run. Poll: the scheduler
+        # updates next_run_time around submitting the job, so it can lag the job itself.
+        assert _wait_until(
+            lambda: scheduler.get_job(job_id="backup").next_run_time == original_next_run
+        )
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+def test_trigger_now_warns_when_no_job_is_scheduled(capsys):
+    """Verify a trigger with no matching job warns instead of raising."""
+    # Given a running scheduler with no backup job
+    instantiate_logger(LogLevel.INFO)
+    scheduler = BackgroundScheduler()
+    scheduler.start()
+
+    try:
+        # When a trigger arrives
+        _trigger_now(scheduler, Action.BACKUP)
+
+        # Then it is reported and does not raise
+        assert "no job is scheduled" in capsys.readouterr().err
+    finally:
+        scheduler.shutdown(wait=False)
