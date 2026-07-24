@@ -1,3 +1,9 @@
+## v1.3.1 (2026-07-23)
+
+### Fix
+
+- prevent OOM writing large archives to NFS (#66)
+
 ## v1.3.0 (2026-07-23)
 
 ### BREAKING CHANGE
