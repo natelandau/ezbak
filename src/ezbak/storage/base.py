@@ -109,6 +109,16 @@ class StorageBackend(ABC):
         """Discover existing backups and organize them into storage locations."""
 
     @abstractmethod
+    def write_locations(self) -> list[StorageLocation]:
+        """Return the destinations to write to, derived from configuration alone.
+
+        Implementations must not enumerate stored backups, so a destination whose
+        listing failed can still be written to; listing and writing are separate
+        requests. The returned locations carry no backups, so a generated name is
+        disambiguated against nothing.
+        """
+
+    @abstractmethod
     def write(
         self, *, tmp_backup: Path, storage_location: StorageLocation, checksum: str | None
     ) -> Backup:

@@ -55,6 +55,10 @@ The storage locations you set decide where backups go. There is no
 storage-type selector. See [Storage locations](../concepts/storage-locations.md)
 for the model and [Back up to S3](../guides/s3.md) for the S3 setup.
 
+`aws_access_key` and `aws_secret_key` are optional. Leave both unset and ezbak uses boto3's
+credential chain: an EC2 instance profile, EKS IRSA, an ECS task role, the standard `AWS_*`
+variables, or `~/.aws/credentials`. Setting only one of the two is an error.
+
 ## Backup behavior
 
 | Field | Environment variable | CLI flag | Default |
@@ -121,7 +125,12 @@ to `0`, marks nothing for that rule. See [Retention policies](../concepts/retent
 `restore_date` selects the newest backup at or before a point in time.
 `clean_before_restore` empties the target as part of the restore, after a
 successful extract, and refuses to target a storage location. `skip_if_no_backup`
-turns a missing backup into a clean no-op instead of a failure.
+turns a missing backup into a clean no-op instead of a failure, but only when
+the destination could be read and was genuinely empty, the fresh-deployment
+case. It does not suppress a failure to *read* a destination: an unreachable
+bucket or a permission error still fails the restore. See [An unreadable
+destination is not an empty
+one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
 `skip_restore_if_populated` skips the restore, as a success, when the target
 already holds data other than benign noise (OS cruft, `lost+found`, ezbak's own
 `.ezbak-restore-*` staging dirs); `clean_before_restore` bypasses this guard.

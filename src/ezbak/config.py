@@ -140,6 +140,9 @@ class BackupConfig(BaseModel):
     chown_uid: int | None = None
     chown_gid: int | None = None
 
+    # Default None so boto3's credential chain stays intact: an omitted pair defers to an
+    # EC2 instance profile, EKS IRSA, an ECS task role, AWS_* variables, or
+    # ~/.aws/credentials. Set both or neither; a half-set pair is rejected at init.
     aws_access_key: str | None = None
     aws_s3_bucket_name: str | None = None
     aws_s3_bucket_prefix: str | None = None

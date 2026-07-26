@@ -1,6 +1,8 @@
 """Direct AWSService tests backed by moto's in-memory S3."""
 
+import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import boto3
 import pytest
@@ -282,10 +284,26 @@ def _service(bucket: str, prefix: str | None = None) -> AWSService:
     )
 
 
+def _patch_session(mocker) -> tuple[MagicMock, MagicMock]:
+    """Patch boto3.Session with an autospecced session/client pair for construction-only tests.
+
+    autospec catches a misspelled or wrongly-positioned argument to Session() or
+    session.client() that a bare MagicMock would silently accept.
+
+    Returns:
+        tuple[MagicMock, MagicMock]: The patched Session class mock and the session
+            instance mock it returns.
+    """
+    mock_session_cls = mocker.patch("ezbak.storage.aws.boto3.Session", autospec=True)
+    mock_session = mock_session_cls.return_value
+    mock_session.get_credentials.return_value = mocker.MagicMock(method="explicit")
+    return mock_session_cls, mock_session
+
+
 def test_service_forwards_region_and_endpoint_to_client(mocker) -> None:
-    """Verify AWSService hands region and endpoint to boto3.client."""
-    # Given a patched boto3.client so no real S3 call is made
-    mock_client = mocker.patch("ezbak.storage.aws.boto3.client", autospec=True)
+    """Verify AWSService hands region to the session and endpoint to the client."""
+    # Given a patched boto3.Session so no real S3 call is made
+    mock_session_cls, mock_session = _patch_session(mocker)
 
     # When constructing the service with an explicit region and endpoint
     AWSService(
@@ -296,38 +314,42 @@ def test_service_forwards_region_and_endpoint_to_client(mocker) -> None:
         endpoint_url="https://minio.example.com",
     )
 
-    # Then both are forwarded to the client for S3-compatible targets
-    _, kwargs = mock_client.call_args
-    assert kwargs["region_name"] == "eu-west-1"
-    assert kwargs["endpoint_url"] == "https://minio.example.com"
+    # Then region reaches the session (it signs requests) and endpoint reaches the
+    # client (it only redirects where requests are sent)
+    _, session_kwargs = mock_session_cls.call_args
+    assert session_kwargs["region_name"] == "eu-west-1"
+    _, client_kwargs = mock_session.client.call_args
+    assert client_kwargs["endpoint_url"] == "https://minio.example.com"
 
 
 def test_service_defaults_region_and_endpoint_to_none(mocker) -> None:
     """Verify an unset region and endpoint pass None so boto3 resolution stays intact."""
-    # Given a patched boto3.client
-    mock_client = mocker.patch("ezbak.storage.aws.boto3.client", autospec=True)
+    # Given a patched boto3.Session
+    mock_session_cls, mock_session = _patch_session(mocker)
 
     # When constructing the service without a region or endpoint
     AWSService(aws_access_key="k", aws_secret_key="s", bucket_name="b")
 
     # Then None is forwarded, deferring to boto3's standard resolution
-    _, kwargs = mock_client.call_args
-    assert kwargs["region_name"] is None
-    assert kwargs["endpoint_url"] is None
+    _, session_kwargs = mock_session_cls.call_args
+    assert session_kwargs["region_name"] is None
+    _, client_kwargs = mock_session.client.call_args
+    assert client_kwargs["endpoint_url"] is None
 
 
 def test_service_blank_region_and_endpoint_normalized_to_none(mocker) -> None:
     """Verify blank region/endpoint strings are normalized to None, not passed verbatim."""
-    # Given a patched boto3.client and blank settings (e.g. EZBAK_AWS_REGION= in a template)
-    mock_client = mocker.patch("ezbak.storage.aws.boto3.client", autospec=True)
+    # Given a patched boto3.Session and blank settings (e.g. EZBAK_AWS_REGION= in a template)
+    mock_session_cls, mock_session = _patch_session(mocker)
 
     # When constructing the service with empty strings
     AWSService(aws_access_key="k", aws_secret_key="s", bucket_name="b", region="", endpoint_url="")
 
     # Then None is forwarded so boto3 resolves normally instead of building an invalid endpoint
-    _, kwargs = mock_client.call_args
-    assert kwargs["region_name"] is None
-    assert kwargs["endpoint_url"] is None
+    _, session_kwargs = mock_session_cls.call_args
+    assert session_kwargs["region_name"] is None
+    _, client_kwargs = mock_session.client.call_args
+    assert client_kwargs["endpoint_url"] is None
 
 
 def test_service_malformed_endpoint_raises_storage_init_error() -> None:
@@ -435,3 +457,84 @@ def test_list_objects_prefix_filter(s3_bucket: str, tmp_path: Path) -> None:
     # Then: the prefix filter returns only matching keys, and no prefix returns all
     assert sorted(svc.list_objects(prefix="app-")) == ["app-1.tgz", "app-2.tgz"]
     assert len(svc.list_objects()) == 3
+
+
+def test_aws_service_uses_ambient_credential_chain(s3_bucket: str) -> None:
+    """Verify AWSService initializes with no explicit credentials via the boto3 chain."""
+    # Given: moto supplies an ambient credential chain and no keys are passed
+    # When: building the service with only a bucket name
+    svc = AWSService(bucket_name=s3_bucket)
+
+    # Then: the bucket was reachable and the client is usable
+    assert svc.list_objects() == []
+
+
+@pytest.mark.parametrize(
+    ("access", "secret", "expected_missing"),
+    [
+        pytest.param("k", None, "aws_secret_key", id="access_without_secret"),
+        pytest.param(None, "s", "aws_access_key", id="secret_without_access"),
+        pytest.param("k", "", "aws_secret_key", id="access_with_blank_secret"),
+    ],
+)
+def test_aws_service_partial_credentials(
+    access: str | None, secret: str | None, expected_missing: str
+) -> None:
+    """Verify a half-set credential pair fails naming the missing ezbak setting."""
+    # Given: exactly one of the two credential settings
+    # When: building the service
+    # Then: init fails naming the missing setting, not boto3's parameter name (the
+    # match must pin down "is not" since both setting names appear in every message)
+    with pytest.raises(StorageInitError, match=f"{expected_missing} is not"):
+        AWSService(bucket_name="test-bucket", aws_access_key=access, aws_secret_key=secret)
+
+
+def test_aws_service_no_bucket_name() -> None:
+    """Verify an empty bucket name fails before any client is built."""
+    # Given: a blank bucket name
+    # When: building the service
+    # Then: init fails on the bucket precondition
+    with pytest.raises(StorageInitError, match="No S3 bucket name provided"):
+        AWSService(bucket_name="")
+
+
+def test_blank_credentials_defer_to_ambient_chain(
+    s3_bucket: str,
+    filesystem: tuple[Path, Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify blank credential strings defer to the chain instead of signing as empty."""
+    # Given: blank credential strings, as a commented-out .env template produces
+    src_dir, _, _ = filesystem
+
+    # When: building an EZBak against the bucket with debug logging
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        log_level="debug",
+        aws_s3_bucket_name=s3_bucket,
+        aws_access_key="",
+        aws_secret_key="",
+    )
+
+    # Then: the ambient chain resolved rather than an explicit empty credential
+    assert app.aws_service is not None
+    output = capsys.readouterr().err
+    assert "resolved via 'env'" in output
+    assert "resolved via 'explicit'" not in output
+
+
+def test_mock_env_scrubs_ambient_aws_credentials() -> None:
+    """Verify the autouse environment fixture leaves no resolvable AWS credentials."""
+    # Given: the autouse mock_env fixture has already run
+    # When: inspecting the environment botocore would resolve from
+    # Then: no credential variables survive and the credential files point nowhere
+    assert "AWS_ACCESS_KEY_ID" not in os.environ
+    assert "AWS_SECRET_ACCESS_KEY" not in os.environ
+    assert os.environ["AWS_EC2_METADATA_DISABLED"] == "true"
+    assert not Path(os.environ["AWS_CONFIG_FILE"]).exists()
+    assert not Path(os.environ["AWS_SHARED_CREDENTIALS_FILE"]).exists()
+
+    # Then: boto3 therefore resolves nothing, so a credential-free client cannot
+    # silently authenticate as the developer running the suite
+    assert boto3.Session().get_credentials() is None

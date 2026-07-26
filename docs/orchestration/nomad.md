@@ -116,7 +116,11 @@ job "my-service" {
     the main task starts, so the data is in place first.
 2.  On a fresh deployment there is no backup yet. `EZBAK_SKIP_IF_NO_BACKUP`
     makes a missing backup a clean no-op so the job can still start. See [Fresh
-    deploys](fresh-deploys.md).
+    deploys](fresh-deploys.md). It does not cover a destination ezbak cannot
+    read: that still fails the task and blocks the job from starting, since a
+    real backup might exist there. See [An unreadable destination is not an
+    empty
+    one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
 3.  `hook = "poststart"` with `sidecar = true` keeps this task running alongside
     the service. `EZBAK_CRON` keeps the container up and backing up on schedule.
 4.  This cron runs hourly. A scheduled backup prunes afterward using the
@@ -155,6 +159,13 @@ backups reachable from any host the job lands on.
     The example shows a bucket name inline for clarity. In practice, source
     `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` from Nomad's Vault
     integration or a secrets store, not from a committed jobspec.
+
+    On a Nomad client running on EC2, an instance profile removes the key pair
+    entirely: attach an IAM role to the instance, drop `EZBAK_AWS_ACCESS_KEY` and
+    `EZBAK_AWS_SECRET_KEY` from every task's `env`, and ezbak authenticates as that
+    role. The role needs `s3:ListBucket` on the bucket plus `s3:GetObject`,
+    `s3:PutObject`, and `s3:DeleteObject` on its contents. See [Instance roles and
+    ambient credentials](../guides/s3.md#instance-roles-and-ambient-credentials).
 
 ## Forcing an on-demand backup
 

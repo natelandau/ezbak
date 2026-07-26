@@ -1,13 +1,18 @@
 """Configuration for pytest."""
 
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from loguru import logger
 from moto import mock_aws
+from pytest_mock import MockerFixture
+
+from ezbak.storage.aws import AWSService
 
 
 @pytest.fixture
@@ -57,13 +62,49 @@ def s3_bucket(monkeypatch: pytest.MonkeyPatch) -> Generator[str, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def mock_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock environment variables for testing."""
-    for k in os.environ:
-        if k.startswith("EZBAK_"):
-            monkeypatch.delenv(k, raising=False)
+    for k in [k for k in os.environ if k.startswith("EZBAK_")]:
+        monkeypatch.delenv(k, raising=False)
 
     monkeypatch.setenv("EZBAK_TZ", "Etc/UTC")
+
+    # The suite must resolve no AWS credentials of its own, so no test can reach a real
+    # bucket. Deletion precedes the sets below, which are themselves AWS_-prefixed. The
+    # s3_bucket fixture re-adds AWS_DEFAULT_REGION, and moto supplies its own fake keys,
+    # both after this fixture runs.
+    for k in [k for k in os.environ if k.startswith("AWS_")]:
+        monkeypatch.delenv(k, raising=False)
+
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-aws-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-aws-credentials"))
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+
+@pytest.fixture
+def break_s3_listing(mocker: MockerFixture) -> Callable[[], MagicMock]:
+    """Provide a callable that makes every AWSService.list_objects call fail with AccessDenied.
+
+    Breaking the listing on demand rather than at fixture setup lets a test store a
+    backup first and make the destination unreadable afterward. The returned mock lets a
+    test let the destination recover by clearing its ``side_effect``.
+
+    Returns:
+        Callable[[], MagicMock]: Call to patch `list_objects`; returns the patched mock.
+    """
+
+    def _break() -> MagicMock:
+        return mocker.patch.object(
+            AWSService,
+            "list_objects",
+            autospec=True,
+            side_effect=ClientError(
+                error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
+                operation_name="ListObjectsV2",
+            ),
+        )
+
+    return _break
 
 
 @pytest.fixture(autouse=True)

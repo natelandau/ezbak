@@ -30,11 +30,12 @@ These apply to every command and come before the subcommand name.
 | `--log-prefix` | | Prefix added to every log line. | |
 | `-v` / `-vv` | | Raise verbosity to `DEBUG` (`-v`) or `TRACE` (`-vv`). | `INFO` |
 
-!!! note "S3 credentials come from the environment"
+!!! note "No CLI flag for S3 credentials"
 
     The CLI has no flag for AWS credentials. Set `EZBAK_AWS_ACCESS_KEY` and
-    `EZBAK_AWS_SECRET_KEY` in the environment so secrets never pass through
-    `argv`. See [Back up to S3](../guides/s3.md).
+    `EZBAK_AWS_SECRET_KEY` in the environment so secrets never pass through the command
+    line, or leave both unset to use an instance role or any other credential source boto3
+    can find. See [Back up to S3](../guides/s3.md).
 
 ## create
 
@@ -66,6 +67,13 @@ Each entry includes the full `YYYYMMDDTHHMMSS` timestamp: local backups show the
 full path, S3 backups the object name. Pass that timestamp to
 `restore --restore-date` to restore that exact backup.
 
+If a configured destination cannot be read, `list` prints the backups it did
+find, then names the unreadable destinations and exits non-zero, instead of
+reporting that no backups exist. A destination that is readable and genuinely
+holds no backups still prints "No backups found" and exits `0`. See [An
+unreadable destination is not an empty
+one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
+
 ## prune
 
 Delete old backups according to your keep rules. Set one or more; a backup
@@ -83,6 +91,13 @@ choice.
 | `--keep-minutely` | `-S` | Minutely backups to keep. | |
 | `--dry-run` | | List what would be deleted without deleting. | `False` |
 | `--force` | | Skip the confirmation prompt and prune immediately. | `False` |
+
+If a configured destination cannot be read, `prune` skips it and logs an
+error, leaving its archives untouched, and exits `0`: pruning still
+completes on every destination that is reachable. Unlike `list`, an unreadable
+destination does not change prune's exit code. See [An unreadable destination
+is not an empty
+one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
 
 ```bash
 # Keep the 10 most recent
@@ -136,4 +151,4 @@ rule.
 | Code | Meaning |
 | --- | --- |
 | `0` | The command succeeded. A restore with `--skip-if-no-backup` and no backup, or with `--skip-if-populated` and a populated target, also exits `0`. |
-| `1` | The command failed: invalid configuration, a storage location that could not be used, or a restore that could not download or extract an archive. |
+| `1` | The command failed: invalid configuration, a storage location that could not be used or read, or a restore that could not download or extract an archive. `prune` is the exception: it skips a destination it cannot read and still exits `0`. |

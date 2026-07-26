@@ -84,8 +84,9 @@ See [Restore backups](restore.md) for the point-in-time matching rule and
 
 ## Back up to S3
 
-Pass `--s3-bucket` and provide credentials through the environment. The CLI has
-no credential flags, so secrets never land in your shell history.
+Pass `--s3-bucket` and, if the host has no credentials of its own, provide them
+through the environment. The CLI has no credential flags, so secrets never land
+in your shell history.
 
 ```bash
 export EZBAK_AWS_ACCESS_KEY="your-access-key"

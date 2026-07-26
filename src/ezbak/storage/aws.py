@@ -27,25 +27,31 @@ def is_missing_object_error(error: ClientError) -> bool:
 
 
 class AWSService:
-    """Manage file operations on Amazon S3 buckets with automatic credential validation."""
+    """Manage file operations on Amazon S3 buckets with a reachability check at init."""
 
     def __init__(
         self,
-        aws_access_key: str,
-        aws_secret_key: str,
+        *,
         bucket_name: str,
+        aws_access_key: str | None = None,
+        aws_secret_key: str | None = None,
         bucket_path: str | None = None,
         region: str | None = None,
         endpoint_url: str | None = None,
     ) -> None:
-        """Initialize AWS S3 client with credentials and validate bucket access.
+        """Initialize the S3 client and validate that the bucket is reachable.
 
-        Set up the S3 client with retry configuration and validate that the bucket exists and is accessible. Use this class when you need to perform file operations on a specific S3 bucket with predefined credentials.
+        Pass both `aws_access_key` and `aws_secret_key` to authenticate explicitly, or
+        neither to defer to boto3's credential chain, which covers an EC2 instance profile,
+        EKS IRSA, an ECS task role, `AWS_*` variables, and `~/.aws/credentials`. Use this
+        class when you need file operations on a specific S3 bucket.
 
         Args:
-            aws_access_key (str): The AWS access key ID.
-            aws_secret_key (str): The AWS secret access key.
             bucket_name (str): The target S3 bucket.
+            aws_access_key (str | None): The AWS access key ID. None defers to boto3's
+                credential chain. Defaults to None.
+            aws_secret_key (str | None): The AWS secret access key. None defers to boto3's
+                credential chain. Defaults to None.
             bucket_path (str | None): Key prefix within the bucket. Defaults to None.
             region (str | None): AWS region. None defers to boto3's standard resolution
                 (AWS_REGION/AWS_DEFAULT_REGION/~/.aws/config). Defaults to None.
@@ -53,39 +59,66 @@ class AWSService:
                 as MinIO. None uses the AWS default endpoint. Defaults to None.
 
         Raises:
-            StorageInitError: If the credentials are missing or the bucket cannot be accessed.
+            StorageInitError: If no bucket name is given, exactly one of the two
+                credentials is set, or the bucket cannot be accessed.
         """
         logger.debug("AWSService: Initializing")
 
-        self.aws_access_key = aws_access_key
-        self.aws_secret_key = aws_secret_key
         self.bucket_path = bucket_path or ""
         self.bucket = bucket_name
 
-        if not all([self.aws_access_key, self.aws_secret_key, self.bucket]):
-            msg = "AWS credentials are not set"
+        if not self.bucket:
+            msg = "No S3 bucket name provided"
             logger.error(msg)
             raise StorageInitError(msg)
 
-        # A blank value (common in .env templates) would reach boto3 as "" and build an
-        # invalid endpoint like "https://s3..amazonaws.com"; normalize to None to defer to
-        # boto3's standard resolution instead.
+        # A blank value (common in .env templates) would reach boto3 as "" and be signed as
+        # a real empty credential, so normalize to None to defer to boto3's own resolution.
+        # Same reason region and endpoint_url are normalized below.
+        access_key = aws_access_key or None
+        secret_key = aws_secret_key or None
         region = region or None
         endpoint_url = endpoint_url or None
 
-        # Construct the client inside the guard: a malformed endpoint (e.g. a missing scheme)
-        # makes boto3 raise ValueError at construction, which must surface as a StorageInitError
-        # so core.py records a failed storage location instead of escaping as a raw traceback.
+        # boto3.Session gates credential setup on any(), so unlike boto3.client it never
+        # raises PartialCredentialsError; a half-set pair would silently become
+        # Credentials(key, None) and fail much later at signing time.
+        if bool(access_key) != bool(secret_key):
+            present, missing = (
+                ("aws_access_key", "aws_secret_key")
+                if access_key
+                else ("aws_secret_key", "aws_access_key")
+            )
+            msg = (
+                f"{present} is set but {missing} is not; set both to use explicit "
+                "credentials, or neither to use the ambient AWS credential chain"
+            )
+            logger.error(msg)
+            raise StorageInitError(msg)
+
+        # Construct inside the try: a malformed endpoint (e.g. a missing scheme) makes
+        # boto3 raise ValueError, an unreadable ~/.aws/config raises ProfileNotFound, and an
+        # unresolvable chain raises NoCredentialsError. All must surface as StorageInitError
+        # so core.py records a failed storage location instead of escaping as a traceback.
         try:
-            self.s3 = boto3.client(
-                "s3",
-                aws_access_key_id=self.aws_access_key,
-                aws_secret_access_key=self.aws_secret_key,
+            session = boto3.Session(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
                 region_name=region,
+            )
+            resolved = session.get_credentials()
+            logger.debug(
+                f"AWSService: S3 credentials resolved via '{resolved.method if resolved else 'none'}'"
+            )
+            self.s3 = session.client(
+                "s3",
                 endpoint_url=endpoint_url,
                 config=Config(retries={"max_attempts": 10, "mode": "standard"}),
             )
-            self.location = self.s3.get_bucket_location(Bucket=self.bucket)  # Ex. us-east-1
+            # HeadBucket is authorized by s3:ListBucket, which every ezbak operation already
+            # requires. GetBucketLocation is a separate action that scoped instance-role
+            # policies routinely omit, and AWS no longer recommends it for this purpose.
+            self.s3.head_bucket(Bucket=self.bucket)
         except (BotoCoreError, ClientError, ValueError) as e:
             msg = f"Cannot access S3 bucket '{self.bucket}': {e}"
             logger.error(msg)
@@ -230,20 +263,18 @@ class AWSService:
             prefix (str, optional): The prefix to filter object keys by. If empty, return all objects.
 
         Returns:
-            list[str]: A list of S3 object keys that match the specified prefix.
+            list[str]: A list of S3 object keys that match the specified prefix. Botocore
+                errors propagate to the caller, so an empty list always means "no matching
+                objects" and never "the listing failed".
         """
         full_prefix = self.build_full_key(prefix)
         object_keys: list[str] = []
 
         logger.trace(f"S3: Attempting to list objects with prefix '{full_prefix}'")
-        try:
-            paginator = self.s3.get_paginator("list_objects_v2")
-            pages = paginator.paginate(Bucket=self.bucket, Prefix=full_prefix)
-            for page in pages:
-                object_keys.extend(obj["Key"] for obj in page.get("Contents", []))
-        except ClientError as e:
-            logger.error(f"Failed to list objects with prefix '{prefix}': {e}")
-            return []
+        paginator = self.s3.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=self.bucket, Prefix=full_prefix)
+        for page in pages:
+            object_keys.extend(obj["Key"] for obj in page.get("Contents", []))
 
         logger.trace(f"S3: Listed {len(object_keys)} objects with prefix '{full_prefix}'")
         return object_keys

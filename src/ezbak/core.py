@@ -33,6 +33,7 @@ from ezbak.exceptions import (
     RestoreFailedError,
     StorageDeleteError,
     StorageInitError,
+    StorageReadError,
     StorageWriteError,
 )
 from ezbak.filters import (
@@ -373,8 +374,10 @@ class EZBak:
 
         self.aws_service: AWSService | None = None
         self._storage_locations: list[StorageLocation] = []
+        self._storage_locations_indexed = False
         self.rebuild_storage_locations = False
         self._failed_storage_locations: list[str] = []
+        self._index_failures: list[str] = []
 
         # TemporaryDirectory registers its own finalizer, so the staging dir is removed
         # when this EZBak is garbage-collected or the process exits. Registering an extra
@@ -383,7 +386,21 @@ class EZBak:
         self._tmp_dir_handle = TemporaryDirectory()
         self.tmp_dir = Path(self._tmp_dir_handle.name)
 
+        self._build_backends()
+
+    def _build_backends(self) -> None:
+        """Construct one backend per configured destination, recording those that fail.
+
+        Re-runnable, and re-run on every index pass: a destination that was unusable at
+        startup (a not-yet-ready network, an instance role whose credentials had not
+        landed) would otherwise stay broken for the life of the process, which for the
+        container is the life of the job. A destination that failed here is dropped from
+        `self.backends` and recorded instead, so create_backup fails loudly for it and a
+        restore refuses to run.
+        """
+        self._failed_storage_locations = []
         self.backends: list[StorageBackend] = []
+
         if self.settings.storage_paths:
             try:
                 # Create/validate the local directories up front so an unusable path
@@ -398,21 +415,25 @@ class EZBak:
                 self.backends.append(LocalBackend(self.settings))
 
         if self.settings.aws_s3_bucket_name:
-            try:
-                self.aws_service = AWSService(
-                    aws_access_key=self.settings.aws_access_key,
-                    aws_secret_key=self.settings.aws_secret_key,
-                    bucket_name=self.settings.aws_s3_bucket_name,
-                    bucket_path=self.settings.aws_s3_bucket_prefix,
-                    region=self.settings.aws_region,
-                    endpoint_url=self.settings.aws_s3_endpoint_url,
-                )
-            except StorageInitError:
-                # AWSService already logged the failure at the raise site; just record
-                # the storage location so create_backup fails loudly for it.
-                self._failed_storage_locations.append(
-                    f"S3 bucket '{self.settings.aws_s3_bucket_name}'"
-                )
+            # Only build the client when there is none: AWSService verifies the bucket
+            # over the network at construction, a round trip a healthy backend must not
+            # repeat on every index pass.
+            if self.aws_service is None:
+                try:
+                    self.aws_service = AWSService(
+                        aws_access_key=self.settings.aws_access_key,
+                        aws_secret_key=self.settings.aws_secret_key,
+                        bucket_name=self.settings.aws_s3_bucket_name,
+                        bucket_path=self.settings.aws_s3_bucket_prefix,
+                        region=self.settings.aws_region,
+                        endpoint_url=self.settings.aws_s3_endpoint_url,
+                    )
+                except StorageInitError:
+                    # AWSService already logged the failure at the raise site; just record
+                    # the storage location so create_backup fails loudly for it.
+                    self._failed_storage_locations.append(
+                        f"S3 bucket '{self.settings.aws_s3_bucket_name}'"
+                    )
 
             if self.aws_service:
                 self.backends.append(
@@ -432,16 +453,83 @@ class EZBak:
         Returns:
             list[StorageLocation]: A list of StorageLocation objects containing discovered backups.
         """
-        if not self.rebuild_storage_locations and self._storage_locations:
+        # Gate on an explicit flag rather than list truthiness: a failed index pass
+        # leaves self._storage_locations empty on purpose, and list truthiness would
+        # read that as "never indexed" and re-run the pass (and its failing network
+        # calls) on every access instead of caching the failure like a successful pass.
+        if not self.rebuild_storage_locations and self._storage_locations_indexed:
             return self._storage_locations
 
         logger.trace(f"Indexing storage locations for: {self.settings.name}")
-        self._storage_locations = [
-            location for backend in self.backends for location in backend.index()
-        ]
+        # Retry the destinations that could not even be constructed, for the same reason
+        # the failure lists below are rebuilt rather than appended.
+        self._build_backends()
+
+        # Rebuilt every pass rather than appended: the container reuses one EZBak for its
+        # whole lifetime, so a failure recorded permanently would keep failing every later
+        # run after the destination recovered.
+        self._index_failures = []
+        self._storage_locations = []
+        for backend in self.backends:
+            try:
+                self._storage_locations.extend(backend.index())
+            except (StorageReadError, OSError) as e:
+                # A destination that cannot be enumerated must not read as "no backups":
+                # record it so create_backup fails loudly and a restore refuses to run.
+                label = self._backend_label(backend)
+                logger.error(f"Could not index {label}: {e}")
+                self._index_failures.append(label)
         logger.trace(f"Indexed {len(self._storage_locations)} storage locations")
         self.rebuild_storage_locations = False
+        self._storage_locations_indexed = True
         return self._storage_locations
+
+    def _backend_label(self, backend: StorageBackend) -> str:
+        """Name a backend's destination the way a failure report should refer to it.
+
+        One vocabulary for every stage, so a destination that fails to index and then
+        fails to write is reported under a single name rather than two.
+
+        Args:
+            backend (StorageBackend): The backend to name.
+
+        Returns:
+            str: The destination name used in failure messages.
+        """
+        if backend.storage_type is StorageType.AWS:
+            return f"S3 bucket '{self.settings.aws_s3_bucket_name}'"
+        return "local storage paths"
+
+    def _unreadable_locations(self) -> list[str]:
+        """Every configured destination ezbak could not use or enumerate.
+
+        A destination that fails during construction is dropped from `self.backends`, so
+        it never reaches an index pass; unioning the two records is what keeps such a
+        destination visible to the guards instead of silently absent. Deduplicated as
+        cheap insurance, since a backend that failed construction cannot also fail
+        indexing.
+
+        Returns:
+            list[str]: Names of the unusable and unreadable storage locations.
+        """
+        return list(dict.fromkeys(self._failed_storage_locations + self._index_failures))
+
+    @property
+    def unreadable_locations(self) -> list[str]:
+        """Destinations ezbak could not use or enumerate.
+
+        Consult this alongside `list_backups`: a non-empty result means the inventory is
+        incomplete, so a backup absent from the list may still exist in a destination that
+        could not be read.
+
+        Returns:
+            list[str]: Names of the storage locations that could not be used or read.
+        """
+        # Touch the index first; the index failures only describe a completed pass.
+        _ = self.storage_locations
+
+        # dict.fromkeys builds a fresh list, so a caller cannot edit the manager's record.
+        return self._unreadable_locations()
 
     def _create_tmp_backup_file(self) -> tuple[Path, str | None] | None:
         """Create a temporary backup file in the temporary directory.
@@ -789,6 +877,11 @@ class EZBak:
         """
         validate_source_paths(source_paths=self.settings.source_paths)
 
+        # Index fresh: this run reports the recorded index failures as its own failures
+        # and names the new archive against the backups that exist now, so a pass cached
+        # from an earlier moment must not decide either.
+        self.rebuild_storage_locations = True
+
         logger.trace("Creating new backup")
         result = self._create_tmp_backup_file()
         if result is None:
@@ -813,7 +906,9 @@ class EZBak:
         # A storage location that was requested but unusable (bad creds) or that failed
         # mid-write must fail the run loudly. Raise only after writing to healthy
         # storage locations so their backups are preserved.
-        failed_storage_locations = self._failed_storage_locations + write_failures
+        failed_storage_locations = (
+            self._failed_storage_locations + self._index_failures + write_failures
+        )
         if failed_storage_locations:
             # Attach the backups that did land so a library caller can observe the
             # copies that succeeded even though the run as a whole failed.
@@ -832,7 +927,9 @@ class EZBak:
         """Write the staged archive to every configured destination, tolerating per-backend failures.
 
         Use this to attempt every destination independently so one unhealthy backend
-        does not block backups from being written to the others.
+        does not block backups from being written to the others. Destinations come from
+        the backends rather than from the index, so a destination that could not be
+        enumerated still receives the archive.
 
         Args:
             tmp_backup (Path): The staged tar.gz archive to distribute.
@@ -845,21 +942,33 @@ class EZBak:
         """
         created_backups: list[Backup] = []
         write_failures: list[str] = []
+        indexed_locations = self.storage_locations
 
-        for storage_location in self.storage_locations:
-            backend = self._backend_for_type(storage_location.storage_type)
-            try:
-                created_backups.append(
-                    backend.write(
-                        tmp_backup=tmp_backup,
-                        storage_location=storage_location,
-                        checksum=checksum,
+        for backend in self.backends:
+            # Fall back to the configured destinations when the index pass produced
+            # none for this backend, so a bucket that could not be listed still
+            # receives the archive: listing and writing are separate requests, one can
+            # fail while the other succeeds, and an S3-only final backup gets no retry.
+            index_failed = self._backend_label(backend) in self._index_failures
+            locations = [
+                x for x in indexed_locations if x.storage_type is backend.storage_type
+            ] or backend.write_locations()
+            for storage_location in locations:
+                try:
+                    created_backups.append(
+                        backend.write(
+                            tmp_backup=tmp_backup,
+                            storage_location=storage_location,
+                            checksum=checksum,
+                        )
                     )
-                )
-            except StorageWriteError:
-                # The backend already logged the failure with its destination context;
-                # just record it so create_backup fails loudly after the loop.
-                write_failures.append(str(storage_location.logging_name))
+                except StorageWriteError:
+                    # The backend already logged the failure with its destination context;
+                    # just record it so create_backup fails loudly after the loop. A
+                    # destination whose index already failed is recorded under that label,
+                    # so naming it again here would report one failure as two.
+                    if not index_failed:
+                        write_failures.append(str(storage_location.logging_name))
 
         return created_backups, write_failures
 
@@ -1054,6 +1163,60 @@ class EZBak:
         else:
             logger.error(message)
 
+    def _assert_all_locations_readable(self) -> None:
+        """Raise when a configured destination could not be used or enumerated.
+
+        Use before selecting a backup to restore: a destination that could not be read
+        must fail the restore rather than report "no backup", which skip_if_no_backup
+        would otherwise absorb into a successful start with no data staged.
+
+        Raises:
+            RestoreFailedError: If any configured storage location is unreadable.
+        """
+        # Touch the index first; the index failures only describe a completed pass.
+        _ = self.storage_locations
+
+        if unreadable := self._unreadable_locations():
+            locations = ", ".join(unreadable)
+            msg = f"Cannot determine available backups; could not read: {locations}"
+            logger.error(msg)
+            raise RestoreFailedError(msg)
+
+    def _select_restore_target(self, restore_date: str) -> Backup | None:
+        """Pick the backup a non-explicit restore should use, or None when nothing matches.
+
+        Covers both ways `restore_backup` selects a target when the caller did not
+        supply one directly: a configured point in time, or otherwise the latest
+        backup. Centralizing them here gives the destination-readability check one call
+        site that both share, rather than one the reader must confirm is reached by
+        every path that needs it.
+
+        Args:
+            restore_date (str): A point in time to restore as of, or "" for the latest backup.
+
+        Returns:
+            Backup | None: The selected backup, or None when no backup matches.
+
+        Raises:
+            RestoreFailedError: If a configured storage location could not be read to
+                determine which backups exist.
+        """  # ruff:ignore[docstring-extraneous-exception]
+        self._assert_all_locations_readable()
+
+        if restore_date:
+            target = self.get_backup_as_of(restore_date)
+            if target is None:
+                # Fail rather than silently falling back to the newest backup, which would
+                # restore the wrong data. A miss is a failure for a plain restore but a
+                # tolerated no-op when skip_if_no_backup is set (like the latest branch).
+                self._log_no_backup(f"No backup at or before {restore_date}")
+            return target
+
+        target = self.get_latest_backup()
+        if target is None:
+            self._log_no_backup("No backup found to restore")
+        return target
+
     def prune_backups(self, *, dry_run: bool = False) -> list[Backup]:
         """Remove old backup files according to configured retention policies to manage storage usage.
 
@@ -1123,7 +1286,7 @@ class EZBak:
 
         Raises:
             ConfigurationError: If no restore path is provided and none is configured, the restore path does not exist or is not a directory, or the restore path overlaps a storage location.
-            RestoreFailedError: If the backup archive is missing or corrupt, extraction fails, or the restore target cannot be read to check whether it is populated.
+            RestoreFailedError: If the backup archive is missing or corrupt, extraction fails, the restore target cannot be read to check whether it is populated, or a configured storage location could not be read to determine which backups exist.
         """  # ruff:ignore[docstring-extraneous-exception]
         target_path = restore_path or self.settings.restore_path
 
@@ -1174,18 +1337,9 @@ class EZBak:
         # clean_before_restore never empties the restore path with nothing to restore.
         if backup is not None:
             target = backup
-        elif restore_date:
-            target = self.get_backup_as_of(restore_date)
-            if target is None:
-                # Fail rather than silently falling back to the newest backup, which would
-                # restore the wrong data. A miss is a failure for a plain restore but a
-                # tolerated no-op when skip_if_no_backup is set (like the latest branch).
-                self._log_no_backup(f"No backup at or before {restore_date}")
-                return RestoreOutcome.NO_BACKUP
         else:
-            target = self.get_latest_backup()
+            target = self._select_restore_target(restore_date)
             if target is None:
-                self._log_no_backup("No backup found to restore")
                 return RestoreOutcome.NO_BACKUP
 
         # _do_restore returns True or raises RestoreFailedError; a return means success.

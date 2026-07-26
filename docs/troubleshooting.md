@@ -23,16 +23,49 @@ On a fresh deployment with no backup yet, this is expected. Set
 `EZBAK_SKIP_IF_NO_BACKUP=true` (CLI `--skip-if-no-backup`) so it exits cleanly. See
 [Fresh deploys](orchestration/fresh-deploys.md).
 
+If the restore fails outright instead, a non-zero exit with a logged error
+rather than a clean no-op, the destination could not be read at all: a bad
+credential, an unreachable bucket, or a permission error.
+`EZBAK_SKIP_IF_NO_BACKUP` does not cover that case. See [An unreadable
+destination is not an empty
+one](concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
+
 ## A backup fails with bad S3 credentials or an unreachable bucket
 
 ezbak validates each storage location before reporting success, so a bad bucket or
 credential fails the run.
 
 - Check `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` are set in the
-  environment. The CLI never takes credentials as flags.
+  environment, or both unset to use the host's own credentials. The CLI never
+  takes credentials as flags.
 - Check `EZBAK_AWS_S3_BUCKET_NAME` names a bucket the credentials can reach.
 - If you configured both local and S3 storage, the local copy still succeeds; only
   the S3 write fails. See [Failure behavior](concepts/failure-behavior.md).
+
+### S3 authentication fails on EC2 or in Kubernetes
+
+- Run with `EZBAK_LOG_LEVEL=debug` and look for `S3 credentials resolved via '...'`. A
+  provider of `none` means nothing resolved at all.
+- Set both `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY`, or neither. A half-set pair
+  fails at startup and names the missing setting.
+- On Docker with bridge networking, the instance metadata service is unreachable by
+  default: the IMDSv2 hop limit of 1 stops the container's request from reaching
+  `169.254.169.254`. Raise the instance's
+  `--http-put-response-hop-limit` to 2, or use host networking.
+- The role needs `s3:ListBucket` on the bucket. ezbak verifies access with `HeadBucket`,
+  which that permission covers.
+- A destination ezbak could not reach at startup is retried on every later run, so a cron
+  sidecar recovers on its next scheduled backup once the role attaches or the network comes
+  up. Restarting the container is not needed.
+
+## A prune left old backups in one destination
+
+A destination `prune` cannot read is skipped, not pruned, so backups beyond
+your retention rules can remain there. This does not fail the prune or change
+its exit code, so check the logs for the error naming the skipped
+destination, then fix the same credential or connectivity issue described
+above. See [An unreadable destination is not an empty
+one](concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
 
 ## Backup timestamps are in the wrong timezone
 
