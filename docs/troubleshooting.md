@@ -54,6 +54,9 @@ credential fails the run.
   `--http-put-response-hop-limit` to 2, or use host networking.
 - The role needs `s3:ListBucket` on the bucket. ezbak verifies access with `HeadBucket`,
   which that permission covers.
+- A destination ezbak could not reach at startup is retried on every later run, so a cron
+  sidecar recovers on its next scheduled backup once the role attaches or the network comes
+  up. Restarting the container is not needed.
 
 ## A prune left old backups in one destination
 

@@ -386,7 +386,21 @@ class EZBak:
         self._tmp_dir_handle = TemporaryDirectory()
         self.tmp_dir = Path(self._tmp_dir_handle.name)
 
+        self._build_backends()
+
+    def _build_backends(self) -> None:
+        """Construct one backend per configured destination, recording those that fail.
+
+        Re-runnable, and re-run on every index pass: a destination that was unusable at
+        startup (a not-yet-ready network, an instance role whose credentials had not
+        landed) would otherwise stay broken for the life of the process, which for the
+        container is the life of the job. A destination that failed here is dropped from
+        `self.backends` and recorded instead, so create_backup fails loudly for it and a
+        restore refuses to run.
+        """
+        self._failed_storage_locations = []
         self.backends: list[StorageBackend] = []
+
         if self.settings.storage_paths:
             try:
                 # Create/validate the local directories up front so an unusable path
@@ -401,21 +415,25 @@ class EZBak:
                 self.backends.append(LocalBackend(self.settings))
 
         if self.settings.aws_s3_bucket_name:
-            try:
-                self.aws_service = AWSService(
-                    aws_access_key=self.settings.aws_access_key,
-                    aws_secret_key=self.settings.aws_secret_key,
-                    bucket_name=self.settings.aws_s3_bucket_name,
-                    bucket_path=self.settings.aws_s3_bucket_prefix,
-                    region=self.settings.aws_region,
-                    endpoint_url=self.settings.aws_s3_endpoint_url,
-                )
-            except StorageInitError:
-                # AWSService already logged the failure at the raise site; just record
-                # the storage location so create_backup fails loudly for it.
-                self._failed_storage_locations.append(
-                    f"S3 bucket '{self.settings.aws_s3_bucket_name}'"
-                )
+            # Only build the client when there is none: AWSService verifies the bucket
+            # over the network at construction, a round trip a healthy backend must not
+            # repeat on every index pass.
+            if self.aws_service is None:
+                try:
+                    self.aws_service = AWSService(
+                        aws_access_key=self.settings.aws_access_key,
+                        aws_secret_key=self.settings.aws_secret_key,
+                        bucket_name=self.settings.aws_s3_bucket_name,
+                        bucket_path=self.settings.aws_s3_bucket_prefix,
+                        region=self.settings.aws_region,
+                        endpoint_url=self.settings.aws_s3_endpoint_url,
+                    )
+                except StorageInitError:
+                    # AWSService already logged the failure at the raise site; just record
+                    # the storage location so create_backup fails loudly for it.
+                    self._failed_storage_locations.append(
+                        f"S3 bucket '{self.settings.aws_s3_bucket_name}'"
+                    )
 
             if self.aws_service:
                 self.backends.append(
@@ -443,6 +461,10 @@ class EZBak:
             return self._storage_locations
 
         logger.trace(f"Indexing storage locations for: {self.settings.name}")
+        # Retry the destinations that could not even be constructed, for the same reason
+        # the failure lists below are rebuilt rather than appended.
+        self._build_backends()
+
         # Rebuilt every pass rather than appended: the container reuses one EZBak for its
         # whole lifetime, so a failure recorded permanently would keep failing every later
         # run after the destination recovered.
@@ -855,6 +877,11 @@ class EZBak:
         """
         validate_source_paths(source_paths=self.settings.source_paths)
 
+        # Index fresh: this run reports the recorded index failures as its own failures
+        # and names the new archive against the backups that exist now, so a pass cached
+        # from an earlier moment must not decide either.
+        self.rebuild_storage_locations = True
+
         logger.trace("Creating new backup")
         result = self._create_tmp_backup_file()
         if result is None:
@@ -920,8 +947,8 @@ class EZBak:
         for backend in self.backends:
             # Fall back to the configured destinations when the index pass produced
             # none for this backend, so a bucket that could not be listed still
-            # receives the archive: ListBucket and PutObject are separate permissions
-            # and separate requests, and an S3-only final backup gets no retry.
+            # receives the archive: listing and writing are separate requests, one can
+            # fail while the other succeeds, and an S3-only final backup gets no retry.
             index_failed = self._backend_label(backend) in self._index_failures
             locations = [
                 x for x in indexed_locations if x.storage_type is backend.storage_type

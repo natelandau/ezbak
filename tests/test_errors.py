@@ -14,6 +14,7 @@ from ezbak.exceptions import (
     BackupFailedError,
     ConfigurationError,
     RestoreFailedError,
+    StorageInitError,
     StorageReadError,
     StorageWriteError,
 )
@@ -704,3 +705,48 @@ def test_create_backup_names_a_failed_destination_once(
 
     # Then one destination failing once reads as one failure, not two
     assert exc.value.failed_storage_locations == [f"S3 bucket '{s3_bucket}'"]
+
+
+def test_unusable_destination_is_rebuilt_after_it_recovers(
+    s3_bucket: str, filesystem, mocker
+) -> None:
+    """Verify a destination that could not be constructed is retried on a later pass."""
+    # Given: a bucket unreachable for the first two attempts, as a container starting
+    # before its network or instance role is ready would see
+    src_dir, _, _ = filesystem
+    recovered = AWSService(bucket_name=s3_bucket)
+    mocker.patch(
+        "ezbak.core.AWSService",
+        side_effect=[StorageInitError("unreachable"), StorageInitError("unreachable"), recovered],
+    )
+    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    assert app.aws_service is None
+    assert app.unreadable_locations == [f"S3 bucket '{s3_bucket}'"]
+
+    # When the destination recovers and a later scheduled run indexes again
+    # Then the backend is rebuilt rather than staying broken for the process's lifetime
+    assert app.create_backup()
+    assert app.unreadable_locations == []
+
+
+def test_create_backup_does_not_report_a_stale_index_failure(
+    s3_bucket: str, filesystem, break_s3_listing
+) -> None:
+    """Verify a backup run reports the index failures of its own pass, not a cached one."""
+    # Given: an app that indexed while the bucket could not be listed
+    src_dir, dest1, _ = filesystem
+    app = ezbak(
+        name="test",
+        source_paths=[src_dir],
+        storage_paths=[dest1],
+        aws_s3_bucket_name=s3_bucket,
+    )
+    mock_list = break_s3_listing()
+    assert app.unreadable_locations == [f"S3 bucket '{s3_bucket}'"]
+
+    # When the bucket recovers before the backup runs
+    mock_list.side_effect = None
+    mock_list.return_value = []
+
+    # Then the run indexes again and succeeds instead of failing on the cached record
+    assert app.create_backup()

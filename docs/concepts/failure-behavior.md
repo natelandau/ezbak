@@ -39,9 +39,9 @@ exits non-zero rather than reporting success. The same distinction carries
 through the rest of ezbak:
 
 - A backup run still writes the archive to a destination it could not read,
-  then fails the run and names it. Reading a destination and writing to it are
-  separate permissions and separate requests, so a listing failure is no reason
-  to withhold the archive.
+  then fails the run and names it. Listing a destination and writing to it are
+  separate requests, so a listing that fails on a destination ezbak already
+  reached is no reason to withhold the archive.
 - A restore fails with `RestoreFailedError` rather than reporting that no
   backup matched.
 - A prune skips the unreadable destination and logs an error, leaving its

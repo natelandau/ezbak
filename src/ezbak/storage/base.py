@@ -112,10 +112,10 @@ class StorageBackend(ABC):
     def write_locations(self) -> list[StorageLocation]:
         """Return the destinations to write to, derived from configuration alone.
 
-        Implementations must not enumerate stored backups, so a destination that
-        cannot be listed can still be written to; listing and writing are separate
-        permissions and separate requests. The returned locations carry no backups,
-        so a generated name is disambiguated against nothing.
+        Implementations must not enumerate stored backups, so a destination whose
+        listing failed can still be written to; listing and writing are separate
+        requests. The returned locations carry no backups, so a generated name is
+        disambiguated against nothing.
         """
 
     @abstractmethod
