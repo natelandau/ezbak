@@ -2,16 +2,16 @@
 icon: lucide/heart-pulse
 ---
 
-# Monitoring scheduled runs
+# Monitoring runs
 
-A scheduled backup that fails quietly is a backup tool's worst failure mode: you
-find out only when you need the backup that was never made. ezbak pings a
-healthcheck monitor after every scheduled run, so a silent failure gets noticed.
+A backup that fails silently is a backup tool's worst failure mode: you find out
+only when you need the backup that was never made. ezbak pings a healthcheck
+monitor after every run, so a failure gets noticed.
 
 ## How the ping works
 
-Set `EZBAK_HEALTHCHECK_URL` on a scheduled container. After each run, ezbak pings
-that URL:
+Set `EZBAK_HEALTHCHECK_URL` on any container. After each run, ezbak pings that
+URL:
 
 - On success, it pings the base URL.
 - On failure, it pings the URL with `/fail` appended.
@@ -22,7 +22,7 @@ catches both a run that failed and a container that stopped running altogether.
 
 ```mermaid
 sequenceDiagram
-    participant E as ezbak (scheduled)
+    participant E as ezbak
     participant M as Healthcheck monitor
     E->>E: run backup
     alt success
@@ -58,10 +58,17 @@ docker run -d \
     period to cover the jitter plus the backup's own runtime. Tune the spread with
     `EZBAK_CRON_JITTER` (seconds).
 
-## What it does and does not cover
+## What it covers
 
-The ping applies only to scheduled runs. A one-shot container reports its result
-through its exit code instead, which the orchestrator already sees.
+Every run pings, scheduled or one-shot. That includes the post-stop backup and
+the pre-start restore in an orchestrated deployment, so a failure in either is
+visible without reading container logs.
+
+A one-shot container also reports its result through its exit code, which the
+orchestrator already sees. A failed run exits non-zero and pings `/fail`. A
+container that never gets as far as a run, because its configuration is invalid
+or `EZBAK_ACTION` is unset, exits non-zero without pinging, so the exit code stays
+the broader signal.
 
 !!! info "Monitoring never breaks the backup"
 

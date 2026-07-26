@@ -57,7 +57,9 @@ The same failure surfaces three ways.
 === "Container (one-shot)"
 
     A one-shot run (`EZBAK_ACTION` without `EZBAK_CRON`) exits non-zero on
-    failure, the same as the CLI. An orchestrator sees the exit code.
+    failure, the same as the CLI. An orchestrator sees the exit code. It also
+    pings the failure endpoint when `EZBAK_HEALTHCHECK_URL` is set. See
+    [Monitoring](../orchestration/monitoring.md).
 
 === "Container (scheduled)"
 

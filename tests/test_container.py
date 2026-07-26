@@ -744,7 +744,7 @@ def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
     _run_shutdown_backup(app, scheduler, config, threading.Lock())
 
     # Then the final backup runs through the same path as a scheduled run
-    mock_report.assert_called_once_with(app, scheduler, config, do_backup)
+    mock_report.assert_called_once_with(app, config, do_backup, scheduler)
 
 
 def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
@@ -964,6 +964,97 @@ def test_run_scheduled_pings_failure(filesystem, mocker):
     _run_scheduled(app, scheduler, config, run, threading.Lock())
 
     # Then it pings for failure
+    mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
+
+
+def test_entrypoint_one_shot_backup_pings_success(filesystem, mocker):
+    """Verify a one-shot backup pings the success URL so a post-stop task is observable."""
+    # Given a one-shot backup container with a healthcheck URL
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
+
+    # When running the entrypoint
+    entrypoint()
+
+    # Then it pings for success
+    mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
+
+
+def test_entrypoint_one_shot_backup_pings_failure(filesystem, mocker):
+    """Verify a failed one-shot backup pings the failure URL and still exits non-zero."""
+    # Given a one-shot backup container whose pre-backup hook aborts the run
+    src_dir, dest1, _ = filesystem
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "backup"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    os.environ["EZBAK_PRE_BACKUP_HOOK"] = "exit 1"
+    mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
+
+    # When running the entrypoint
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+
+    # Then it pings for failure and the exit code still reports the failure
+    assert exc_info.value.code == 1
+    mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
+
+
+def test_entrypoint_one_shot_restore_pings_success(filesystem, mocker, tmp_path):
+    """Verify a one-shot restore pings the success URL so a pre-start task is observable."""
+    # Given a restorable backup and a one-shot restore container with a healthcheck URL
+    src_dir, dest1, _ = filesystem
+    shutil.copy2(fixture_archive_path, dest1 / f"test-{frozen_time_str}-yearly.tgz")
+    restore_path = tmp_path / "restore"
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
+
+    # When running the entrypoint
+    entrypoint()
+
+    # Then it pings for success
+    mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
+
+
+def test_entrypoint_one_shot_restore_pings_failure(filesystem, mocker, tmp_path):
+    """Verify a failed one-shot restore pings the failure URL and still exits non-zero."""
+    # Given a corrupt archive, so the restore fails rather than finding no backup
+    src_dir, dest1, _ = filesystem
+    (dest1 / f"test-{frozen_time_str}-yearly.tgz").write_bytes(b"not a tarball")
+    restore_path = tmp_path / "restore"
+    restore_path.mkdir(exist_ok=True)
+
+    os.environ["EZBAK_NAME"] = "test"
+    os.environ["EZBAK_ACTION"] = "restore"
+    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
+    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
+    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
+    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
+
+    # When running the entrypoint
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint()
+
+    # Then it pings for failure and the exit code still reports the failure
+    assert exc_info.value.code == 1
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
 
 

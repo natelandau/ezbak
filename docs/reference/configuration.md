@@ -183,8 +183,8 @@ have no CLI flag.
 `EZBAK_ACTION` is `backup` or `restore` and is required to run the container.
 `EZBAK_CRON_JITTER` sets the seconds of random delay added to each scheduled run,
 so a fleet sharing one cron does not hit a destination at the same instant; set
-`0` to disable it. `EZBAK_HEALTHCHECK_URL` pings a monitor after each scheduled
-run. See [Monitoring](../orchestration/monitoring.md).
+`0` to disable it. `EZBAK_HEALTHCHECK_URL` pings a monitor after each run,
+scheduled or one-shot. See [Monitoring](../orchestration/monitoring.md).
 `EZBAK_BACKUP_ON_SHUTDOWN` takes one final backup when a cron backup container
 receives `SIGTERM` or `SIGINT`; see [Final backup on
 shutdown](../guides/docker.md#final-backup-on-shutdown). The four hook variables

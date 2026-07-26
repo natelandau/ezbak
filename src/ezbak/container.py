@@ -68,12 +68,12 @@ def do_backup(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | No
 
 
 def _ping_healthcheck(url: str | None, *, failed: bool) -> None:
-    """Signal an external monitor with the outcome of a scheduled run.
+    """Signal an external monitor with the outcome of a run.
 
-    A silently failed cron backup is a backup tool's worst failure mode, so ping a
+    A silently failed backup is a backup tool's worst failure mode, so ping a
     healthcheck monitor (Healthchecks.io convention: the base URL on success, the URL
-    plus ``/fail`` on failure). Any ping error is swallowed so monitoring can never
-    break or fail a backup run.
+    plus ``/fail`` on failure). Scheduled, shutdown, and one-shot runs all ping. Any
+    ping error is swallowed so monitoring can never break or fail a backup run.
     """
     if not url:
         return
@@ -135,36 +135,43 @@ def do_restore(app: EZBak, config: EnvConfig, scheduler: BackgroundScheduler | N
 
 def _run_and_report(
     app: EZBak,
-    scheduler: BackgroundScheduler,
     config: EnvConfig,
-    run: Callable[[EZBak, EnvConfig, BackgroundScheduler], None],
-) -> None:
-    """Run a backup or restore, signaling the outcome without stopping the scheduler.
+    run: Callable[[EZBak, EnvConfig, BackgroundScheduler | None], None],
+    scheduler: BackgroundScheduler | None = None,
+) -> bool:
+    """Run a backup or restore, signaling the outcome without raising.
 
     APScheduler routes a job exception through the stdlib logging system, which bypasses
     the loguru sink this app configures, so catch it here and log it via loguru instead,
-    then ping the healthcheck monitor with the run's success or failure.
+    then ping the healthcheck monitor with the run's success or failure. One-shot runs
+    share this path so a post-stop backup or pre-start restore is as observable as a
+    cron tick; they act on the returned outcome to set their exit status.
 
     Args:
         app (EZBak): The configured backup manager.
-        scheduler (BackgroundScheduler): The scheduler owning the run.
         config (EnvConfig): The container configuration.
         run (Callable): The action to perform, `do_backup` or `do_restore`.
+        scheduler (BackgroundScheduler | None): The scheduler owning the run, if any.
+
+    Returns:
+        bool: True if the run failed.
     """
     try:
         run(app, config, scheduler)
     except EZBakError as e:
         logger.error(e)
         _ping_healthcheck(config.healthcheck_url, failed=True)
-    else:
-        _ping_healthcheck(config.healthcheck_url, failed=False)
+        return True
+
+    _ping_healthcheck(config.healthcheck_url, failed=False)
+    return False
 
 
 def _run_scheduled(
     app: EZBak,
     scheduler: BackgroundScheduler,
     config: EnvConfig,
-    run: Callable[[EZBak, EnvConfig, BackgroundScheduler], None],
+    run: Callable[[EZBak, EnvConfig, BackgroundScheduler | None], None],
     run_lock: threading.Lock,
 ) -> None:
     """Run a scheduled backup or restore as the container's single in-flight run.
@@ -190,7 +197,7 @@ def _run_scheduled(
         return
 
     try:
-        _run_and_report(app, scheduler, config, run)
+        _run_and_report(app, config, run, scheduler)
     finally:
         run_lock.release()
 
@@ -249,7 +256,7 @@ def _run_shutdown_backup(
 
     try:
         logger.info("Taking a final backup before shutdown")
-        _run_and_report(app, scheduler, config, do_backup)
+        _run_and_report(app, config, do_backup, scheduler)
     finally:
         run_lock.release()
 
@@ -461,18 +468,12 @@ def main() -> None:
         _run_cron(app, config, config.entrypoint_action)
 
     elif config.entrypoint_action == Action.BACKUP:
-        try:
-            do_backup(app, config)
-        except EZBakError as e:
-            logger.error(e)
+        if _run_and_report(app, config, do_backup):
             sys.exit(1)
         logger.info("Backup complete. Exiting.")
 
     elif config.entrypoint_action == Action.RESTORE:
-        try:
-            do_restore(app, config)
-        except EZBakError as e:
-            logger.error(e)
+        if _run_and_report(app, config, do_restore):
             sys.exit(1)
         logger.info("Restore complete. Exiting.")
 
