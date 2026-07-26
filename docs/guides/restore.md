@@ -78,6 +78,16 @@ that exact backup.
     you asked for would be the wrong result. Combine it with `--skip-if-no-backup` to turn
     a miss into a clean no-op instead of a failure.
 
+!!! note "Restore is all-or-nothing across destinations"
+
+    When both `--storage` and `--s3-bucket` are configured, ezbak must be able
+    to read every destination before it restores anything. One unreadable
+    destination fails the restore even though the healthy one could have
+    served it, since restoring an older archive while a possibly newer
+    destination is unreadable would silently stage stale state. See [An
+    unreadable destination is not an empty
+    one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
+
 ## Empty the target before restoring
 
 `clean_before_restore` removes the existing contents of the restore path, so the
@@ -123,8 +133,10 @@ ezbak --name my-backup --storage ~/Backups \
   restore --restore-path ~/restore --skip-if-no-backup
 ```
 
-A real download or extract failure still fails, with or without `--skip-if-no-backup`.
-See [Fresh deploys](../orchestration/fresh-deploys.md) for the orchestration case.
+A real download or extract failure still fails, with or without `--skip-if-no-backup`,
+and so does a destination ezbak cannot read: `--skip-if-no-backup` only covers a
+destination that is readable and genuinely empty. See [Fresh
+deploys](../orchestration/fresh-deploys.md) for the orchestration case.
 
 A library caller does not need this option: `restore_backup()` returns
 `RestoreOutcome.NO_BACKUP` when there is nothing to restore, and the caller

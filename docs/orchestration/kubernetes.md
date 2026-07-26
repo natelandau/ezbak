@@ -106,7 +106,11 @@ spec:
     restored data is in place first.
 2.  On a fresh deployment there is no backup yet. `EZBAK_SKIP_IF_NO_BACKUP` makes
     a missing backup a clean no-op so the pod can still start. See [Fresh
-    deploys](fresh-deploys.md).
+    deploys](fresh-deploys.md). It does not cover a destination ezbak cannot
+    read: that still fails the init container and blocks the pod from
+    starting, since a real backup might exist there. See [An unreadable
+    destination is not an empty
+    one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
 3.  `restartPolicy: Always` on an init container makes it a native sidecar
     (Kubernetes 1.29 and later): it starts before the app container and keeps
     running alongside it. `EZBAK_CRON` keeps it backing up on schedule.
@@ -129,6 +133,27 @@ stringData:
   EZBAK_AWS_ACCESS_KEY: "your-access-key"
   EZBAK_AWS_SECRET_KEY: "your-secret-key"
 ```
+
+!!! tip "On EKS, use IRSA instead of a Secret"
+
+    IAM roles for service accounts (IRSA) let a pod assume an IAM role directly, with no
+    key pair to store or rotate. Annotate the service account with the role's ARN:
+
+    ```yaml title="service-account.yaml"
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: ezbak
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/my-service-ezbak
+    ```
+
+    Reference it from the pod spec with `serviceAccountName: ezbak`, then drop
+    `EZBAK_AWS_ACCESS_KEY` and `EZBAK_AWS_SECRET_KEY` from every task's `env`, and drop the
+    `envFrom` block that reads the `ezbak-aws` Secret entirely. The role needs
+    `s3:ListBucket` on the bucket plus `s3:GetObject`, `s3:PutObject`, and
+    `s3:DeleteObject` on its contents. See [Instance roles and ambient
+    credentials](../guides/s3.md#instance-roles-and-ambient-credentials).
 
 ## How the pieces line up
 

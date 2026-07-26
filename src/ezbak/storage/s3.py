@@ -47,12 +47,21 @@ class S3Backend(StorageBackend):
 
         Returns:
             list[StorageLocation]: A single-element list with the S3 storage location.
+
+        Raises:
+            StorageReadError: If the bucket listing fails.
         """
         logger.trace("Indexing S3 storage location")
         # Anchor on "{name}-" so a set does not swallow keys that merely share its
         # prefix (name "gitea" must not match "giteasave-*"). The naming grammar
         # always joins name and timestamp with "-".
-        found_backups = self.aws_service.list_objects(prefix=f"{self.settings.name}-")
+        try:
+            found_backups = self.aws_service.list_objects(prefix=f"{self.settings.name}-")
+        except _S3_ERRORS as e:
+            # The caller logs the failure with its own destination context, so logging
+            # here would print the same text twice.
+            msg = f"S3 index failed for bucket '{self.settings.aws_s3_bucket_name}': {e}"
+            raise StorageReadError(msg) from e
 
         # The prefix listing returns sidecars too; drop them so a .sha256 is never
         # parsed as a spurious Backup and counted against retention.
@@ -81,6 +90,18 @@ class S3Backend(StorageBackend):
             logger.trace(f"Indexed: {backup}")
 
         return [location]
+
+    def write_locations(self) -> list[StorageLocation]:
+        """Return the bucket destination, without listing its objects.
+
+        Returns:
+            list[StorageLocation]: A single-element list with the S3 naming context.
+        """
+        return [
+            self._build_storage_location(
+                storage_path=self.settings.aws_s3_bucket_prefix, backups=[]
+            )
+        ]
 
     def write(
         self, *, tmp_backup: Path, storage_location: StorageLocation, checksum: str | None

@@ -27,6 +27,53 @@ graph TD
 The library carries the detail on the raised error: `BackupFailedError` names the
 `failed_storage_locations` and attaches the `created_backups` that did land.
 
+## An unreadable destination is not an empty one
+
+ezbak distinguishes "this destination holds no backups" from "this destination
+could not be read." A permission error, a network failure, or an unreachable
+bucket is a failure, not an empty result, and it never gets silently absorbed
+into an empty inventory.
+
+The backup run above already treats a bad destination this way: it fails and
+exits non-zero rather than reporting success. The same distinction carries
+through the rest of ezbak:
+
+- A backup run still writes the archive to a destination it could not read,
+  then fails the run and names it. Reading a destination and writing to it are
+  separate permissions and separate requests, so a listing failure is no reason
+  to withhold the archive.
+- A restore fails with `RestoreFailedError` rather than reporting that no
+  backup matched.
+- A prune skips the unreadable destination and logs an error, leaving its
+  archives untouched. Destinations that are still reachable prune normally.
+- `ezbak list` prints the backups it did find, then names the unreadable
+  destinations and exits non-zero, instead of reporting "No backups found."
+  See the [CLI reference](../reference/cli.md#list).
+
+!!! warning "skip_if_no_backup does not cover an unreachable destination"
+
+    `skip_if_no_backup` exists so a first deployment with no backup yet can
+    still start. It applies only when a destination is readable and
+    genuinely empty. If a destination cannot be read, the restore fails
+    regardless of `skip_if_no_backup`, and the job does not start.
+
+    This is deliberate. Starting a job with no data when a backup does exist
+    lets the next scheduled backup capture the empty state, and retention
+    eventually discards the good archive.
+
+!!! note "Restore is all-or-nothing across destinations"
+
+    With both a local path and an S3 bucket configured, one unreadable
+    destination fails the restore, even though the healthy destination could
+    have served it. Restoring an older archive while a possibly newer
+    destination is unreadable would silently stage stale state, so ezbak
+    fails instead of guessing which destination is authoritative.
+
+A library caller can check `EZBak.unreadable_locations` before trusting
+`list_backups()`: a non-empty list means the inventory is incomplete, and a
+backup missing from the list may still exist somewhere unreadable. See the
+[Python API reference](../reference/python-api.md#unreadable_locations).
+
 ## How each interface signals failure
 
 The same failure surfaces three ways.
@@ -52,7 +99,8 @@ The same failure surfaces three ways.
 
     `ezbak create` and `ezbak restore` exit non-zero on failure and log the
     reason. A restore that finds no backup exits non-zero too, unless you pass
-    `--skip-if-no-backup`.
+    `--skip-if-no-backup`. `ezbak list` exits non-zero if a destination could
+    not be read, instead of reporting that no backups exist.
 
 === "Container (one-shot)"
 

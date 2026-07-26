@@ -52,10 +52,13 @@ their restore task.
 
 !!! warning "A real failure still fails"
 
-    `skip_if_no_backup` only changes the "no backup found" case. If a backup
-    exists but cannot be downloaded or extracted, the restore still fails and
-    exits non-zero, so a genuine problem is never hidden. See [Failure
-    behavior](../concepts/failure-behavior.md).
+    `skip_if_no_backup` only changes the "no backup found" case. It does not
+    cover a destination ezbak cannot read: an unreachable bucket or a
+    permission error still fails the restore and exits non-zero, the same as
+    a backup that exists but cannot be downloaded or extracted. A genuine
+    problem is never hidden behind an empty result. See [An unreadable
+    destination is not an empty
+    one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
 
 ## The other edge: a target that already has data
 

@@ -135,6 +135,17 @@ class LocalBackend(StorageBackend):
 
         return locations
 
+    def write_locations(self) -> list[StorageLocation]:
+        """Return one destination per configured storage directory, without scanning them.
+
+        Returns:
+            list[StorageLocation]: One naming context per configured storage path.
+        """
+        return [
+            self._build_storage_location(storage_path=storage_path, backups=[])
+            for storage_path in self.settings.storage_paths
+        ]
+
     def write(
         self, *, tmp_backup: Path, storage_location: StorageLocation, checksum: str | None
     ) -> Backup:

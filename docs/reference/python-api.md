@@ -145,6 +145,45 @@ if backup:
 An explicit `backup` argument takes priority over a configured `restore_date`,
 which in turn takes priority over the latest backup.
 
+### unreadable_locations
+
+`list_backups()` never raises: it returns whatever backups it found, even if a
+configured destination could not be read. Check the `unreadable_locations`
+property alongside it to know whether that result is the whole picture.
+
+```python
+backups.list_backups()
+if backups.unreadable_locations:
+    print(f"Inventory incomplete: could not read {', '.join(backups.unreadable_locations)}")
+```
+
+A non-empty list names the storage locations ezbak could not use or enumerate, a
+bad S3 credential, an unreachable bucket, a local path ezbak cannot read. It
+means a backup absent from `list_backups()` may still exist in one of those
+destinations. `create_backup()` and `restore_backup()` treat the same condition
+as a hard failure instead of an incomplete result; see
+[BackupFailedError](#backupfailederror) and
+[RestoreFailedError](#restorefailederror) below.
+
+Reading the property indexes the storage locations if they have not been indexed
+yet, so the first access performs network I/O against S3 rather than returning a
+cached attribute.
+
+!!! note "An empty inventory is cached until the next backup run"
+
+    An index that finds zero backups is cached like any other, so
+    `list_backups()` keeps returning that result until `create_backup()` or
+    `prune_backups()` invalidates it. A long-lived process watching for archives
+    another writer creates has to set `rebuild_storage_locations = True` to force
+    a fresh scan.
+
+!!! note "ezbak builds its own boto3 session"
+
+    S3 access goes through a `boto3.Session` that ezbak constructs itself, so a
+    session installed with `boto3.setup_default_session()` is not used. Pass
+    credentials through `BackupConfig`, or leave them unset to use the ambient
+    credential chain.
+
 ## Exceptions
 
 Every exception the library raises subclasses `EZBakError`, so one

@@ -5,9 +5,9 @@ from __future__ import annotations
 import shutil
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import boto3
 import cappa
 import pytest
 import time_machine
@@ -288,11 +288,10 @@ def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
         storage_path=tmp_path,
     )
     aws_backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
-    fake_app = SimpleNamespace(
-        list_backups=lambda: [local_backup, aws_backup],
-    )
     mocker.patch.object(list_cmd, "build_config", return_value=mocker.MagicMock())
-    mocker.patch.object(list_cmd, "EZBak", return_value=fake_app)
+    mock_ezbak = mocker.patch.object(list_cmd, "EZBak", autospec=True)
+    mock_ezbak.return_value.list_backups.return_value = [local_backup, aws_backup]
+    mock_ezbak.return_value.unreadable_locations = []
 
     # When listing backups
     list_cmd.main(mocker.MagicMock())
@@ -304,6 +303,80 @@ def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
     assert aws_backup.name in output
     assert "Found 1 local backups" in output
     assert local_backup.name in output
+
+
+def test_cli_list_backups_partial_index_reports_and_exits_nonzero(
+    s3_bucket: str, break_s3_listing, capsys, tmp_path
+) -> None:
+    """Verify a partial index still prints the backups found but exits non-zero."""
+    # Given a local backup alongside an S3 bucket that cannot be listed
+    Path(tmp_path / "test-20250609T101857-hourly.tgz").touch()
+    break_s3_listing()
+
+    # When listing backups
+    with pytest.raises(cappa.Exit) as exc:
+        cappa.invoke(
+            obj=EZBakCLI,
+            argv=[
+                "list",
+                "--name",
+                "test",
+                "--storage",
+                str(tmp_path),
+                "--s3-bucket",
+                s3_bucket,
+            ],
+        )
+    output = capsys.readouterr().err
+
+    # Then it exits non-zero, names the unreadable destination, and still lists what was found
+    assert exc.value.code == 1
+    assert f"S3 bucket '{s3_bucket}'" in output
+    assert "test-20250609T101857-hourly.tgz" in output
+
+
+def test_cli_list_backups_partial_index_with_no_backups_found(
+    s3_bucket: str, break_s3_listing, capsys, tmp_path
+) -> None:
+    """Verify an unreadable destination with nothing found never prints "No backups found"."""
+    # Given an empty local storage path alongside an S3 bucket that cannot be listed
+    break_s3_listing()
+
+    # When listing backups
+    with pytest.raises(cappa.Exit) as exc:
+        cappa.invoke(
+            obj=EZBakCLI,
+            argv=[
+                "list",
+                "--name",
+                "test",
+                "--storage",
+                str(tmp_path),
+                "--s3-bucket",
+                s3_bucket,
+            ],
+        )
+    output = capsys.readouterr().err
+
+    # Then it exits non-zero and never claims there are no backups when it could not look
+    assert exc.value.code == 1
+    assert "No backups found" not in output
+    assert f"S3 bucket '{s3_bucket}'" in output
+
+
+def test_cli_list_backups_empty_and_readable_prints_no_backups_found(capsys, tmp_path) -> None:
+    """Verify a fully readable but empty configuration still reports no backups found."""
+    # Given an empty, readable local storage path and no S3 destination configured
+
+    # When listing backups, then it does not raise cappa.Exit
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=["list", "--name", "test", "--storage", str(tmp_path)],
+    )
+    output = capsys.readouterr().err
+
+    # Then it reports no backups found rather than staying silent or exiting non-zero
+    assert "No backups found" in output
 
 
 def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
@@ -698,3 +771,69 @@ def test_cli_prune_backups_force_skips_confirmation(mocker, debug, capsys, tmp_p
     confirm.assert_not_called()
     assert "Deleted 10 backups" in output
     assert len(list(tmp_path.iterdir())) == 3
+
+
+def test_cli_list_backups_unusable_destination_exits_nonzero(s3_bucket: str, capsys, tmp_path):
+    """Verify a destination ezbak could not use at all exits non-zero."""
+    # Given a local backup alongside a bucket that does not exist, so no S3 backend is built
+    Path(tmp_path / "test-20250609T101857-hourly.tgz").touch()
+
+    # When listing backups
+    with pytest.raises(cappa.Exit) as exc:
+        cappa.invoke(
+            obj=EZBakCLI,
+            argv=[
+                "list",
+                "--name",
+                "test",
+                "--storage",
+                str(tmp_path),
+                "--s3-bucket",
+                "missing-bucket",
+            ],
+        )
+    output = capsys.readouterr().err
+
+    # Then it exits non-zero, names the unusable destination, and still lists what was found
+    assert exc.value.code == 1
+    assert "S3 bucket 'missing-bucket'" in output
+    assert "test-20250609T101857-hourly.tgz" in output
+
+
+def test_cli_prune_unreadable_destination_exits_zero(s3_bucket, break_s3_listing, capsys, tmp_path):
+    """Verify prune skips an unreadable destination, exits zero, and prunes the healthy one."""
+    # Given three archives in a local path and the same three in a bucket that cannot be listed
+    names = [
+        "test-20250609T095745-minutely.tgz",
+        "test-20250609T095804-minutely.tgz",
+        "test-20250609T101857-hourly.tgz",
+    ]
+    s3 = boto3.client("s3")
+    for name in names:
+        Path(tmp_path / name).touch()
+        s3.put_object(Bucket=s3_bucket, Key=name, Body=b"archive")
+    break_s3_listing()
+
+    # When pruning down to the newest backup, then prune does not exit non-zero
+    cappa.invoke(
+        obj=EZBakCLI,
+        argv=[
+            "prune",
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "--s3-bucket",
+            s3_bucket,
+            "--keep-last",
+            "1",
+            "--force",
+        ],
+    )
+    output = capsys.readouterr().err
+
+    # Then the healthy destination is pruned, the unreadable one keeps every archive,
+    # and the skipped destination is named in the log
+    assert [x.name for x in tmp_path.iterdir()] == ["test-20250609T101857-hourly.tgz"]
+    assert {x["Key"] for x in s3.list_objects_v2(Bucket=s3_bucket)["Contents"]} == set(names)
+    assert f"Could not index S3 bucket '{s3_bucket}'" in output
