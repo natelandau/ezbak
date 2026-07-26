@@ -12,8 +12,9 @@ storage-type setting to pick: the locations you provide decide where backups go.
 You configure storage by naming destinations, and the backends follow.
 
 - Set `storage_paths` to back up to one or more local directories.
-- Set `aws_s3_bucket_name`, with `aws_access_key` and `aws_secret_key`, to back
-  up to S3.
+- Set `aws_s3_bucket_name` to back up to S3. Add `aws_access_key` and `aws_secret_key` to
+  authenticate explicitly, or omit both to use the host's own credentials, such as an EC2
+  instance profile or an EKS service account.
 - Set both to write every backup to local storage and S3 at the same time.
 
 ```mermaid

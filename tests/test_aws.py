@@ -129,14 +129,16 @@ def test_delete_objects(mocker, debug, capsys):
     instantiate_logger(LogLevel.TRACE)
 
     mock_client = mocker.MagicMock()
-    mock_client.get_bucket_location.return_value = {"LocationConstraint": "us-east-1"}
     mock_client.delete_objects.return_value = {
         "Deleted": [{"Key": "test-20240609T000000-yearly.tgz"}],
         "Errors": [
             {"Key": "test-20240609T000000-yearly.tgz", "Code": "404", "Message": "Not Found"}
         ],
     }
-    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_client)
+    mock_session = mocker.MagicMock()
+    mock_session.client.return_value = mock_client
+    mock_session.get_credentials.return_value = mocker.MagicMock(method="explicit")
+    mocker.patch("ezbak.storage.aws.boto3.Session", return_value=mock_session)
 
     aws_service = AWSService(
         bucket_name="test-bucket",
@@ -176,27 +178,26 @@ def test_both_backends_configured(s3_bucket, filesystem):
     assert types == {StorageType.LOCAL, StorageType.AWS}
 
 
-def test_aws_service_missing_credentials():
-    """Verify AWSService raises StorageInitError when credentials are missing."""
-    # Given empty credentials
-    # When constructing the service, then a StorageInitError is raised
-    with pytest.raises(StorageInitError, match="AWS credentials are not set"):
-        AWSService(
-            aws_access_key="",
-            aws_secret_key="",
-            bucket_name="test-bucket",
-        )
+def test_aws_service_no_resolvable_credentials():
+    """Verify AWSService still fails init when no credentials resolve from anywhere."""
+    # Given no explicit credentials and, via the mock_env fixture, no ambient chain
+    # When constructing the service, then it degrades to a StorageInitError
+    with pytest.raises(StorageInitError, match="Cannot access S3 bucket"):
+        AWSService(bucket_name="test-bucket")
 
 
 def test_aws_service_unreachable_bucket(mocker):
     """Verify AWSService raises StorageInitError when the bucket is unreachable."""
     # Given an S3 client whose bucket lookup fails
     mock_client = mocker.MagicMock()
-    mock_client.get_bucket_location.side_effect = ClientError(
+    mock_client.head_bucket.side_effect = ClientError(
         error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
-        operation_name="GetBucketLocation",
+        operation_name="HeadBucket",
     )
-    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_client)
+    mock_session = mocker.MagicMock()
+    mock_session.client.return_value = mock_client
+    mock_session.get_credentials.return_value = mocker.MagicMock(method="explicit")
+    mocker.patch("ezbak.storage.aws.boto3.Session", return_value=mock_session)
 
     # When constructing the service, then a StorageInitError is raised (not SystemExit)
     with pytest.raises(StorageInitError, match="Cannot access S3 bucket"):
@@ -211,10 +212,13 @@ def test_aws_service_network_error_raises_storage_init_error(mocker):
     """Verify a network-level failure at init becomes a StorageInitError, not a raw crash."""
     # Given an S3 client whose bucket lookup hits a connectivity error (a BotoCoreError, not ClientError)
     mock_client = mocker.MagicMock()
-    mock_client.get_bucket_location.side_effect = EndpointConnectionError(
+    mock_client.head_bucket.side_effect = EndpointConnectionError(
         endpoint_url="https://s3.amazonaws.com"
     )
-    mocker.patch("ezbak.storage.aws.boto3.client", return_value=mock_client)
+    mock_session = mocker.MagicMock()
+    mock_session.client.return_value = mock_client
+    mock_session.get_credentials.return_value = mocker.MagicMock(method="explicit")
+    mocker.patch("ezbak.storage.aws.boto3.Session", return_value=mock_session)
 
     # When constructing the service, then it degrades to a StorageInitError
     with pytest.raises(StorageInitError, match="Cannot access S3 bucket"):
