@@ -1,3 +1,11 @@
+## v1.4.0 (2026-07-26)
+
+### Feat
+
+- **s3**: add instance-role auth (#68)
+- **container**: ping healthcheck on one-shot runs
+- **container**: force a run with SIGUSR1 (#67)
+
 ## v1.3.1 (2026-07-23)
 
 ### Fix
