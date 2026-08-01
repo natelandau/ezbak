@@ -106,3 +106,7 @@ class HookFailedError(EZBakError):
     non-zero, times out, or cannot be spawned. Subclasses EZBakError so the existing
     entrypoint handlers log it, ping the healthcheck failure URL, and exit non-zero.
     """
+
+
+class SqliteSnapshotError(EZBakError):
+    """Raised when a configured SQLite database cannot be snapshotted consistently."""
