@@ -38,6 +38,8 @@ Tool config (ruff, mypy, pytest, coverage) lives in `pyproject.toml`.
 
 ## Conventions
 
+- Ruff runs `select = ["ALL"]` with `preview = true`, so suppressions are common and their format matters. Write them as `# ruff:ignore[full-rule-name]` (no space after the colon, full rule name, never the short code). Do **not** write `# noqa: E501`: preview rule RUF105 rewrites `noqa` into the `ruff:ignore` form on the next `ruff check --fix`, so a `noqa` you commit will not survive. The rule name must be exact; a wrong one re-flags the original violation and adds `invalid-rule-code`, which is the quickest way to tell a live suppression from a dead one.
+- `[tool.ruff]` sets `fix = true`, so a plain `uv run ruff check` **rewrites files in place**; it is not a read-only inspection. Use `uv run ruff check --no-fix` to look without touching anything. Never run a narrowed `--select` with fixing on: ruff then applies fixes the full rule set would not, and rewrites files you never meant to change.
 - Commit subject max **72** chars, enforced by the `committed` hook at the `commit-msg` stage (`committed.toml`). Body line length is not enforced (`line_length = 500`), but wrap bodies at 72 by convention.
 - `CHANGELOG.md` is commitizen-managed and regenerated on `cz bump`. Never hand-edit it, including for breaking changes; the release tooling owns it.
 - Version source is `constants.py:__version__` (commitizen `version_files`).
