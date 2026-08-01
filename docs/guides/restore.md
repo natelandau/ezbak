@@ -112,6 +112,22 @@ behavior](../concepts/failure-behavior.md).
     the real directories, so it also catches two container mounts that point at the
     same host path.
 
+!!! note "A restore clears stale SQLite journals it finds"
+
+    A restore that does not empty the target first writes over the files the
+    archive contains and leaves everything else alone, with one exception. When
+    it restores a SQLite database, it also removes a `-wal`, `-shm`, or
+    `-journal` file already sitting beside that database, unless the archive
+    supplied the journal itself. SQLite replays a journal it finds next to a
+    database, so one left over from an earlier deployment would roll the
+    restored database back to that older data and still pass an integrity
+    check. This applies to any SQLite database in a backup, whether or not you
+    used [`sqlite_paths`](../concepts/sqlite.md). Nothing else is touched: the
+    file being restored must carry SQLite's own header, and a `-wal` or
+    `-journal` must carry the matching journal header, before either is
+    removed. See [Stale journals at the restore
+    target](../concepts/sqlite.md#stale-journals-at-the-restore-target-are-cleared).
+
 ## Set ownership on restored files
 
 `--uid` and `--gid` set the owner and group on the restored files, which is useful

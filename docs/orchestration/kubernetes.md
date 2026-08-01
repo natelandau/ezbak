@@ -162,6 +162,13 @@ The backup sidecar mounts `data` read-only, so it never modifies the app's live
 data, and its `preStop` hook captures the final state. All three share the
 `EZBAK_NAME` and bucket, so the backups follow the pod to any node.
 
+!!! warning "EZBAK_SQLITE_PATHS needs a writable mount"
+
+    Setting `EZBAK_SQLITE_PATHS` is the one exception to the read-only mount
+    above. SQLite may have to create a `-shm` file to read a WAL database, so set
+    `readOnly: false` on the backup sidecar's `volumeMounts` entry when you
+    snapshot databases. See [SQLite databases](../concepts/sqlite.md#mount-the-source-read-write).
+
 !!! warning "A shutdown backup runs inside the grace period"
 
     The manifest above already takes a final backup with the `preStop` hook.

@@ -27,10 +27,10 @@ run modes.
 
 ## Tools your hooks need
 
-The container image is lean. It ships `sh`, `python3`, `curl`, `tar`, and the
-ezbak runtime, but not the database and sync tools most hooks reach for, such as
-`sqlite3`, `rsync`, or `pg_dump`. A hook that calls a tool the image lacks fails
-with a `not found` error, and a failing pre-hook aborts the backup.
+The container image is lean. It ships `sh`, `python3`, `curl`, `tar`, `sqlite3`,
+and the ezbak runtime, but not the database and sync tools most hooks reach for,
+such as `rsync` or `pg_dump`. A hook that calls a tool the image lacks fails with
+a `not found` error, and a failing pre-hook aborts the backup.
 
 Bake the tools you need into your own image. The runtime is Debian-based and
 runs as root, so install them with `apt-get` in a Dockerfile that starts from
@@ -39,7 +39,7 @@ ezbak:
 ```dockerfile
 FROM ghcr.io/natelandau/ezbak:latest
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sqlite3 rsync postgresql-client \
+    && apt-get install -y --no-install-recommends rsync postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 ```
 
@@ -52,30 +52,39 @@ reproducible.
 !!! tip "Quick experiment without rebuilding"
 
     To try a tool before committing to a Dockerfile, install it in the hook
-    itself: `EZBAK_PRE_BACKUP_HOOK='apt-get update && apt-get install -y sqlite3 && sqlite3 ...'`.
+    itself: `EZBAK_PRE_BACKUP_HOOK='apt-get update && apt-get install -y rsync && rsync ...'`.
     This re-installs on every run, needs network access each time, and runs as
     root, so treat it as a stopgap and move the install into your image once the
     hook works.
 
-## Worked example: quiescing a SQLite database
+## SQLite needs no hook
 
-A running SQLite database can be mid-write when ezbak archives its file, so the
-backup can capture a torn page. Run SQLite's own `.backup` command first to write
-a consistent snapshot, then archive that snapshot instead of the live file:
+ezbak snapshots live SQLite databases itself. List each one in
+`EZBAK_SQLITE_PATHS` and ezbak copies it through SQLite's online-backup API,
+verifies the copy, and archives it in the live file's place. Don't write a hook
+for this. See [SQLite databases](../concepts/sqlite.md).
+
+## Worked example: dumping a Postgres database
+
+Postgres runs as a separate service, so ezbak has nothing on disk it can copy
+consistently. Dump the database to a file before the backup and remove the dump
+afterward:
 
 ```bash
-EZBAK_PRE_BACKUP_HOOK='sqlite3 /data/app.db ".backup /data/app.db.bak"'
-EZBAK_POST_BACKUP_HOOK='rm -f /data/app.db.bak'
+EZBAK_PRE_BACKUP_HOOK='pg_dump -Fc -f /data/app.dump app'
+EZBAK_POST_BACKUP_HOOK='rm -f /data/app.dump'
 ```
 
-The pre-backup hook writes `/data/app.db.bak`, a point-in-time copy safe to
-archive even while the application keeps writing to `/data/app.db`. Point
-`EZBAK_SOURCE_PATHS` at the directory containing the `.bak` file. The
-post-backup hook removes the copy once the backup exists, so a second run
-starts from a clean directory instead of archiving a stale leftover.
+The pre-backup hook writes `/data/app.dump`, a point-in-time export safe to
+archive while the database keeps serving traffic. Point `EZBAK_SOURCE_PATHS` at
+the directory holding the dump. The post-backup hook removes it once the backup
+exists, so a second run starts from a clean directory instead of archiving a
+stale leftover.
 
-The stock image does not ship `sqlite3`, so add it first. See [Tools your hooks
-need](#tools-your-hooks-need) for the Dockerfile that bakes it in.
+The stock image does not ship `pg_dump`. See [Tools your hooks
+need](#tools-your-hooks-need) for the Dockerfile that bakes it in. Pass a
+password through `PGPASSWORD` in the environment rather than writing it into the
+hook command, which ezbak logs verbatim; see [How a hook runs](#how-a-hook-runs).
 
 ## How a hook runs
 

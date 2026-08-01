@@ -34,10 +34,19 @@ A few things to know before the tables:
 | --- | --- | --- | --- |
 | `name` | `EZBAK_NAME` | `-n`, `--name` | required |
 | `source_paths` | `EZBAK_SOURCE_PATHS` | `create --source` | none |
+| `sqlite_paths` | `EZBAK_SQLITE_PATHS` | `create --sqlite-path` | none |
 
 `name` identifies the backup set and groups its files. `source_paths` lists the
 files and directories to archive. Pass multiple sources by repeating `--source`
 on the command line, or as a comma-separated string in the environment variable.
+
+`sqlite_paths` names SQLite databases to snapshot through SQLite's online-backup
+API instead of copying as files, so a database that a service holds open is
+archived consistently. Each path must sit inside exactly one source path, and
+the snapshot is archived in the live file's place, leaving the archive layout
+unchanged. Repeat `--sqlite-path` for multiple databases, or give a
+comma-separated string in the environment variable. See [SQLite
+databases](../concepts/sqlite.md).
 
 ## Storage
 

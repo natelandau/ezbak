@@ -25,11 +25,14 @@ name and add the `EZBAK_` prefix.
 export EZBAK_NAME="my-backup"
 export EZBAK_SOURCE_PATHS="/data"
 export EZBAK_STORAGE_PATHS="/backups"
+export EZBAK_SQLITE_PATHS="/data/app.db"
 export EZBAK_KEEP_DAILY=7
 ```
 
 So the `source_paths` field is `EZBAK_SOURCE_PATHS`, and `keep_daily` is
-`EZBAK_KEEP_DAILY`. A few settings control the container entrypoint and have no
+`EZBAK_KEEP_DAILY`. A field that takes a list of paths reads a comma-separated
+string, so `EZBAK_SQLITE_PATHS="/data/app.db,/data/sessions.db"` names two
+databases. A few settings control the container entrypoint and have no
 library field or CLI flag, such as `EZBAK_ACTION` and `EZBAK_CRON`; the
 [configuration reference](configuration.md#container-only-options) marks them as
 container-only.

@@ -28,7 +28,9 @@ Every container run needs two things: an action and a storage location.
   or both.
 
 Mount your source and backup directories as volumes, and point the environment
-variables at the mount paths inside the container.
+variables at the mount paths inside the container. The examples below mount the
+source `:ro`, so drop that flag if you set `EZBAK_SQLITE_PATHS`, which requires a
+writable source (see [SQLite databases](../concepts/sqlite.md#mount-the-source-read-write)).
 
 ## One-shot backup
 
