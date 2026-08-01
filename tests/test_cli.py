@@ -566,6 +566,65 @@ def test_create_sqlite_path_flag_repeats(tmp_path):
     assert config.sqlite_paths == [src / "a.db", src / "b.db"]
 
 
+def test_create_sqlite_path_flag_accepts_a_pattern(tmp_path):
+    """Verify --sqlite-path carries a glob through unexpanded, for expansion at backup time."""
+    # Given a source tree of sharded databases
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "folder.0001-nhx4yzcl.db").touch()
+    (src / "folder.0002-j4dkatqn.db").touch()
+
+    # And a create command naming them with one pattern
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=[
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "create",
+            "--source",
+            str(src),
+            "--sqlite-path",
+            str(src / "*.db"),
+        ],
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then the pattern is stored as written, since expansion happens per backup run
+    assert config.sqlite_paths == [src / "*.db"]
+
+
+def test_create_sqlite_path_flag_accepts_a_relative_pattern(tmp_path):
+    """Verify a relative pattern is not resolved against the process working directory."""
+    # Given a create command with a source-relative pattern
+    src = tmp_path / "data"
+    src.mkdir()
+
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=[
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "create",
+            "--source",
+            str(src),
+            "--sqlite-path",
+            "**/*.db",
+        ],
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then it stays relative, to be anchored to each source path at expansion time
+    assert config.sqlite_paths == [Path("**/*.db")]
+
+
 def test_restore_no_use_checksums_flag(tmp_path):
     """Verify --no-use-checksums maps to use_checksums=False on a restore command."""
     # Given a restore command parsed with --no-use-checksums

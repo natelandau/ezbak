@@ -47,7 +47,7 @@ Create a backup archive of one or more sources.
 | `--include-regex` | `-i` | Back up only files whose path matches this regex. | |
 | `--exclude-regex` | `-e` | Skip files whose path matches this regex. | |
 | `--strip-source-paths` | `-s` | Flatten directory sources in the archive. | `False` |
-| `--sqlite-path` | | SQLite database inside a source path to snapshot consistently instead of copying. Repeat for multiple. | |
+| `--sqlite-path` | | Path or glob pattern matching SQLite databases inside a source path to snapshot consistently instead of copying. Repeat for multiple entries. See [Match databases with a pattern](../concepts/sqlite.md#match-databases-with-a-pattern). | |
 | `--compression-level` | `-c` | gzip level, 1 to 9. | `6` |
 | `--use-checksums` / `--no-use-checksums` | | Write a `.sha256` sidecar for each backup and verify it on restore. | `True` |
 
