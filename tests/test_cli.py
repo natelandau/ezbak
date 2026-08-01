@@ -503,6 +503,69 @@ def test_create_no_use_checksums_flag(tmp_path):
     assert config.use_checksums is False
 
 
+def test_create_sqlite_path_flag(tmp_path):
+    """Verify --sqlite-path maps to sqlite_paths in the built config."""
+    # Given a source tree holding a database
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "app.db").touch()
+
+    # And a create command parsed with --sqlite-path
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=[
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "create",
+            "--source",
+            str(src),
+            "--sqlite-path",
+            str(src / "app.db"),
+        ],
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then the sqlite path is carried through
+    assert config.sqlite_paths == [src / "app.db"]
+
+
+def test_create_sqlite_path_flag_repeats(tmp_path):
+    """Verify --sqlite-path accumulates across repeats."""
+    # Given a source tree holding two databases
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "a.db").touch()
+    (src / "b.db").touch()
+
+    # And a create command naming both
+    cli = cappa.parse(
+        EZBakCLI,
+        argv=[
+            "--name",
+            "test",
+            "--storage",
+            str(tmp_path),
+            "create",
+            "--source",
+            str(src),
+            "--sqlite-path",
+            str(src / "a.db"),
+            "--sqlite-path",
+            str(src / "b.db"),
+        ],
+    )
+
+    # When building the config
+    config = build_config(cli)
+
+    # Then both paths are present
+    assert config.sqlite_paths == [src / "a.db", src / "b.db"]
+
+
 def test_restore_no_use_checksums_flag(tmp_path):
     """Verify --no-use-checksums maps to use_checksums=False on a restore command."""
     # Given a restore command parsed with --no-use-checksums
