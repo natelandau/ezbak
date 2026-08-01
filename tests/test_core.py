@@ -856,3 +856,211 @@ def test_restore_keeps_a_journal_the_archive_supplies(tmp_path):
 
     # Then the archived journal lands beside its database
     assert (target / "app.db-wal").read_bytes() == b"\x37\x7f\x06\x82" + b"\x00" * 28
+
+
+def test_create_backup_snapshots_every_database_matched_by_a_pattern(tmp_path):
+    """Verify a pattern snapshots every match, substituting a consistent copy for one a live writer holds open."""
+    # Given a service directory of sharded databases, plus a plain file
+    src = tmp_path / "data"
+    src.mkdir()
+    for shard in ("folder.0001-nhx4yzcl", "folder.0002-j4dkatqn", "main"):
+        make_db(src / f"{shard}.db", rows=3)
+    (src / "readme.txt").write_text("plain")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "*.db"],
+        strip_source_paths=True,
+    )
+
+    # When creating a backup while one shard has an uncommitted write in flight
+    with closing(sqlite3.connect(src / "folder.0001-nhx4yzcl.db")) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("INSERT INTO t (v) VALUES ('uncommitted')")
+
+        backup.create_backup()
+
+    # Then every database is archived at its live position, with no journals beside them
+    names = _archive_file_members(dest)
+
+    assert "folder.0001-nhx4yzcl.db" in names
+    assert "folder.0002-j4dkatqn.db" in names
+    assert "main.db" in names
+    assert "readme.txt" in names
+    assert not [n for n in names if n.endswith(("-wal", "-shm", "-journal"))]
+
+    # And the shard with the in-flight write holds only the committed rows
+    extracted = tmp_path / "extracted"
+    with tarfile.open(next(dest.glob("*.tgz"))) as tar:
+        tar.extractall(path=extracted, filter="data")
+
+    assert row_count(extracted / "folder.0001-nhx4yzcl.db") == 3
+
+
+def test_create_backup_pattern_snapshots_restore_and_open(tmp_path):
+    """Verify each database matched by a pattern restores as a usable database."""
+    # Given two databases matched by one pattern, one left with an abandoned writer's WAL
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "one.db", rows=4)
+    make_db(src / "two.db", rows=7)
+    write_uncheckpointed(src / "two.db", "abandoned-write")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    restore_to = tmp_path / "restored"
+    restore_to.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "*.db"],
+        strip_source_paths=True,
+        restore_path=restore_to,
+    )
+    backup.create_backup()
+
+    # Then the archive holds no journal siblings alongside the snapshotted databases
+    names = _archive_file_members(dest)
+    assert not [n for n in names if n.endswith(("-wal", "-shm", "-journal"))]
+
+    # When restoring
+    backup.restore_backup()
+
+    # Then both open, and the abandoned writer's committed value survived the snapshot
+    assert row_count(restore_to / "one.db") == 4
+    assert values(restore_to / "two.db") == ["abandoned-write"]
+
+
+def test_create_backup_pattern_picks_up_a_database_added_between_runs(tmp_path):
+    """Verify expansion happens per run, so a cron sidecar sees new shards."""
+    # Given one database and a backup instance configured with a pattern
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "first.db")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "*.db"],
+        strip_source_paths=True,
+    )
+    backup.create_backup()
+
+    # When a second database appears with an abandoned writer's WAL and another backup
+    # runs on the same instance
+    write_uncheckpointed(src / "second.db", "abandoned-write")
+    backup.create_backup()
+
+    # Then some archive holds both databases, but the ordinary source walk alone would
+    # do that much regardless of pattern expansion. What only a fresh expansion produces
+    # is a snapshot of second.db, so the real check is the absence of its journal siblings.
+    def _members(archive: Path) -> list[str]:
+        with tarfile.open(archive) as tar:
+            return [member.name for member in tar.getmembers() if member.isfile()]
+
+    archives = {archive: _members(archive) for archive in dest.glob("*.tgz")}
+
+    assert any({"first.db", "second.db"} <= set(members) for members in archives.values())
+
+    matching = next(
+        members for members in archives.values() if {"first.db", "second.db"} <= set(members)
+    )
+    assert not [n for n in matching if n.endswith(("-wal", "-shm", "-journal"))]
+
+
+def test_create_backup_pattern_leaves_a_non_database_to_the_file_walk(tmp_path):
+    """Verify a text file wearing a .db extension is archived rather than failing the run."""
+    # Given a real database with an abandoned writer's WAL, and an impostor sharing its extension
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "real.db", rows=2)
+    write_uncheckpointed(src / "real.db", "abandoned-write")
+    (src / "notes.db").write_text("not a database")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "*.db"],
+        strip_source_paths=True,
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then the run succeeded, both files are present, and the snapshotted database
+    # carries no journal siblings into the archive
+    names = _archive_file_members(dest)
+
+    assert "real.db" in names
+    assert "notes.db" in names
+    assert not [n for n in names if n.endswith(("-wal", "-shm", "-journal"))]
+
+
+def test_create_backup_relative_pattern_matches_under_the_source_path(tmp_path):
+    """Verify a relative pattern matches under the configured source, not the process cwd."""
+    # Given a database nested below the source, with an abandoned writer's WAL
+    src = tmp_path / "data"
+    (src / "nested").mkdir(parents=True)
+    make_db(src / "nested" / "app.db", rows=3)
+    write_uncheckpointed(src / "nested" / "app.db", "abandoned-write")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[Path("**/*.db")],
+        strip_source_paths=True,
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then the database is archived at its live position under the source, with no
+    # journal siblings beside it
+    names = _archive_file_members(dest)
+
+    assert "nested/app.db" in names
+    assert not [n for n in names if n.endswith(("-wal", "-shm", "-journal"))]
+
+
+def test_create_backup_reports_a_glob_failure_instead_of_raising(tmp_path, mocker):
+    """Verify a pattern the interpreter rejects fails the run through the normal error path."""
+    # Given a working pattern config whose expansion blows up at backup time, standing in
+    # for a glob Python refuses (a '**' that is not a whole component on Python < 3.13)
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "app.db")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "*.db"],
+    )
+    mocker.patch(
+        "ezbak.core.expand_sqlite_paths",
+        side_effect=ValueError("Invalid pattern: '**' can only be an entire path component"),
+    )
+
+    # When creating a backup
+    # Then it fails as an EZBakError, which the container's scheduler logs and alerts on,
+    # rather than as a bare ValueError that escapes it
+    with pytest.raises(BackupFailedError):
+        backup.create_backup()
+
+    assert not list(dest.glob("*.tgz"))

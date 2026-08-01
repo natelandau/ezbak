@@ -32,9 +32,12 @@ export EZBAK_KEEP_DAILY=7
 So the `source_paths` field is `EZBAK_SOURCE_PATHS`, and `keep_daily` is
 `EZBAK_KEEP_DAILY`. A field that takes a list of paths reads a comma-separated
 string, so `EZBAK_SQLITE_PATHS="/data/app.db,/data/sessions.db"` names two
-databases. A few settings control the container entrypoint and have no
-library field or CLI flag, such as `EZBAK_ACTION` and `EZBAK_CRON`; the
-[configuration reference](configuration.md#container-only-options) marks them as
+databases. An entry in `EZBAK_SQLITE_PATHS` can also be a glob pattern, such as
+`EZBAK_SQLITE_PATHS=/data/shards/*.db`; see [Match databases with a
+pattern](../concepts/sqlite.md#match-databases-with-a-pattern). A few settings
+control the container entrypoint and have no library field or CLI flag, such
+as `EZBAK_ACTION` and `EZBAK_CRON`; the [configuration
+reference](configuration.md#container-only-options) marks them as
 container-only.
 
 ## .env and .env.secrets files

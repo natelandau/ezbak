@@ -37,8 +37,10 @@ before it goes into the archive.
 
 ## Configure it
 
-Name each database you want snapshotted. Every path must sit inside one of your
-configured source paths.
+Name each database you want snapshotted. A literal path must sit inside one of
+your configured source paths; see [Match databases with a
+pattern](#match-databases-with-a-pattern) below for the different rule that
+applies to a glob pattern.
 
 === "Library"
 
@@ -90,6 +92,159 @@ INFO | Snapshotted 2 of 2 configured sqlite databases
 Repeating the same database in the list is harmless. ezbak deduplicates the
 paths, keeping the order you gave, so a database is never snapshotted or
 archived twice.
+
+## Match databases with a pattern
+
+A literal path names one database, which works only when you know every
+filename ahead of time. A service that shards its state across many databases
+with generated names, for example `folder.0001-nhx4yzcl.db` and
+`folder.0002-j4dkatqn.db`, can't be listed in a job spec at all: the next shard
+gets a name nobody wrote down. Give `sqlite_paths` a glob pattern instead, and
+ezbak snapshots every database the pattern matches.
+
+=== "Library"
+
+    ```python
+    sqlite_paths=[Path("/data/shards/*.db")]
+    ```
+
+=== "CLI"
+
+    ```bash
+    ezbak --name shards --storage /backups create \
+      --source /data \
+      --sqlite-path "/data/shards/*.db"
+    ```
+
+=== "Container"
+
+    ```bash
+    EZBAK_SOURCE_PATHS=/data
+    EZBAK_SQLITE_PATHS=/data/shards/*.db
+    ```
+
+### What counts as a pattern
+
+An entry is a pattern when it contains `*`, `?`, or `[`, and no file exists at
+that exact path. ezbak checks the filesystem first, so a database genuinely
+named `weird[1].db` still works as a literal path: the literal reading wins
+whenever the path is real.
+
+That reading is re-decided on every run, not fixed once. If `weird[1].db` is
+ever deleted, the same entry classifies as a pattern on the next backup and
+may expand to whatever else matches, for example `weird1.db`. The consequence
+is narrow: the "database not found" warning you'd otherwise get is lost,
+since a match, not an absence, is what the run sees instead.
+
+Two spellings are rejected outright when the config is built, on every
+interface:
+
+| Entry | Why it's rejected |
+| --- | --- |
+| Any entry holding a `..` component, such as `/data/../etc/app.db` | ezbak decides containment without resolving the path, so a `..` looks like it sits inside a source path and then lands in the archive under a name a restore refuses to extract. |
+| A pattern where `**` is not a whole path component, such as `/data/**.db` | Python rejects it outright before 3.13 and quietly reads it as a single `*` from 3.13 on, so it would mean different things on different runtimes. Write `/data/**/*.db`. |
+
+### Absolute and relative patterns anchor differently
+
+| Pattern | Anchored at | Reads as |
+| --- | --- | --- |
+| `/data/shards/*.db` (absolute) | The directory it names | "this exact place" |
+| `**/*.db` (relative) | Each configured source path, in turn | "anywhere under my sources" |
+
+A relative pattern is never resolved against the process working directory,
+which in a container is whatever the base image happened to set. It's matched
+under every path in `source_paths` instead, so `**/*.db` finds a database
+under any of them.
+
+`**` recurses through subdirectories and, like every other directory walk in
+ezbak, does not follow a symlinked directory.
+
+!!! warning "Root an absolute pattern below the filesystem root"
+
+    A pattern whose first component already globs, such as `/**/*.db`, has no
+    static prefix. It anchors at `/` and walks the whole filesystem below it on
+    every backup run, which in a container includes `/proc` and `/sys`. Write
+    every absolute pattern with a real leading directory, such as
+    `/data/**/*.db`.
+
+### Patterns are expanded on every backup run
+
+A literal path is fixed once the config is built. A pattern is expanded fresh
+each time ezbak takes a backup, which is the point of the feature for a
+long-lived cron sidecar: a database your service creates after the container
+started is picked up on the very next scheduled run, with no restart and no
+config change.
+
+### The file extension doesn't matter
+
+Whether a match is a SQLite database is decided by reading its header, not its
+name. `*.sqlite3`, `*.database`, and even an extensionless pattern like
+`shards/*` all work the same way, so write the pattern to match your actual
+layout instead of a specific extension.
+
+### What a pattern skips, and why
+
+A pattern match is a candidate, not a promise: the entry describes a shape,
+and ezbak decides case by case whether each match belongs in the snapshot
+list. A literal path is the opposite. It names one file, so ezbak treats it as
+an assertion and fails the run when that file can't be snapshotted.
+
+A match is dropped, and the backup continues, in five cases:
+
+| Match | What happens |
+| --- | --- |
+| Anything that is not a regular file (a directory, a fifo, a socket, a dangling symlink) | Skipped. Only a regular file can be snapshotted. |
+| A journal sibling (`-wal`, `-shm`, `-journal`) | Skipped. The database it belongs to is matched separately and carries the consistent snapshot. |
+| Not a SQLite database | Skipped from the snapshot list, then archived as an ordinary file by the normal source walk. |
+| Outside exactly one configured source path | Skipped, since ezbak can't place the snapshot at a single position in the archive. |
+| A symlink, or reached through one | Skipped later, when snapshotting runs, the same way the source walk treats every other symlink. |
+
+The directory, journal, and non-database skips log at `DEBUG`, visible with
+`-v` or `-vv`. The out-of-source-path and symlink skips log at `WARNING`:
+
+```text
+WARNING | Skip sqlite pattern match not inside exactly one source path: /data/other/app.db
+WARNING | Skip backup of symlink: /data/shards/linked.db
+```
+
+A pattern that matches nothing also logs a `WARNING`, and the run continues:
+
+```text
+WARNING | Pattern matched no sqlite databases: /data/shards/*.db
+```
+
+That's deliberate: a freshly deployed service has no databases yet, and
+failing here would break the first backup after every deploy.
+
+!!! warning "A mistyped pattern fails silently"
+
+    None of the checks above catch a typo in the pattern itself. If
+    `/data/shards/*.db` should have been `/data/shard/*.db`, ezbak finds
+    nothing, logs the warning above, and moves on, because a fresh deployment
+    looks identical to a mistyped pattern from the code's point of view. Your
+    databases are then archived as ordinary file copies instead of snapshots,
+    and a copy taken while the service holds the database open can be torn.
+
+    An absolute pattern rooted at a directory that doesn't exist is rejected
+    at startup, before any backup runs, which catches the common version of
+    this mistake: a wrong directory in a job spec. It doesn't catch every
+    version. A pattern whose directory exists but is simply the wrong one
+    passes validation and only shows up as the ordinary-file-copy behavior
+    described above. Test a new pattern against a real deployment before
+    relying on it.
+
+### A worked example
+
+The motivating case is a sharded service with generated database names:
+
+```bash title=".env"
+EZBAK_SOURCE_PATHS=/data
+EZBAK_SQLITE_PATHS=/data/state/*.db
+```
+
+Every database matching `/data/state/*.db` is snapshotted, including ones
+created after the container started, so adding a shard never means updating
+the job spec.
 
 ## The archive layout does not change
 
@@ -150,11 +305,11 @@ problem.
     archived as usual; the only difference is that the named databases arrive as
     snapshots instead of as file reads.
 
-## Each database must sit inside exactly one source path
+## Literal paths must sit inside exactly one source path
 
-ezbak places a snapshot by working out where its live file would have landed, so
-the path has to resolve to one position. Two configurations are rejected when the
-config is constructed, before any backup runs:
+For literal paths, ezbak places a snapshot by working out where its live file
+would have landed, so the path has to resolve to one position. Two configurations
+are rejected when the config is constructed, before any backup runs:
 
 | Configuration | Result |
 | --- | --- |
@@ -164,6 +319,10 @@ config is constructed, before any backup runs:
 Both fail at construction rather than mid-run: the library raises a pydantic
 `ValidationError` from `BackupConfig`, and the CLI logs the message and exits
 non-zero before it touches your data.
+
+For pattern entries, containment is instead checked when the pattern is expanded:
+an out-of-source match is skipped with a warning rather than rejected at
+construction.
 
 ## Filters apply to snapshots
 

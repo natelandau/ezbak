@@ -12,15 +12,12 @@ import stat
 import time
 from contextlib import closing
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 from urllib.parse import quote
 
 from loguru import logger
 
 from ezbak.exceptions import SqliteSnapshotError
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # Longest a snapshot waits on another process's write lock. `Connection.backup()` retries
 # SQLITE_BUSY forever on its own, so without a bound one long write transaction wedges a
@@ -76,6 +73,188 @@ def _copy(source: Path, *, dest: Path, read_only: bool) -> None:
 # snapshot, so they are excluded from the archive. Master journals (-mj*) only appear for
 # multi-database transactions, which ezbak does not support.
 SQLITE_SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal")
+
+GLOB_METACHARACTERS: tuple[str, ...] = ("*", "?", "[")
+
+
+def is_sqlite_path_pattern(entry: Path) -> bool:
+    """Report whether a configured sqlite entry should be read as a glob pattern.
+
+    Check the filesystem before the spelling so a database genuinely named `weird[1].db`
+    keeps working: the glob reading applies only once the literal reading has failed. The
+    symlink check covers a dangling link, which `exists()` reports as missing but which the
+    snapshot step should still reject by name rather than silently reinterpret.
+
+    Args:
+        entry (Path): The configured sqlite path entry.
+
+    Returns:
+        bool: True when the entry is a pattern to expand.
+    """
+    if entry.is_symlink() or entry.exists():
+        return False
+
+    return any(char in str(entry) for char in GLOB_METACHARACTERS)
+
+
+def static_pattern_prefix(pattern: Path) -> Path | None:
+    """Return the deepest directory a pattern is rooted in, before any globbing component.
+
+    Use this to validate a pattern at configuration time and to anchor glob expansion
+    at the pattern's literal prefix rather than the filesystem root. A pattern whose
+    first component already globs has nothing checkable and is reported as None rather
+    than as the filesystem root, which would always exist and prove nothing.
+
+    Args:
+        pattern (Path): The pattern to inspect.
+
+    Returns:
+        Path | None: The rooted directory, or None when the pattern globs from its start.
+    """
+    static: list[str] = []
+    for part in pattern.parts:
+        if any(char in part for char in GLOB_METACHARACTERS):
+            break
+        static.append(part)
+
+    if not static:
+        return None
+
+    prefix = Path(*static)
+    return None if prefix == Path(pattern.anchor) else prefix
+
+
+def unusable_pattern_component(pattern: Path) -> str | None:
+    """Return the first component that misuses `**`, or None when the pattern is usable.
+
+    Use this to reject a pattern at configuration time. `Path.glob` raises `ValueError` for
+    a `**` that is not an entire component on Python before 3.13 and silently reads it as a
+    single `*` from 3.13 on, so an unchecked pattern is either a crash or a different result
+    depending on the interpreter.
+
+    Args:
+        pattern (Path): The pattern to inspect.
+
+    Returns:
+        str | None: The offending component, or None when every component is usable.
+    """
+    return next((part for part in pattern.parts if "**" in part and part != "**"), None)
+
+
+def _keep_databases(matches: list[Path], *, source_paths: list[Path]) -> list[Path]:
+    """Reduce a pattern's raw matches to the databases worth snapshotting.
+
+    A pattern match is a candidate rather than an assertion: the operator described a shape,
+    not a file, so anything that cannot be snapshotted is dropped and left to the ordinary
+    file walk instead of failing the run. A literal path is the opposite, and keeps failing
+    loudly, because there the operator named the file.
+
+    Args:
+        matches (list[Path]): The raw glob matches.
+        source_paths (list[Path]): The configured backup source paths.
+
+    Returns:
+        list[Path]: The matches that name a snapshottable database.
+    """
+    kept: list[Path] = []
+
+    for match in matches:
+        # Also rules out a fifo, socket, device, or dangling link. Opening a fifo to read
+        # its header blocks until a writer arrives, which would wedge the run indefinitely.
+        if not match.is_file():
+            logger.debug(f"Skip sqlite pattern match that is not a regular file: {match}")
+            continue
+
+        # A sidecar has no meaning without the live database beside it, and the database
+        # itself is matched separately when the pattern reaches it.
+        if match.name.endswith(SQLITE_SIDECAR_SUFFIXES):
+            logger.debug(f"Skip sqlite journal matched by pattern: {match}")
+            continue
+
+        if not is_sqlite_database(match):
+            logger.debug(f"Skip pattern match that is not a sqlite database: {match}")
+            continue
+
+        containers = containing_source_paths(match, source_paths=source_paths)
+        if len(containers) != 1:
+            logger.warning(f"Skip sqlite pattern match not inside exactly one source path: {match}")
+            continue
+
+        kept.append(match)
+
+    return kept
+
+
+def _expand_pattern(pattern: Path, *, source_paths: list[Path]) -> list[Path]:
+    """Resolve one pattern against the filesystem.
+
+    An absolute pattern names its own root. A relative one is expanded against each
+    configured source path, so it means "anywhere under what I am backing up" rather than
+    resolving against the process working directory, which in a container is whatever the
+    image happened to set.
+
+    Args:
+        pattern (Path): The pattern to expand.
+        source_paths (list[Path]): The configured backup source paths.
+
+    Returns:
+        list[Path]: The matching databases.
+    """
+    if pattern.is_absolute():
+        # A static prefix lets the glob start below the root, rather than walking every
+        # literal directory component from `/` on each call. `static_pattern_prefix`
+        # returns None when the pattern globs from its first component, which is exactly
+        # when there is no better root than the anchor itself.
+        prefix = static_pattern_prefix(pattern)
+        root = prefix if prefix is not None else Path(pattern.anchor)
+        roots = [root]
+        relative = pattern.relative_to(root)
+    else:
+        roots = source_paths
+        relative = pattern
+
+    matches: list[Path] = []
+    for root in roots:
+        matches.extend(_keep_databases(sorted(root.glob(str(relative))), source_paths=source_paths))
+
+    return matches
+
+
+def expand_sqlite_paths(entries: list[Path], *, source_paths: list[Path]) -> list[Path]:
+    """Resolve configured sqlite entries into the concrete databases to snapshot.
+
+    Call this once per backup run rather than at configuration time. A cron sidecar lives
+    for weeks, and a set of databases frozen at startup would silently miss every one
+    created afterwards, which is exactly the case patterns exist to serve.
+
+    Ordering is fully determined, since `snapshot_databases` stages each snapshot in a
+    subdirectory named for its index: entries in configured order, a relative pattern's
+    source paths in configured order, and each glob call's matches sorted.
+
+    Args:
+        entries (list[Path]): The configured sqlite paths, literal or pattern.
+        source_paths (list[Path]): The configured backup source paths.
+
+    Returns:
+        list[Path]: The databases to snapshot, deduplicated, first occurrence kept.
+    """
+    expanded: list[Path] = []
+
+    for entry in entries:
+        if not is_sqlite_path_pattern(entry):
+            expanded.append(entry)
+            continue
+
+        matches = _expand_pattern(entry, source_paths=source_paths)
+        if not matches:
+            # Not an error: a pre-start restore on a fresh deployment has an empty data
+            # directory, and the databases arrive with the service.
+            logger.warning(f"Pattern matched no sqlite databases: {entry}")
+
+        expanded.extend(matches)
+
+    return list(dict.fromkeys(expanded))
+
 
 # Header bytes SQLite writes at the front of each journal form. A WAL carries one of two
 # magic numbers, chosen by the checksum byte order it was written with.

@@ -9,7 +9,7 @@ package, and a command-line tool. Install the one that matches how you plan to r
 it. The container is the primary interface; the package and CLI are for scripting,
 local testing, and one-off backups.
 
-ezbak requires Python 3.11 or higher for the package and CLI. The container
+ezbak requires Python 3.11.4 or higher for the package and CLI. The container
 bundles its own runtime.
 
 ## Docker container

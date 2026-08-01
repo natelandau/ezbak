@@ -42,11 +42,13 @@ on the command line, or as a comma-separated string in the environment variable.
 
 `sqlite_paths` names SQLite databases to snapshot through SQLite's online-backup
 API instead of copying as files, so a database that a service holds open is
-archived consistently. Each path must sit inside exactly one source path, and
-the snapshot is archived in the live file's place, leaving the archive layout
-unchanged. Repeat `--sqlite-path` for multiple databases, or give a
-comma-separated string in the environment variable. See [SQLite
-databases](../concepts/sqlite.md).
+archived consistently. Each entry can be a literal path or a glob pattern; a
+literal path must sit inside exactly one source path, and the snapshot is
+archived in the live file's place, leaving the archive layout unchanged.
+Repeat `--sqlite-path` for multiple entries, or give a comma-separated string
+in the environment variable. See [SQLite databases](../concepts/sqlite.md) and
+[Match databases with a
+pattern](../concepts/sqlite.md#match-databases-with-a-pattern).
 
 ## Storage
 

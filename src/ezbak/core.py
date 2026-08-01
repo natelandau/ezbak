@@ -50,6 +50,7 @@ from ezbak.naming import new_staging_filename
 from ezbak.sqlite import (
     SQLITE_SIDECAR_SUFFIXES,
     SqliteSnapshot,
+    expand_sqlite_paths,
     is_sqlite_database,
     is_sqlite_sidecar,
     sidecar_paths,
@@ -620,12 +621,20 @@ class EZBak:
         # Staged inside tmp_dir, which lives as long as this EZBak instance, so a large
         # snapshot must not survive the run that created it.
         snapshot_dir = self.tmp_dir / f"sqlite-{new_uid(bits=24)}"
-        sqlite_paths = self.settings.sqlite_paths or []
-        # Every configured database is kept out of the walk, snapshotted or not, along with
-        # its journal siblings: a sidecar has no meaning without the live database beside
-        # it, so it must never reach the archive on its own.
-        excluded_paths = frozenset(path for db in sqlite_paths for path in (db, *sidecar_paths(db)))
         try:
+            # Expanded per run, not at configuration time: a cron sidecar lives for weeks, and
+            # a set frozen at startup would silently miss every database created afterwards.
+            # Inside the try so a pattern that the filesystem or interpreter rejects fails the
+            # run through the normal path instead of escaping into the caller's scheduler.
+            sqlite_paths = expand_sqlite_paths(
+                self.settings.sqlite_paths or [], source_paths=self.settings.source_paths or []
+            )
+            # Every configured database is kept out of the walk, snapshotted or not, along
+            # with its journal siblings: a sidecar has no meaning without the live database
+            # beside it, so it must never reach the archive on its own.
+            excluded_paths = frozenset(
+                path for db in sqlite_paths for path in (db, *sidecar_paths(db))
+            )
             snapshots = snapshot_databases(
                 self._sqlite_paths_to_snapshot(sqlite_paths),
                 source_paths=self.settings.source_paths,
@@ -635,11 +644,13 @@ class EZBak:
             checksum = self._write_archive(
                 temp_tarfile, snapshots=snapshots, excluded_paths=excluded_paths
             )
-        except (tarfile.TarError, OSError, SqliteSnapshotError) as e:
+        except (tarfile.TarError, OSError, SqliteSnapshotError, ValueError) as e:
             # Fail the whole backup loudly rather than write a partial archive: an
             # unreadable directory, a file that vanished mid-walk, or a database that could
             # not be snapshotted consistently must not silently shrink the backup. OSError
-            # is not a TarError, so it needs its own clause.
+            # is not a TarError, so it needs its own clause. ValueError covers a glob pattern
+            # the interpreter rejects; the container's scheduler only handles EZBakError, so
+            # anything escaping here is a backup that fails with no log and no alert.
             logger.error(f"Failed to create backup: {e}")
             return None
         finally:

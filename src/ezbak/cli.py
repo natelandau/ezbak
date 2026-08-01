@@ -171,8 +171,9 @@ class CreateCommand:
         cappa.Arg(
             long="sqlite-path",
             help=(
-                "Path to a SQLite database inside a source path to snapshot consistently "
-                "instead of copying. Repeat for multiple databases."
+                "Path or glob pattern matching SQLite databases inside a source path to "
+                "snapshot consistently instead of copying. A relative pattern is matched "
+                "under each source path. Repeat for multiple entries."
             ),
             group=(3, "Optional"),
         ),

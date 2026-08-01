@@ -22,7 +22,7 @@ uv tool install ezbak   # command-line tool
 docker pull ghcr.io/natelandau/ezbak:latest   # container
 ```
 
-ezbak requires Python 3.11 or higher.
+ezbak requires Python 3.11.4 or higher.
 
 ## Quickstart
 
