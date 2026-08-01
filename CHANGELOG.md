@@ -1,3 +1,9 @@
+## v1.5.1 (2026-08-01)
+
+### Fix
+
+- **sqlite**: accept glob patterns in sqlite paths (#70)
+
 ## v1.5.0 (2026-07-31)
 
 ### Feat
