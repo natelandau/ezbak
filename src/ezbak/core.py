@@ -12,6 +12,7 @@ from typing import IO, TYPE_CHECKING, Literal, NoReturn, assert_never, cast
 
 from loguru import logger
 from nclutils.fs import clean_directory
+from nclutils.utils import new_uid
 from pydantic import ValidationError
 from whenever import PlainDateTime
 
@@ -31,6 +32,7 @@ from ezbak.exceptions import (
     BackupFailedError,
     ConfigurationError,
     RestoreFailedError,
+    SqliteSnapshotError,
     StorageDeleteError,
     StorageInitError,
     StorageReadError,
@@ -45,6 +47,14 @@ from ezbak.filters import (
 )
 from ezbak.logging import instantiate_logger, log_validation_errors
 from ezbak.naming import new_staging_filename
+from ezbak.sqlite import (
+    SQLITE_SIDECAR_SUFFIXES,
+    SqliteSnapshot,
+    is_sqlite_database,
+    is_sqlite_sidecar,
+    sidecar_paths,
+    snapshot_databases,
+)
 from ezbak.storage import LocalBackend, S3Backend, StorageBackend
 from ezbak.storage.aws import AWSService
 
@@ -315,6 +325,50 @@ def _reap_orphaned_staging(destination: Path) -> None:
                 logger.warning(f"Failed to remove orphaned staging dir '{stale}': {e}")
 
 
+def _clear_stale_sqlite_sidecars(restored: Path, *, stale_candidates: set[str]) -> None:
+    """Remove journal files an earlier deployment left beside a just-restored file.
+
+    SQLite replays a `-wal` or `-journal` it finds next to a database when the database is
+    next opened, so one left over at the destination silently rolls a restored snapshot
+    back to older data and still passes an integrity check. Deleting files the caller never
+    named calls for restraint, so a sidecar is only removed when the archive supplied its
+    base file, the base file really is a SQLite database, the archive did not supply the
+    sidecar itself, and the header confirms the file is the sidecar its name claims to be.
+
+    Args:
+        restored (Path): The destination file just moved into place.
+        stale_candidates (set[str]): Names already in the destination directory that the
+            archive does not supply. Nothing outside this set is inspected or removed.
+    """
+    for suffix in SQLITE_SIDECAR_SUFFIXES:
+        name = restored.name + suffix
+        if name not in stale_candidates:
+            continue
+
+        sidecar = restored.with_name(name)
+        if sidecar.is_symlink() or not sidecar.is_file():
+            continue
+
+        # Read the base file's header only once something beside it is named like a journal:
+        # the set lookup above rules out all but a handful of files in a large restore. A
+        # `-shm` is judged on its name alone, so this is the only thing standing between an
+        # unrelated `notes-shm` and deletion.
+        if not is_sqlite_database(restored):
+            logger.debug(f"Keeping '{sidecar}': '{restored.name}' is not a sqlite database")
+            return
+
+        if not is_sqlite_sidecar(sidecar, suffix=suffix):
+            logger.debug(f"Keeping '{sidecar}': not a sqlite {suffix} file")
+            continue
+
+        try:
+            sidecar.unlink()
+        except OSError as e:
+            logger.warning(f"Failed to remove stale sqlite journal '{sidecar}': {e}")
+        else:
+            logger.info(f"Removed stale sqlite journal beside restored file: {sidecar}")
+
+
 def _merge_move(src: Path, dst: Path) -> None:
     """Move every entry from `src` into `dst`, overwriting collisions.
 
@@ -323,7 +377,13 @@ def _merge_move(src: Path, dst: Path) -> None:
     filesystem, so each move is a metadata-only rename and stays cheap even for
     multi-gigabyte restores.
     """
-    for entry in src.iterdir():
+    entries = list(src.iterdir())
+    # A journal the archive itself supplies is restored normally, so only what is already
+    # in the destination can be stale. Listing both sides once keeps the per-file sidecar
+    # check a set lookup instead of a stat per journal suffix.
+    stale_candidates = {entry.name for entry in dst.iterdir()} - {entry.name for entry in entries}
+
+    for entry in entries:
         target = dst / entry.name
         entry_is_dir = entry.is_dir() and not entry.is_symlink()
         target_is_dir = target.is_dir() and not target.is_symlink()
@@ -335,6 +395,8 @@ def _merge_move(src: Path, dst: Path) -> None:
             # file, so clear the target first.
             _remove_path(target)
             entry.rename(target)
+            if not entry_is_dir:
+                _clear_stale_sqlite_sidecars(target, stale_candidates=stale_candidates)
 
 
 def _commit_restore(staging: Path, dest: Path, *, clean: bool) -> None:
@@ -536,9 +598,8 @@ class EZBak:
 
         Compress all configured source files and directories into a single tar.gz archive in the temporary directory. Use this to prepare backup data before distributing it to storage locations.
 
-        When checksums are enabled, the archive's SHA-256 is computed inline while
-        the tar is written, so no separate read pass over the finished archive is
-        needed (that re-read inflated the container's page-cache footprint).
+        Any configured SQLite database is snapshotted first and the snapshot is archived in
+        the live file's place, so the archive matches one taken of a quiesced tree.
 
         Returns:
             tuple[Path, str | None] | None: The temporary backup path and its
@@ -555,31 +616,110 @@ class EZBak:
 
         temp_tarfile = self.tmp_dir / new_staging_filename()
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
-        hasher = hashlib.sha256() if self.settings.use_checksums else None
+
+        # Staged inside tmp_dir, which lives as long as this EZBak instance, so a large
+        # snapshot must not survive the run that created it.
+        snapshot_dir = self.tmp_dir / f"sqlite-{new_uid(bits=24)}"
+        sqlite_paths = self.settings.sqlite_paths or []
+        # Every configured database is kept out of the walk, snapshotted or not, along with
+        # its journal siblings: a sidecar has no meaning without the live database beside
+        # it, so it must never reach the archive on its own.
+        excluded_paths = frozenset(path for db in sqlite_paths for path in (db, *sidecar_paths(db)))
         try:
-            with temp_tarfile.open("wb") as raw:
-                # Tee the compressed bytes through the hash as tarfile writes them.
-                stream = HashingWriter(fileobj=raw, hasher=hasher) if hasher is not None else raw
-                with tarfile.open(
-                    fileobj=cast("IO[bytes]", stream),
-                    mode="w:gz",
-                    compresslevel=self.settings.compression_level,
-                ) as tar:
-                    for source in self.settings.source_paths:
-                        self._archive_source(tar, source)
-        except (tarfile.TarError, OSError) as e:
+            snapshots = snapshot_databases(
+                self._sqlite_paths_to_snapshot(sqlite_paths),
+                source_paths=self.settings.source_paths,
+                strip=self.settings.strip_source_paths,
+                dest_dir=snapshot_dir,
+            )
+            checksum = self._write_archive(
+                temp_tarfile, snapshots=snapshots, excluded_paths=excluded_paths
+            )
+        except (tarfile.TarError, OSError, SqliteSnapshotError) as e:
             # Fail the whole backup loudly rather than write a partial archive: an
-            # unreadable directory or a file that vanished mid-walk must not silently
-            # shrink the backup. OSError is not a TarError, so it needs its own clause.
+            # unreadable directory, a file that vanished mid-walk, or a database that could
+            # not be snapshotted consistently must not silently shrink the backup. OSError
+            # is not a TarError, so it needs its own clause.
             logger.error(f"Failed to create backup: {e}")
             return None
+        finally:
+            if snapshot_dir.exists():
+                shutil.rmtree(snapshot_dir, ignore_errors=True)
 
-        checksum = hasher.hexdigest() if hasher is not None else None
         logger.trace(f"Created temporary tarfile: {temp_tarfile}")
         return temp_tarfile, checksum
 
+    def _sqlite_paths_to_snapshot(self, sqlite_paths: list[Path]) -> list[Path]:
+        """Drop the configured databases the include/exclude filters leave out of the archive.
+
+        Filter before snapshotting rather than before adding to the tar, so a database that
+        cannot reach the archive is never copied and the run's snapshot count is honest. The
+        live path is what the filters see, exactly as they would have seen it during the walk.
+
+        Args:
+            sqlite_paths (list[Path]): The configured database paths.
+
+        Returns:
+            list[Path]: The paths that survive the filters.
+        """
+        include_pattern, exclude_pattern = compile_filter_patterns(
+            self.settings.include_regex, self.settings.exclude_regex
+        )
+        kept: list[Path] = []
+        for path in sqlite_paths:
+            if passes_filters(
+                path=path, include_pattern=include_pattern, exclude_pattern=exclude_pattern
+            ):
+                kept.append(path)
+            else:
+                logger.debug(f"Skip sqlite snapshot of filtered-out database: {path}")
+
+        return kept
+
+    def _write_archive(
+        self,
+        destination: Path,
+        *,
+        snapshots: list[SqliteSnapshot],
+        excluded_paths: frozenset[Path],
+    ) -> str | None:
+        """Write the tar.gz holding every configured source and every SQLite snapshot.
+
+        Each snapshot is added at the archive position its live database would have held, so
+        the layout, and therefore every existing restore, is unchanged.
+
+        When checksums are enabled, the archive's SHA-256 is computed inline while the tar is
+        written, so no separate read pass over the finished archive is needed (that re-read
+        inflated the container's page-cache footprint).
+
+        Args:
+            destination (Path): The archive file to write.
+            snapshots (list[SqliteSnapshot]): Snapshots to add in place of their live databases.
+            excluded_paths (frozenset[Path]): Live files a snapshot replaces, skipped in the walk.
+
+        Returns:
+            str | None: The archive's SHA-256 hex digest, or None when checksums are disabled.
+        """
+        hasher = hashlib.sha256() if self.settings.use_checksums else None
+
+        with destination.open("wb") as raw:
+            # Tee the compressed bytes through the hash as tarfile writes them.
+            stream = HashingWriter(fileobj=raw, hasher=hasher) if hasher is not None else raw
+            with tarfile.open(
+                fileobj=cast("IO[bytes]", stream),
+                mode="w:gz",
+                compresslevel=self.settings.compression_level,
+            ) as tar:
+                for source in self.settings.source_paths or []:
+                    self._archive_source(tar, source, excluded_paths=excluded_paths)
+                for snapshot in snapshots:
+                    logger.trace("Add sqlite snapshot to tar: {}", snapshot.arcname)
+                    tar.add(snapshot.snapshot, arcname=snapshot.arcname, recursive=False)
+
+        return hasher.hexdigest() if hasher is not None else None
+
     def _tar_add_filter(
-        self, source: Path, *, strip: bool
+        self, source: Path, *, strip: bool, excluded_paths: frozenset[Path]
     ) -> Callable[[tarfile.TarInfo], tarfile.TarInfo | None]:
         """Build a tarfile add-filter that applies the include/exclude rules per entry.
 
@@ -598,6 +738,8 @@ class EZBak:
         Args:
             source (Path): The source directory the entries are walked from.
             strip (bool): Whether the archive names omit the source directory name.
+            excluded_paths (frozenset[Path]): Live files that a snapshot replaces, which
+                must not be archived from the walk.
 
         Returns:
             Callable[[tarfile.TarInfo], tarfile.TarInfo | None]: The tarfile add-filter.
@@ -608,13 +750,30 @@ class EZBak:
         # With strip, archive names are relative to the source itself; without, they
         # start with the source's own directory name, so anchor one level higher.
         prefix = str(source if strip else source.parent)
+        # Translate once to archive names so the per-entry check is a set lookup on
+        # tarinfo.name rather than another path reconstruction. Mirror _archive_source's
+        # arcname construction exactly, empty prefix included, so a source at the
+        # filesystem root cannot make the two disagree.
+        name_prefix = "" if strip else source.name
+        excluded_names = {
+            f"{name_prefix}/{path.relative_to(source).as_posix()}"
+            if name_prefix
+            else path.relative_to(source).as_posix()
+            for path in excluded_paths
+            if path != source and path.is_relative_to(source)
+        }
 
         def _add_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
             if tarinfo.isdir():
                 logger.trace("Add to tar: {}", tarinfo.name)
                 return tarinfo
+            # Checked before the exclusion set so the symlink policy is reported the same
+            # way everywhere, rather than a symlinked database being dropped silently.
             if tarinfo.issym():
                 logger.warning(f"Skip backup of symlink: {prefix}/{tarinfo.name}")
+                return None
+            if tarinfo.name in excluded_names:
+                logger.trace("Skip live sqlite file: {}", tarinfo.name)
                 return None
             if passes_filters(
                 path=f"{prefix}/{tarinfo.name}",
@@ -627,7 +786,9 @@ class EZBak:
 
         return _add_filter
 
-    def _archive_source(self, tar: tarfile.TarFile, source: Path) -> None:
+    def _archive_source(
+        self, tar: tarfile.TarFile, source: Path, *, excluded_paths: frozenset[Path]
+    ) -> None:
         """Add one configured source (a file or a directory tree) to the open archive.
 
         Delegate the recursive directory walk to tarfile so the complete subtree is always
@@ -638,6 +799,8 @@ class EZBak:
         Args:
             tar (tarfile.TarFile): The open archive to add to.
             source (Path): The configured source path.
+            excluded_paths (frozenset[Path]): Live files that a snapshot replaces, which
+                must not be archived from the walk.
 
         Raises:
             ConfigurationError: If source is neither a file nor a directory.
@@ -647,11 +810,14 @@ class EZBak:
             # layout is preserved while tarfile recurses through the rest of the tree.
             strip = self.settings.strip_source_paths
             prefix = "" if strip else source.name
-            add_filter = self._tar_add_filter(source, strip=strip)
+            add_filter = self._tar_add_filter(source, strip=strip, excluded_paths=excluded_paths)
             for child in sorted(source.iterdir()):
                 arcname = f"{prefix}/{child.name}" if prefix else child.name
                 tar.add(child, arcname=arcname, recursive=True, filter=add_filter)
         elif source.is_file() and not source.is_symlink():
+            if source in excluded_paths:
+                logger.trace(f"Skip live sqlite file: {source}")
+                return
             include_pattern, exclude_pattern = compile_filter_patterns(
                 self.settings.include_regex, self.settings.exclude_regex
             )

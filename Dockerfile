@@ -27,11 +27,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.13-slim-trixie
 
 # Runtime-only system deps. tini gives us proper PID 1 signal handling so
-# APScheduler shuts down cleanly on SIGTERM.
+# APScheduler shuts down cleanly on SIGTERM. sqlite3 is the CLI only, for
+# inspecting a database inside a running container; snapshots use the stdlib
+# sqlite3 module, which needs no external binary.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        sqlite3 \
         tar \
         tini \
         tzdata \

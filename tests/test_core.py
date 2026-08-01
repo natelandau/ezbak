@@ -2,15 +2,19 @@
 
 import os
 import shutil
+import sqlite3
 import tarfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from ezbak import sqlite as ezbak_sqlite
 from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.core import EZBak, _FsyncTarFile, ezbak
-from ezbak.exceptions import ConfigurationError
+from ezbak.exceptions import BackupFailedError, ConfigurationError
+from tests.helpers import make_db, row_count, values, write_uncheckpointed
 
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
@@ -419,3 +423,436 @@ def test_restore_backup_without_checksum_fsyncs_large_files(filesystem, tmp_path
     assert result is RestoreOutcome.RESTORED
     assert fsync_spy.call_count >= 2
     assert next(restore_dir.rglob("big.bin")).read_bytes() == payload
+
+
+def test_create_backup_substitutes_a_sqlite_snapshot(tmp_path):
+    """Verify the archive holds a consistent snapshot rather than the live database."""
+    # Given a source tree containing a WAL database with an uncommitted write in flight
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "plain.txt").write_text("hello")
+    make_db(src / "app.db", rows=5)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+    )
+
+    with closing(sqlite3.connect(src / "app.db")) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("INSERT INTO t (v) VALUES ('uncommitted')")
+
+        # When creating a backup
+        backup.create_backup()
+
+    # Then the archive holds the database and the ordinary file, but no journal siblings
+    names = _archive_file_members(dest)
+
+    assert "app.db" in names
+    assert "plain.txt" in names
+    assert not [n for n in names if n.endswith(("-wal", "-shm", "-journal"))]
+
+    # And the archived database is the committed state, without the in-flight write
+    extracted = tmp_path / "extracted"
+    with tarfile.open(next(dest.glob("*.tgz"))) as tar:
+        tar.extractall(path=extracted, filter="data")
+
+    assert row_count(extracted / "app.db") == 5
+
+
+def test_create_backup_restores_a_usable_sqlite_database(tmp_path):
+    """Verify the snapshot round-trips through restore and opens with its rows intact."""
+    # Given a backed-up source tree containing a database
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "app.db", rows=11)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    restore_to = tmp_path / "restored"
+    restore_to.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+        restore_path=restore_to,
+    )
+    backup.create_backup()
+
+    # When restoring it
+    backup.restore_backup()
+
+    # Then the restored database opens with every row
+    assert row_count(restore_to / "app.db") == 11
+
+
+def test_create_backup_fails_when_a_sqlite_snapshot_fails(tmp_path):
+    """Verify a corrupt or unreadable database aborts the run instead of shipping."""
+    # Given a configured sqlite path that is not a database
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "app.db").write_text("not a database")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+    )
+
+    # When creating a backup
+    # Then it fails and writes no archive
+    with pytest.raises(BackupFailedError):
+        backup.create_backup()
+
+    assert not list(dest.glob("*.tgz"))
+
+
+def test_create_backup_removes_staged_sqlite_snapshots(tmp_path):
+    """Verify snapshots do not accumulate in temp between scheduled runs."""
+    # Given a source tree with a database
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "app.db", rows=3)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+    )
+
+    # When creating two backups in a row
+    backup.create_backup()
+    backup.create_backup()
+
+    # Then no snapshot staging directory is left behind
+    assert not list(backup.tmp_dir.glob("sqlite-*"))
+
+
+def test_create_backup_filters_a_sqlite_snapshot(tmp_path):
+    """Verify an excluded database stays out of the archive, snapshot included."""
+    # Given a source tree whose database matches the exclude regex
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "keep.txt").write_text("keep")
+    make_db(src / "app.db", rows=5)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+        exclude_regex=r"\.db$",
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then the archive matches one taken of a quiesced tree: no database at all
+    assert _archive_file_members(dest) == ["keep.txt"]
+
+
+def test_create_backup_places_a_snapshot_without_stripping(tmp_path):
+    """Verify a nested database lands at its live position under the default layout."""
+    # Given a source tree with a database in a subdirectory, backed up without stripping
+    src = tmp_path / "data"
+    (src / "sub").mkdir(parents=True)
+    (src / "keep.txt").write_text("keep")
+    make_db(src / "sub" / "app.db", rows=7)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    restore_to = tmp_path / "restored"
+    restore_to.mkdir()
+
+    # strip_source_paths is left at its default of False, the layout most backups use
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "sub" / "app.db"],
+        restore_path=restore_to,
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then the snapshot sits where the live database would have, and only once
+    assert sorted(_archive_file_members(dest)) == ["data/keep.txt", "data/sub/app.db"]
+
+    # And it restores to that path with every row
+    backup.restore_backup()
+
+    assert row_count(restore_to / "data" / "sub" / "app.db") == 7
+
+
+@pytest.mark.parametrize("strip", [True, False])
+def test_create_backup_when_the_source_is_the_database(tmp_path, strip):
+    """Verify a source that is itself a database is archived once, as the snapshot."""
+    # Given a database configured as both the source path and the sqlite path
+    db = tmp_path / "app.db"
+    make_db(db, rows=6)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[db],
+        storage_paths=[dest],
+        sqlite_paths=[db],
+        strip_source_paths=strip,
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then the archive holds one member, the snapshot under the database's own name
+    assert _archive_file_members(dest) == ["app.db"]
+
+
+def test_create_backup_deduplicates_repeated_sqlite_paths(tmp_path):
+    """Verify a database listed twice is not archived twice."""
+    # Given the same database configured twice
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "app.db", rows=2)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db", src / "app.db"],
+        strip_source_paths=True,
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then it appears once
+    assert _archive_file_members(dest) == ["app.db"]
+
+
+def test_create_backup_skips_a_symlinked_sqlite_path(tmp_path):
+    """Verify a symlinked database is skipped rather than copied in from outside the source."""
+    # Given a sqlite path that is a symlink to a database outside every source path
+    outside = tmp_path / "outside"
+    make_db(outside / "real.db", rows=3)
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "keep.txt").write_text("keep")
+    (src / "link.db").symlink_to(outside / "real.db")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "link.db"],
+        strip_source_paths=True,
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then the archive holds no content from outside the source tree
+    assert _archive_file_members(dest) == ["keep.txt"]
+
+
+def test_create_backup_does_not_snapshot_a_filtered_database(tmp_path, mocker):
+    """Verify a database the filters drop is never copied, and its journals stay out too."""
+    # Given a source tree whose database and stale journal are both present, with an exclude
+    # regex that matches only the database
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "keep.txt").write_text("keep")
+    make_db(src / "app.db", rows=5)
+    (src / "app.db-wal").write_bytes(b"\x37\x7f\x06\x82" + b"\x00" * 28)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    spy = mocker.spy(ezbak_sqlite, "snapshot_database")
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+        exclude_regex=r"app\.db$",
+    )
+
+    # When creating a backup
+    backup.create_backup()
+
+    # Then no snapshot was taken, and neither the database nor its journal was archived
+    assert spy.call_count == 0
+    assert _archive_file_members(dest) == ["keep.txt"]
+
+
+def test_tar_add_filter_excludes_a_live_database_under_a_root_source(tmp_path):
+    """Verify the exclusion set is built without a leading slash for a source at the root."""
+    # Given a backup whose exclusion set names a database directly under a root source path
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    backup = ezbak(name="test", source_paths=[tmp_path], storage_paths=[dest])
+
+    # When building the add-filter for that source without stripping
+    add_filter = backup._tar_add_filter(
+        Path("/"), strip=False, excluded_paths=frozenset({Path("/app.db")})
+    )
+
+    # Then the live database is dropped under its bare name and other files are kept
+    assert add_filter(tarfile.TarInfo("app.db")) is None
+    assert add_filter(tarfile.TarInfo("notes.txt")) is not None
+
+
+def test_restore_clears_a_stale_wal_at_the_destination(tmp_path):
+    """Verify a previous deployment's uncheckpointed -wal cannot roll a restore back.
+
+    The archive carries no journal files, so a `-wal` already sitting in the restore target
+    would be replayed over the restored database, silently reverting it to older rows.
+    """
+    # Given a restore target holding a database and the -wal a hard-killed run left behind
+    src = tmp_path / "data"
+    src.mkdir()
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+
+    write_uncheckpointed(target / "app.db", "v1-old")
+    assert (target / "app.db-wal").exists(), "expected a stale -wal at the restore target"
+
+    # And a live service whose current state is newer
+    write_uncheckpointed(src / "app.db", "v2-current")
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        sqlite_paths=[src / "app.db"],
+        strip_source_paths=True,
+        restore_path=target,
+    )
+    backup.create_backup()
+
+    # When restoring over the populated target
+    result = backup.restore_backup()
+
+    # Then the stale journal is gone and the restored database holds the current rows
+    assert result is RestoreOutcome.RESTORED
+    assert not (target / "app.db-wal").exists()
+    assert not (target / "app.db-shm").exists()
+    assert values(target / "app.db") == ["v2-current"]
+
+
+def test_restore_keeps_a_file_only_named_like_a_journal(tmp_path):
+    """Verify a plain file whose name ends in -wal is never deleted by a restore."""
+    # Given a restore target holding a text file named like a journal, beside a file the
+    # archive replaces
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "notes").write_text("new notes")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "notes").write_text("old notes")
+    (target / "notes-wal").write_text("not a sqlite journal")
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        strip_source_paths=True,
+        restore_path=target,
+    )
+    backup.create_backup()
+
+    # When restoring over it
+    backup.restore_backup()
+
+    # Then the lookalike survives untouched and the restore still happened
+    assert (target / "notes-wal").read_text() == "not a sqlite journal"
+    assert (target / "notes").read_text() == "new notes"
+
+
+def test_restore_keeps_a_shm_beside_a_non_database(tmp_path):
+    """Verify a -shm is only removed when the file it sits beside is really a database.
+
+    A `-shm` carries no identifying header, so the restored base file is what rules the
+    removal in or out.
+    """
+    # Given a restore target holding a -shm beside a plain file the archive replaces
+    src = tmp_path / "data"
+    src.mkdir()
+    (src / "notes").write_text("new notes")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "notes").write_text("old notes")
+    (target / "notes-shm").write_bytes(b"unrelated shared memory")
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        strip_source_paths=True,
+        restore_path=target,
+    )
+    backup.create_backup()
+
+    # When restoring over it
+    backup.restore_backup()
+
+    # Then the unrelated file survives untouched
+    assert (target / "notes-shm").read_bytes() == b"unrelated shared memory"
+    assert (target / "notes").read_text() == "new notes"
+
+
+def test_restore_keeps_a_journal_the_archive_supplies(tmp_path):
+    """Verify a journal that came from the archive is restored rather than deleted."""
+    # Given an archive holding a database and a real -wal beside it, taken with no
+    # sqlite_paths so the journals are archived as ordinary files
+    src = tmp_path / "data"
+    src.mkdir()
+    make_db(src / "app.db", rows=2)
+    (src / "app.db-wal").write_bytes(b"\x37\x7f\x06\x82" + b"\x00" * 28)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+
+    backup = ezbak(
+        name="test",
+        source_paths=[src],
+        storage_paths=[dest],
+        strip_source_paths=True,
+        restore_path=target,
+    )
+    backup.create_backup()
+
+    # When restoring
+    backup.restore_backup()
+
+    # Then the archived journal lands beside its database
+    assert (target / "app.db-wal").read_bytes() == b"\x37\x7f\x06\x82" + b"\x00" * 28

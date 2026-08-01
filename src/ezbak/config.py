@@ -17,6 +17,7 @@ from ezbak.constants import (
     LogLevel,
 )
 from ezbak.retention import RetentionPolicyManager
+from ezbak.sqlite import containing_source_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -93,6 +94,12 @@ class BackupConfig(BaseModel):
         default_factory=list
     )
     storage_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
+        default_factory=list
+    )
+    # Databases to snapshot through SQLite's online-backup API rather than copy as files. Each
+    # must sit inside exactly one source path: the snapshot replaces the live file at the same
+    # position in the archive, and its journal siblings are excluded from the walk.
+    sqlite_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
         default_factory=list
     )
 
@@ -190,5 +197,19 @@ class BackupConfig(BaseModel):
         if not self.storage_paths and not self.aws_s3_bucket_name:
             msg = "No storage configured: set storage_paths and/or aws_s3_bucket_name"
             raise ValueError(msg)
+
+        if self.sqlite_paths:
+            # A repeated database would be snapshotted twice and added to the archive twice.
+            self.sqlite_paths = list(dict.fromkeys(self.sqlite_paths))
+
+        for sqlite_path in self.sqlite_paths or []:
+            matches = containing_source_paths(sqlite_path, source_paths=self.source_paths or [])
+            if not matches:
+                msg = f"sqlite path '{sqlite_path}' is not inside any configured source path"
+                raise ValueError(msg)
+            if len(matches) > 1:
+                listed = ", ".join(f"'{m}'" for m in matches)
+                msg = f"sqlite path '{sqlite_path}' is inside more than one source path ({listed})"
+                raise ValueError(msg)
 
         return self

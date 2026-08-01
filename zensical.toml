@@ -61,6 +61,7 @@ nav = [
     "concepts/backup-names.md",
     "concepts/storage-locations.md",
     "concepts/filtering.md",
+    "concepts/sqlite.md",
     "concepts/retention.md",
     "concepts/checksums.md",
     "concepts/failure-behavior.md",

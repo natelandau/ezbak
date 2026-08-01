@@ -166,6 +166,18 @@ class CreateCommand:
         ),
     ] = False
 
+    sqlite_paths: Annotated[
+        list[Path],
+        cappa.Arg(
+            long="sqlite-path",
+            help=(
+                "Path to a SQLite database inside a source path to snapshot consistently "
+                "instead of copying. Repeat for multiple databases."
+            ),
+            group=(3, "Optional"),
+        ),
+    ] = None
+
     compression_level: Annotated[
         int,
         cappa.Arg(
@@ -419,6 +431,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
             "exclude_regex": cmd.exclude_regex,
             "compression_level": cmd.compression_level,
             "use_checksums": cmd.use_checksums,
+            "sqlite_paths": cmd.sqlite_paths,
         }
     elif isinstance(cmd, RestoreCommand):
         extra = {

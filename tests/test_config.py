@@ -200,3 +200,83 @@ def test_restore_populated_ignore_filenames():
     # Then the populated-ignore list is a superset that adds lost+found
     assert set(ALWAYS_EXCLUDE_FILENAMES).issubset(RESTORE_POPULATED_IGNORE_FILENAMES)
     assert "lost+found" in RESTORE_POPULATED_IGNORE_FILENAMES
+
+
+def test_backupconfig_sqlite_paths_defaults_to_empty():
+    """Verify the option is inert when unset."""
+    # Given a config with no sqlite paths
+    config = BackupConfig(name="x", storage_paths=["/tmp"], source_paths=["/data"])  # ruff:ignore[hardcoded-temp-file]
+
+    # Then the list is empty
+    assert config.sqlite_paths == []
+
+
+def test_backupconfig_sqlite_paths_accepts_a_comma_separated_string():
+    """Verify the env-style comma-separated form is coerced to paths."""
+    # Given a comma-separated value like an env var supplies
+    config = BackupConfig(
+        name="x",
+        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        source_paths=["/data"],
+        sqlite_paths="/data/a.db,/data/b.db",
+    )
+
+    # Then it becomes a list of absolute paths
+    assert config.sqlite_paths == [Path("/data/a.db"), Path("/data/b.db")]
+
+
+def test_backupconfig_rejects_sqlite_path_outside_sources():
+    """Verify a database with no enclosing source is rejected at construction."""
+    # Given a sqlite path outside every source path
+    # When constructing the config
+    # Then validation fails, naming the offending path
+    with pytest.raises(ValidationError, match="elsewhere"):
+        BackupConfig(
+            name="x",
+            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            source_paths=["/data"],
+            sqlite_paths=["/elsewhere/a.db"],
+        )
+
+
+def test_backupconfig_rejects_sqlite_path_under_overlapping_sources():
+    """Verify nested sources are rejected, since the archive position would be ambiguous."""
+    # Given two configured sources that both contain the database
+    # When constructing the config
+    # Then validation fails
+    with pytest.raises(ValidationError, match="more than one"):
+        BackupConfig(
+            name="x",
+            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            source_paths=["/data", "/data/gitea"],
+            sqlite_paths=["/data/gitea/gitea.db"],
+        )
+
+
+def test_backupconfig_accepts_sqlite_path_equal_to_a_file_source():
+    """Verify backing up a single database file directly is allowed."""
+    # Given a source path that is itself the database
+    config = BackupConfig(
+        name="x",
+        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        source_paths=["/data/gitea.db"],
+        sqlite_paths=["/data/gitea.db"],
+    )
+
+    # Then it validates
+    assert config.sqlite_paths == [Path("/data/gitea.db")]
+
+
+def test_envconfig_reads_sqlite_paths(monkeypatch):
+    """Verify the container surface picks the option up from the environment."""
+    # Given EZBAK_ env vars including sqlite paths
+    monkeypatch.setenv("EZBAK_NAME", "from-env")
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # ruff:ignore[hardcoded-temp-file]
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", "/data")
+    monkeypatch.setenv("EZBAK_SQLITE_PATHS", "/data/gitea/gitea.db")
+
+    # When building an EnvConfig
+    config = EnvConfig(_env_file=None)
+
+    # Then the sqlite paths are loaded
+    assert config.sqlite_paths == [Path("/data/gitea/gitea.db")]

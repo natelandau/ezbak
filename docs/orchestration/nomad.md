@@ -140,6 +140,13 @@ backups reachable from any host the job lands on.
   never modify the service's live data.
 - All three point at the same `EZBAK_AWS_S3_BUCKET_NAME` and `EZBAK_NAME`.
 
+!!! warning "EZBAK_SQLITE_PATHS needs a writable mount"
+
+    Setting `EZBAK_SQLITE_PATHS` is the one exception to the read-only mounts
+    above. SQLite may have to create a `-shm` file to read a WAL database, so
+    drop `read_only = true` from the backup tasks' `volume_mount` when you
+    snapshot databases. See [SQLite databases](../concepts/sqlite.md#mount-the-source-read-write).
+
 !!! warning "A shutdown backup races the kill timeout"
 
     Set `EZBAK_BACKUP_ON_SHUTDOWN = "true"` on the backup sidecar to back up once
