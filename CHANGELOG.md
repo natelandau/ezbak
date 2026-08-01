@@ -1,3 +1,9 @@
+## v1.5.0 (2026-07-31)
+
+### Feat
+
+- **sqlite**: back up live sqlite databases consistently (#69)
+
 ## v1.4.0 (2026-07-26)
 
 ### Feat
