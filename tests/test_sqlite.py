@@ -10,17 +10,22 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 from ezbak import sqlite as ezbak_sqlite
 from ezbak.exceptions import SqliteSnapshotError
 from ezbak.sqlite import (
     archive_name_for,
     containing_source_paths,
+    expand_sqlite_paths,
     is_sqlite_database,
+    is_sqlite_path_pattern,
     is_sqlite_sidecar,
     sidecar_paths,
     snapshot_database,
     snapshot_databases,
+    static_pattern_prefix,
+    unusable_pattern_component,
 )
 from tests.helpers import make_db, row_count
 
@@ -598,3 +603,251 @@ def test_snapshot_databases_with_no_paths_is_a_noop(tmp_path):
     # Then nothing is produced and no destination is created
     assert result == []
     assert not (tmp_path / "s").exists()
+
+
+def test_is_sqlite_path_pattern_detects_metacharacters(tmp_path):
+    """Verify an entry holding a glob metacharacter is read as a pattern."""
+    # Given entries that do not exist on disk
+    # Then only the ones holding a metacharacter are patterns
+    assert is_sqlite_path_pattern(tmp_path / "*.db")
+    assert is_sqlite_path_pattern(tmp_path / "**" / "*.sqlite3")
+    assert is_sqlite_path_pattern(tmp_path / "app-?.db")
+    assert is_sqlite_path_pattern(tmp_path / "app-[0-9].db")
+    assert not is_sqlite_path_pattern(tmp_path / "app.db")
+
+
+def test_is_sqlite_path_pattern_prefers_an_existing_literal(tmp_path):
+    """Verify a real file whose name holds a metacharacter stays a literal path."""
+    # Given a database genuinely named with a bracket
+    literal = tmp_path / "weird[1].db"
+    make_db(literal)
+
+    # Then the literal reading wins over the glob reading
+    assert not is_sqlite_path_pattern(literal)
+
+
+def test_is_sqlite_path_pattern_treats_a_broken_symlink_as_a_literal(tmp_path):
+    """Verify a dangling link is a literal, so it is reported as a skipped symlink later."""
+    # Given a symlink with a metacharacter in its name pointing nowhere
+    link = tmp_path / "gone[1].db"
+    link.symlink_to(tmp_path / "missing.db")
+
+    # Then it is still a literal, since the path exists even though the target does not
+    assert not is_sqlite_path_pattern(link)
+
+
+def test_static_pattern_prefix_returns_the_rooted_directory():
+    """Verify the prefix is every component before the first that globs."""
+    # Given absolute patterns rooted at a real directory
+    # Then the prefix stops at the first globbing component
+    assert static_pattern_prefix(Path("/data/db/*.db")) == Path("/data/db")
+    assert static_pattern_prefix(Path("/data/**/app.db")) == Path("/data")
+    assert static_pattern_prefix(Path("/data/*/*.db")) == Path("/data")
+
+
+def test_static_pattern_prefix_is_none_when_the_first_component_globs():
+    """Verify a pattern with nothing static to check reports no prefix."""
+    # Given patterns whose first component already globs
+    # Then there is no prefix worth checking for existence
+    assert static_pattern_prefix(Path("/**/*.db")) is None
+    assert static_pattern_prefix(Path("**/*/*.db")) is None
+
+
+def test_expand_sqlite_paths_passes_literals_through(tmp_path):
+    """Verify a literal entry is untouched, including one that does not exist yet."""
+    # Given a source holding one database and a literal entry for a database not yet created
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "app.db")
+    missing = source / "later.db"
+
+    # When expanding
+    result = expand_sqlite_paths([source / "app.db", missing], source_paths=[source])
+
+    # Then both literals survive, so snapshot_databases still reports the missing one
+    assert result == [source / "app.db", missing]
+
+
+def test_expand_sqlite_paths_expands_an_absolute_pattern(tmp_path):
+    """Verify an absolute pattern resolves to every matching database."""
+    # Given a directory of generated database names
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "folder.0001-nhx4yzcl.db")
+    make_db(source / "folder.0002-j4dkatqn.db")
+    make_db(source / "main.db")
+
+    # When expanding an absolute pattern
+    result = expand_sqlite_paths([source / "*.db"], source_paths=[source])
+
+    # Then every database is matched, in sorted order
+    assert result == [
+        source / "folder.0001-nhx4yzcl.db",
+        source / "folder.0002-j4dkatqn.db",
+        source / "main.db",
+    ]
+
+
+def test_expand_sqlite_paths_anchors_a_relative_pattern_to_each_source(tmp_path):
+    """Verify a relative pattern expands against every source, never the process CWD."""
+    # Given two sources that each hold a database
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    make_db(first / "a.db")
+    make_db(second / "b.db")
+
+    # When expanding a relative pattern
+    result = expand_sqlite_paths([Path("*.db")], source_paths=[first, second])
+
+    # Then it matched inside both sources, in configured source order
+    assert result == [first / "a.db", second / "b.db"]
+
+
+def test_expand_sqlite_paths_recurses_with_double_star(tmp_path):
+    """Verify ** reaches databases nested below the pattern's root."""
+    # Given databases at two depths
+    source = tmp_path / "data"
+    (source / "nested" / "deep").mkdir(parents=True)
+    make_db(source / "top.db")
+    make_db(source / "nested" / "deep" / "bottom.db")
+
+    # When expanding a recursive pattern
+    result = expand_sqlite_paths([source / "**" / "*.db"], source_paths=[source])
+
+    # Then both depths are matched
+    assert set(result) == {source / "top.db", source / "nested" / "deep" / "bottom.db"}
+
+
+def test_expand_sqlite_paths_drops_journal_siblings(tmp_path):
+    """Verify a broad pattern never returns a wal, shm, or journal file."""
+    # Given a database with journal siblings beside it
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "app.db")
+    (source / "app.db-wal").write_bytes(b"\x37\x7f\x06\x82" + b"\x00" * 28)
+    (source / "app.db-shm").write_bytes(b"\x00" * 32)
+    (source / "app.db-journal").write_bytes(b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7")
+
+    # When expanding a pattern broad enough to match them
+    result = expand_sqlite_paths([source / "app.db*"], source_paths=[source])
+
+    # Then only the database itself survives
+    assert result == [source / "app.db"]
+
+
+def test_expand_sqlite_paths_drops_non_databases(tmp_path):
+    """Verify a match that is not a database is left to the ordinary file walk."""
+    # Given a text file wearing a database extension, and a real database
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "real.db")
+    (source / "notes.db").write_text("not a database")
+    (source / "subdir.db").mkdir()
+
+    # When expanding
+    result = expand_sqlite_paths([source / "*.db"], source_paths=[source])
+
+    # Then only the real database is returned
+    assert result == [source / "real.db"]
+
+
+def test_expand_sqlite_paths_drops_matches_outside_sources(tmp_path):
+    """Verify a pattern reaching past every source path yields nothing for those matches."""
+    # Given a database outside the configured source
+    source = tmp_path / "data"
+    outside = tmp_path / "outside"
+    source.mkdir()
+    outside.mkdir()
+    make_db(source / "inside.db")
+    make_db(outside / "stray.db")
+
+    # When expanding a pattern that spans both directories
+    result = expand_sqlite_paths([tmp_path / "*" / "*.db"], source_paths=[source])
+
+    # Then only the match inside the source survives
+    assert result == [source / "inside.db"]
+
+
+def test_expand_sqlite_paths_dedupes_overlapping_patterns(tmp_path):
+    """Verify a database matched twice is snapshotted once."""
+    # Given one database matched by two patterns
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "app.db")
+
+    # When expanding both
+    result = expand_sqlite_paths([source / "*.db", source / "app.*"], source_paths=[source])
+
+    # Then it appears once
+    assert result == [source / "app.db"]
+
+
+def test_expand_sqlite_paths_warns_when_a_pattern_matches_nothing(tmp_path):
+    """Verify a pattern matching nothing warns rather than failing the run."""
+    # Given a source with no databases and a sink capturing warnings
+    source = tmp_path / "data"
+    source.mkdir()
+    messages: list[str] = []
+    logger.add(messages.append, level="WARNING")
+
+    # When expanding a pattern that matches nothing
+    result = expand_sqlite_paths([source / "*.db"], source_paths=[source])
+
+    # Then nothing is returned and the operator is told
+    assert result == []
+    assert any("matched no sqlite databases" in message for message in messages)
+
+
+def test_expand_sqlite_paths_preserves_order_across_literals_and_patterns(tmp_path):
+    """Verify a list mixing literal and pattern entries expands in configured order."""
+    # Given a literal, a pattern matching two databases, and another literal, in that order
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "first.db")
+    make_db(source / "shard-a.db")
+    make_db(source / "shard-b.db")
+    make_db(source / "last.db")
+
+    # When expanding the mixed list
+    result = expand_sqlite_paths(
+        [source / "first.db", source / "shard-*.db", source / "last.db"],
+        source_paths=[source],
+    )
+
+    # Then each literal keeps its configured position, with the pattern's matches
+    # inserted in its place
+    assert result == [
+        source / "first.db",
+        source / "shard-a.db",
+        source / "shard-b.db",
+        source / "last.db",
+    ]
+
+
+def test_unusable_pattern_component_flags_a_partial_double_star():
+    """Verify a '**' glued to other characters is reported, since globbing it is unreliable."""
+    # Given patterns that misuse the recursive wildcard
+    # Then the offending component is named
+    assert unusable_pattern_component(Path("/data/**.db")) == "**.db"
+    assert unusable_pattern_component(Path("a**b/*.db")) == "a**b"
+
+    # And a well-formed pattern reports nothing
+    assert unusable_pattern_component(Path("/data/**/*.db")) is None
+    assert unusable_pattern_component(Path("/data/*.db")) is None
+
+
+def test_expand_sqlite_paths_skips_a_fifo_without_opening_it(tmp_path):
+    """Verify a fifo match is dropped by stat, since reading its header would block forever."""
+    # Given a fifo sharing the pattern's extension, beside a real database
+    source = tmp_path / "data"
+    source.mkdir()
+    make_db(source / "real.db")
+    os.mkfifo(source / "pipe.db")
+
+    # When expanding a pattern that matches both
+    result = expand_sqlite_paths([source / "*.db"], source_paths=[source])
+
+    # Then only the database is returned, and the call did not hang on the fifo
+    assert result == [source / "real.db"]

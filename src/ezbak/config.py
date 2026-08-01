@@ -17,7 +17,12 @@ from ezbak.constants import (
     LogLevel,
 )
 from ezbak.retention import RetentionPolicyManager
-from ezbak.sqlite import containing_source_paths
+from ezbak.sqlite import (
+    containing_source_paths,
+    is_sqlite_path_pattern,
+    static_pattern_prefix,
+    unusable_pattern_component,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,6 +88,87 @@ def coerce_path_list(value: list[str] | str | None) -> list[Path]:
     return [Path(str(path).strip()).expanduser().absolute() for path in value if str(path).strip()]
 
 
+def coerce_sqlite_path_list(value: list[str] | str | None) -> list[Path]:
+    """Coerce sqlite path entries, leaving relative glob patterns relative.
+
+    Literal entries are resolved exactly as every other path option is. A relative pattern
+    is left alone because it is anchored to each configured source path at expansion time;
+    resolving it against the process working directory here would point it somewhere the
+    operator never named, and in a container that is whatever the image happened to set.
+
+    Args:
+        value (list[str] | str | None): The raw entries, or a comma-separated string.
+
+    Returns:
+        list[Path]: The coerced entries.
+    """
+    if value is None:
+        return []
+
+    raw = value.split(",") if isinstance(value, str) else [str(item) for item in value]
+
+    coerced: list[Path] = []
+    for item in raw:
+        text = item.strip()
+        if not text:
+            continue
+        path = Path(text).expanduser()
+        coerced.append(path if is_sqlite_path_pattern(path) else path.absolute())
+
+    return coerced
+
+
+def validate_sqlite_path(entry: Path, *, source_paths: list[Path]) -> None:
+    """Reject a sqlite path entry that cannot produce a placeable snapshot.
+
+    Fail here, when the config is built, rather than mid-backup: an orchestrator can act on a
+    container that refuses to start, but a scheduled run that dies halfway leaves a service
+    with no archive and nothing obvious to look at.
+
+    Args:
+        entry (Path): The configured sqlite path, literal or pattern.
+        source_paths (list[Path]): The configured backup source paths.
+
+    Raises:
+        ValueError: If the entry cannot be expanded or placed in the archive.
+    """
+    # Containment is decided with is_relative_to, which is purely lexical, so a '..' would
+    # look like it sits inside a source path and then be archived under an arcname holding
+    # '..' that the restore's data filter refuses to extract.
+    if ".." in entry.parts:
+        msg = f"sqlite path '{entry}' contains a '..' component; give the path it points at instead"
+        raise ValueError(msg)
+
+    if not is_sqlite_path_pattern(entry):
+        matches = containing_source_paths(entry, source_paths=source_paths)
+        if not matches:
+            msg = f"sqlite path '{entry}' is not inside any configured source path"
+            raise ValueError(msg)
+        if len(matches) > 1:
+            listed = ", ".join(f"'{m}'" for m in matches)
+            msg = f"sqlite path '{entry}' is inside more than one source path ({listed})"
+            raise ValueError(msg)
+        return
+
+    offending = unusable_pattern_component(entry)
+    if offending is not None:
+        msg = (
+            f"sqlite path pattern '{entry}' has an unusable component '{offending}': "
+            f"'**' must be a whole path component"
+        )
+        raise ValueError(msg)
+
+    # Only an absolute pattern has a directory worth checking. A relative one is anchored to
+    # the source paths, and its matches are checked as they are found.
+    prefix = static_pattern_prefix(entry) if entry.is_absolute() else None
+    if prefix is not None and not prefix.is_dir():
+        msg = (
+            f"sqlite path pattern '{entry}' is rooted at '{prefix}', "
+            f"which is not an existing directory"
+        )
+        raise ValueError(msg)
+
+
 class BackupConfig(BaseModel):
     """Validated configuration for a set of ezbak backups.
 
@@ -96,10 +182,13 @@ class BackupConfig(BaseModel):
     storage_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
         default_factory=list
     )
-    # Databases to snapshot through SQLite's online-backup API rather than copy as files. Each
-    # must sit inside exactly one source path: the snapshot replaces the live file at the same
-    # position in the archive, and its journal siblings are excluded from the walk.
-    sqlite_paths: Annotated[list[Path] | None, BeforeValidator(coerce_path_list)] = Field(
+    # Databases to snapshot through SQLite's online-backup API rather than copy as files. A
+    # literal entry must sit inside exactly one source path: the snapshot replaces the live
+    # file at the same position in the archive, and its journal siblings are excluded from the
+    # walk. A glob pattern is exempt from that containment check at this point; only its static
+    # directory prefix, if any, must exist, since containment is enforced per match once the
+    # pattern is expanded.
+    sqlite_paths: Annotated[list[Path] | None, BeforeValidator(coerce_sqlite_path_list)] = Field(
         default_factory=list
     )
 
@@ -203,13 +292,6 @@ class BackupConfig(BaseModel):
             self.sqlite_paths = list(dict.fromkeys(self.sqlite_paths))
 
         for sqlite_path in self.sqlite_paths or []:
-            matches = containing_source_paths(sqlite_path, source_paths=self.source_paths or [])
-            if not matches:
-                msg = f"sqlite path '{sqlite_path}' is not inside any configured source path"
-                raise ValueError(msg)
-            if len(matches) > 1:
-                listed = ", ".join(f"'{m}'" for m in matches)
-                msg = f"sqlite path '{sqlite_path}' is inside more than one source path ({listed})"
-                raise ValueError(msg)
+            validate_sqlite_path(sqlite_path, source_paths=self.source_paths or [])
 
         return self

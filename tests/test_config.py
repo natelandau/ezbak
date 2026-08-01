@@ -12,6 +12,7 @@ from ezbak.constants import (
     RestoreOutcome,
 )
 from ezbak.env import EnvConfig
+from tests.helpers import make_db
 
 
 def test_backupconfig_requires_name():
@@ -280,3 +281,133 @@ def test_envconfig_reads_sqlite_paths(monkeypatch):
 
     # Then the sqlite paths are loaded
     assert config.sqlite_paths == [Path("/data/gitea/gitea.db")]
+
+
+def test_backupconfig_keeps_a_relative_sqlite_pattern_relative():
+    """Verify a relative pattern is not nailed to the process working directory."""
+    # Given a relative pattern, which is anchored to source paths at expansion time
+    config = BackupConfig(
+        name="x",
+        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        source_paths=["/data"],
+        sqlite_paths=["**/*.db"],
+    )
+
+    # Then it survives coercion unchanged
+    assert config.sqlite_paths == [Path("**/*.db")]
+
+
+def test_backupconfig_accepts_an_absolute_sqlite_pattern(tmp_path):
+    """Verify an absolute pattern rooted at a real directory is accepted, regardless of containment."""
+    # Given a pattern whose static prefix sits above every configured source path;
+    # containment is enforced per match at expansion time, not on the pattern itself
+    source = tmp_path / "data"
+    first = source / "a"
+    second = source / "b"
+    first.mkdir(parents=True)
+    second.mkdir()
+
+    config = BackupConfig(
+        name="x",
+        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        source_paths=[first, second],
+        sqlite_paths=[source / "*.db"],
+    )
+
+    # Then it is stored as written, with no expansion at construction time
+    assert config.sqlite_paths == [source / "*.db"]
+
+
+def test_backupconfig_accepts_a_pattern_rooted_at_an_empty_directory(tmp_path):
+    """Verify a fresh deployment with no databases yet still constructs, regardless of containment."""
+    # Given an existing but empty data directory whose pattern sits above every source path;
+    # containment is enforced per match at expansion time, not on the pattern itself
+    source = tmp_path / "data"
+    first = source / "a"
+    second = source / "b"
+    first.mkdir(parents=True)
+    second.mkdir()
+
+    # Then the config is valid, since the databases arrive with the service
+    config = BackupConfig(
+        name="x",
+        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        source_paths=[first, second],
+        sqlite_paths=[source / "**" / "*.db"],
+    )
+
+    assert config.sqlite_paths == [source / "**" / "*.db"]
+
+
+def test_backupconfig_rejects_a_pattern_rooted_at_a_missing_directory(tmp_path):
+    """Verify a mistyped directory in a pattern fails at construction, not silently."""
+    # Given an absolute pattern whose static prefix does not exist
+    source = tmp_path / "data"
+    source.mkdir()
+
+    # When constructing the config
+    # Then validation fails, naming the directory that is missing
+    with pytest.raises(ValidationError, match="is not an existing directory"):
+        BackupConfig(
+            name="x",
+            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            source_paths=[source],
+            sqlite_paths=[source / "typo" / "*.db"],
+        )
+
+
+def test_backupconfig_skips_source_containment_for_patterns(tmp_path):
+    """Verify a pattern is not checked for containment, since only matches can be."""
+    # Given a pattern whose static prefix sits above every source path
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+
+    # When constructing the config
+    # Then it is accepted, because matches under either source are legitimate
+    config = BackupConfig(
+        name="x",
+        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        source_paths=[first, second],
+        sqlite_paths=[tmp_path / "*" / "*.db"],
+    )
+
+    assert config.sqlite_paths == [tmp_path / "*" / "*.db"]
+
+
+def test_backupconfig_rejects_a_sqlite_path_with_a_parent_component(tmp_path):
+    """Verify a '..' entry fails at construction rather than producing an unrestorable archive."""
+    # Given a literal path that escapes its source path through '..'
+    source = tmp_path / "data"
+    outside = tmp_path / "etc"
+    source.mkdir()
+    outside.mkdir()
+    make_db(outside / "app.db")
+
+    # When constructing the config
+    # Then validation fails, since containment is decided without resolving the path
+    with pytest.raises(ValidationError, match=r"contains a '\.\.' component"):
+        BackupConfig(
+            name="x",
+            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            source_paths=[source],
+            sqlite_paths=[source / ".." / "etc" / "app.db"],
+        )
+
+
+def test_backupconfig_rejects_a_partial_double_star_component(tmp_path):
+    """Verify a '**' that is not a whole component fails at construction, not mid-backup."""
+    # Given a pattern whose recursive wildcard is glued to an extension
+    source = tmp_path / "data"
+    source.mkdir()
+
+    # When constructing the config
+    # Then validation fails, naming the component Python cannot glob consistently
+    with pytest.raises(ValidationError, match="'\\*\\*' must be a whole path component"):
+        BackupConfig(
+            name="x",
+            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            source_paths=[source],
+            sqlite_paths=[source / "**.db"],
+        )
