@@ -5,27 +5,28 @@ icon: lucide/settings
 # Configuration reference
 
 ezbak takes the same options three ways: as `EZBAK_` environment variables (the
-container), as command-line flags, or as arguments to the Python library's
-`BackupConfig`. Each table below gives an option's library field, environment
-variable, CLI flag, and default, so you never have to translate between surfaces.
-Every ezbak option appears in one of these tables. For how `EZBAK_` variables are
-read from the environment and `.env` files, see [Environment
-variables](environment-variables.md); for runnable container commands, see
-[Running in Docker](../guides/docker.md).
+container), as command-line flags, or as arguments to `BackupConfig` in the
+Python library. Each table below gives the library field, environment variable,
+CLI flag, and default of an option. You therefore never have to translate
+between the three interfaces. Every ezbak option appears in one of these tables. For how
+ezbak reads `EZBAK_` variables from the environment and from `.env` files, see
+[Environment variables](environment-variables.md). For runnable container
+commands, see [Running in Docker](../guides/docker.md).
 
-The environment variable is the field name uppercased with an `EZBAK_` prefix, so
-`source_paths` becomes `EZBAK_SOURCE_PATHS`. CLI flags use their own names, which
-do not always match, and some sit on a subcommand such as `create` or `prune`.
+The environment variable is the field name in uppercase with an `EZBAK_` prefix,
+so `source_paths` becomes `EZBAK_SOURCE_PATHS`. CLI flags use their own names,
+which do not always match. Some of them sit on a subcommand such as `create` or
+`prune`.
 
 A few things to know before the tables:
 
-- Credentials and a couple of other options are read only from the environment,
-  with no CLI flag (`aws_access_key`, `aws_secret_key`, `tz`). This keeps
-  credentials out of your shell history.
+- ezbak reads credentials, and two other options, only from the environment, with
+  no CLI flag (`aws_access_key`, `aws_secret_key`, `tz`). This keeps credentials
+  out of your shell history.
 - Some options apply only to the container (`EZBAK_ACTION`, `healthcheck_url`).
-  They have no library field or CLI flag and are collected in
+  They have no library field and no CLI flag, and they are in
   [Container-only options](#container-only-options) below.
-- At least one storage location is required: set `storage_paths`,
+- At least one storage location is required. Set `storage_paths`,
   `aws_s3_bucket_name`, or both.
 
 ## Identity and sources
@@ -37,16 +38,17 @@ A few things to know before the tables:
 | `sqlite_paths` | `EZBAK_SQLITE_PATHS` | `create --sqlite-path` | none |
 
 `name` identifies the backup set and groups its files. `source_paths` lists the
-files and directories to archive. Pass multiple sources by repeating `--source`
-on the command line, or as a comma-separated string in the environment variable.
+files and directories to archive. To pass multiple sources, repeat `--source` on
+the command line, or give a comma-separated string in the environment variable.
 
-`sqlite_paths` names SQLite databases to snapshot through SQLite's online-backup
-API instead of copying as files, so a database that a service holds open is
-archived consistently. Each entry can be a literal path or a glob pattern; a
-literal path must sit inside exactly one source path, and the snapshot is
-archived in the live file's place, leaving the archive layout unchanged.
-Repeat `--sqlite-path` for multiple entries, or give a comma-separated string
-in the environment variable. See [SQLite databases](../concepts/sqlite.md) and
+`sqlite_paths` names the SQLite databases to snapshot through the online-backup
+API of SQLite instead of copying them as files. A database that a service holds
+open is then archived consistently. Each entry is a literal path or a glob
+pattern. A literal path must sit inside exactly one source path. ezbak archives
+the snapshot in the place of the live file, so the archive layout does not
+change. To pass multiple entries, repeat `--sqlite-path`, or give a
+comma-separated string in the environment variable. See
+[SQLite databases](../concepts/sqlite.md) and
 [Match databases with a
 pattern](../concepts/sqlite.md#match-databases-with-a-pattern).
 
@@ -62,13 +64,15 @@ pattern](../concepts/sqlite.md#match-databases-with-a-pattern).
 | `aws_access_key` | `EZBAK_AWS_ACCESS_KEY` | environment only | `None` |
 | `aws_secret_key` | `EZBAK_AWS_SECRET_KEY` | environment only | `None` |
 
-The storage locations you set decide where backups go. There is no
-storage-type selector. See [Storage locations](../concepts/storage-locations.md)
-for the model and [Back up to S3](../guides/s3.md) for the S3 setup.
+The storage locations you set decide where backups go. There is no storage-type
+selector. See [Storage locations](../concepts/storage-locations.md) for the
+model, and [Back up to S3](../guides/s3.md) for the S3 setup.
 
-`aws_access_key` and `aws_secret_key` are optional. Leave both unset and ezbak uses boto3's
-credential chain: an EC2 instance profile, EKS IRSA, an ECS task role, the standard `AWS_*`
-variables, or `~/.aws/credentials`. Setting only one of the two is an error.
+`aws_access_key` and `aws_secret_key` are optional. Leave both unset, and ezbak
+uses the credential chain of boto3. That chain covers an EC2 instance profile,
+EKS IRSA, an ECS task role, the standard `AWS_*` variables, and
+`~/.aws/credentials`. Setting only
+one of the two is an error.
 
 ## Backup behavior
 
@@ -81,32 +85,35 @@ variables, or `~/.aws/credentials`. Setting only one of the two is an error.
 | `exclude_regex` | `EZBAK_EXCLUDE_REGEX` | `create -e`, `--exclude-regex` | `None` |
 | `use_checksums` | `EZBAK_USE_CHECKSUMS` | `create`/`restore` `--use-checksums/--no-use-checksums` | `True` |
 
-`compression_level` is the gzip level from 1 to 9. `strip_source_paths` flattens
-a directory source so `/source/foo.txt` archives as `foo.txt` instead of
-`source/foo.txt`. `delete_source_after_backup` removes the sources after a fully
-successful backup, and never when any storage location failed. See
-[Including and excluding files](../concepts/filtering.md) for the regex options.
+`compression_level` is the gzip level, from 1 to 9. `strip_source_paths` flattens
+a directory source, so `/source/foo.txt` archives as `foo.txt` instead of
+`source/foo.txt`. `delete_source_after_backup` deletes the sources after a fully
+successful backup, and never when any storage location failed. For the two
+regular expressions, see
+[Including and excluding files](../concepts/filtering.md).
 
-`use_checksums` is the master switch for the `.sha256` sidecar feature. With it
-enabled, ezbak writes a sidecar next to each new backup archive (for example
-`my-documents-20241215T143022.tgz.sha256` alongside
-`my-documents-20241215T143022.tgz`) and verifies an archive against its sidecar
-on restore. The sidecar uses the same text format as `sha256sum`, so
-`sha256sum -c` verifies it too. Set `use_checksums` to `false` and ezbak writes
-no new sidecars and skips verification on restore, ignoring any sidecar already
-in storage. See [Archive integrity checksums](../concepts/checksums.md).
+`use_checksums` is the master switch for the `.sha256` checksum file. With the
+option enabled, ezbak writes a checksum file next to each new backup archive, for
+example `my-documents-20241215T143022.tgz.sha256` alongside
+`my-documents-20241215T143022.tgz`. It then verifies an archive against its
+checksum file on restore. The checksum file uses the same text format as
+`sha256sum`, so `sha256sum -c` verifies it too. Set `use_checksums` to `false`,
+and ezbak writes no new checksum files and skips verification on restore. It then
+ignores any checksum file already in storage. See
+[Archive integrity checksums](../concepts/checksums.md).
 
-!!! warning "delete_source_after_backup removes your source data"
+!!! warning "delete_source_after_backup deletes your source data"
 
-    ezbak deletes the sources only after every configured storage location
-    confirms a successful write. An S3-only run with bad credentials fails
-    before this step, so it never deletes the only copy of your data. Still,
-    treat this option with care.
+    Treat this option with care. ezbak deletes the sources only after every
+    configured storage location reports a successful write. An S3-only run with
+    bad credentials fails before this step, so it never deletes the only copy of
+    your data.
 
 ## Retention
 
-Each retention field sets one keep rule. A backup survives pruning if any set
-rule marks it, so the rules compose instead of picking one policy.
+Each retention field sets one keep rule. If any rule you set marks a backup, that
+backup survives the prune. The rules therefore compose, instead of forcing you to
+pick one policy.
 
 | Field | Environment variable | CLI flag | Default |
 | --- | --- | --- | --- |
@@ -118,8 +125,8 @@ rule marks it, so the rules compose instead of picking one policy.
 | `keep_hourly` | `EZBAK_KEEP_HOURLY` | `prune -H`, `--keep-hourly` | `None` |
 | `keep_minutely` | `EZBAK_KEEP_MINUTELY` | `prune -S`, `--keep-minutely` | `None` |
 
-With no rule set, ezbak keeps every backup. Leaving a rule unset, or setting it
-to `0`, marks nothing for that rule. See [Retention policies](../concepts/retention.md).
+With no rule set, ezbak keeps every backup. A rule that you leave unset, or set
+to `0`, marks nothing. See [Retention policies](../concepts/retention.md).
 
 ## Restore
 
@@ -135,26 +142,28 @@ to `0`, marks nothing for that rule. See [Retention policies](../concepts/retent
 
 `restore_date` selects the newest backup at or before a point in time.
 `clean_before_restore` empties the target as part of the restore, after a
-successful extract, and refuses to target a storage location. `skip_if_no_backup`
-turns a missing backup into a clean no-op instead of a failure, but only when
-the destination could be read and was genuinely empty, the fresh-deployment
-case. It does not suppress a failure to *read* a destination: an unreachable
-bucket or a permission error still fails the restore. See [An unreadable
-destination is not an empty
-one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
+successful extract, and it refuses to target a storage location.
+
+`skip_if_no_backup` turns a missing backup into a clean no-op instead of a
+failure. It applies only when the storage location is readable and genuinely
+empty, which is the fresh-deployment case. It does not suppress a
+failure to *read* a location: an unreachable bucket, or a permission error, still
+fails the restore. See [An unreadable storage location is not an empty
+one](../concepts/failure-behavior.md#an-unreadable-storage-location-is-not-an-empty-one).
+
 `skip_restore_if_populated` skips the restore, as a success, when the target
-already holds data other than benign noise (OS cruft, `lost+found`, ezbak's own
-`.ezbak-restore-*` staging dirs); `clean_before_restore` bypasses this guard.
-`chown_uid` and `chown_gid` set ownership on restored files, and both must be
-set together. See [Restore backups](../guides/restore.md).
+already holds data other than benign noise: OS noise files, `lost+found`, and the
+`.ezbak-restore-*` staging directories of ezbak. `clean_before_restore` bypasses
+this guard. `chown_uid` and `chown_gid` set ownership on the restored files, and
+you have to set both together. See [Restore backups](../guides/restore.md).
 
 !!! note "skip_if_no_backup is for the CLI and container"
 
     A library caller does not need `skip_if_no_backup`. `restore_backup()`
     returns `RestoreOutcome.NO_BACKUP` when there is nothing to restore, so the
-    caller decides how to react. The setting exists so the CLI and container can
-    turn that same "nothing to restore" result into a zero exit code. See
-    [Fresh deploys](../orchestration/fresh-deploys.md).
+    caller decides how to react. The option exists so the CLI and the container
+    can turn that same result into a zero exit code. See [Fresh
+    deploys](../orchestration/fresh-deploys.md).
 
 ## Scheduling and timezone
 
@@ -167,7 +176,7 @@ set together. See [Restore backups](../guides/restore.md).
 `cron` turns the container into a scheduled service. `tz` sets the timezone for
 backup timestamps. When `tz` is unset, ezbak uses the system timezone, which the
 `TZ` environment variable controls inside a container. `TZ` is a standard system
-variable, not an `EZBAK_` option, so it has no library field or CLI flag. See
+variable, not an `EZBAK_` option, so it has no library field and no CLI flag. See
 [TZ and EZBAK_TZ](environment-variables.md#tz-and-ezbak_tz).
 
 ## Logging
@@ -178,15 +187,15 @@ variable, not an `EZBAK_` option, so it has no library field or CLI flag. See
 | `log_file` | `EZBAK_LOG_FILE` | `--log-file` | `None` |
 | `log_prefix` | `EZBAK_LOG_PREFIX` | `--log-prefix` | `None` |
 
-`log_level` accepts `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. On the CLI,
-`-v` raises the level to `DEBUG` and `-vv` to `TRACE`. `log_file` also writes
-logs to a file. `log_prefix` adds a prefix to every log line, which helps when
-several ezbak tasks share one log stream.
+`log_level` accepts `TRACE`, `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`.
+On the CLI, `-v` raises the level to `DEBUG` and `-vv` raises it to `TRACE`.
+`log_file` also writes the logs to a file. `log_prefix` adds a prefix to every log
+line, which helps when several ezbak tasks share one log stream.
 
 ## Container-only options
 
-These live on the container adapter, not on the library `BackupConfig`. They
-have no CLI flag.
+These live on the container adapter, not on the library `BackupConfig`. They have
+no CLI flag.
 
 | Setting | Environment variable | Default |
 | --- | --- | --- |
@@ -200,16 +209,21 @@ have no CLI flag.
 | Post-restore hook | `EZBAK_POST_RESTORE_HOOK` | `None` |
 | Hook timeout | `EZBAK_HOOK_TIMEOUT` | `300` |
 
-`EZBAK_ACTION` is `backup` or `restore` and is required to run the container.
-`EZBAK_CRON_JITTER` sets the seconds of random delay added to each scheduled run,
-so a fleet sharing one cron does not hit a destination at the same instant; set
-`0` to disable it. `EZBAK_HEALTHCHECK_URL` pings a monitor after each run,
-scheduled or one-shot. See [Monitoring](../orchestration/monitoring.md).
+`EZBAK_ACTION` is `backup` or `restore`, and it is required to run the container.
+
+`EZBAK_CRON_JITTER` sets the seconds of random delay that ezbak adds to each
+scheduled run. A fleet that shares one cron therefore does not reach a storage
+location at the same instant. Set `0` to disable the delay.
+
+`EZBAK_HEALTHCHECK_URL` pings a monitor after each run, scheduled or one-shot.
+See [Monitoring](../orchestration/monitoring.md).
+
 `EZBAK_BACKUP_ON_SHUTDOWN` takes one final backup when a cron backup container
-receives `SIGTERM` or `SIGINT`; see [Final backup on
-shutdown](../guides/docker.md#final-backup-on-shutdown). The four hook variables
-run a shell command before or after a container backup or restore, and
-`EZBAK_HOOK_TIMEOUT` bounds how long a hook may run; see [Container lifecycle
-hooks](../guides/hooks.md).
+receives `SIGTERM` or `SIGINT`. See [Final backup on
+shutdown](../guides/docker.md#final-backup-on-shutdown).
+
+The four hook variables run a shell command before or after a container backup or
+restore, and `EZBAK_HOOK_TIMEOUT` bounds how long a hook can run. See
+[Container lifecycle hooks](../guides/hooks.md).
 
 *[gzip]: GNU zip compression

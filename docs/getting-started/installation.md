@@ -5,24 +5,24 @@ icon: lucide/download
 # Installation
 
 ezbak ships as three things from one codebase: a Docker container, a Python
-package, and a command-line tool. Install the one that matches how you plan to run
-it. The container is the primary interface; the package and CLI are for scripting,
-local testing, and one-off backups.
+package, and a command-line tool. Install the one that matches how you plan to
+run it. The container is the primary interface. The package and the CLI are for
+scripting, local tests, and one-off backups.
 
-ezbak requires Python 3.11.4 or higher for the package and CLI. The container
-bundles its own runtime.
+The package and the CLI require Python 3.11.4 or higher. The container bundles
+its own runtime.
 
 ## Docker container
 
-Pull the image from the GitHub Container Registry. This is the interface to reach
-for in an orchestrated deployment.
+Pull the image from the GitHub Container Registry. This is the interface to use
+in an orchestrated deployment.
 
 ```bash
 docker pull ghcr.io/natelandau/ezbak:latest
 ```
 
-The container reads its configuration from environment variables. See [Running in
-Docker](../guides/docker.md) to run it.
+The container reads its configuration from environment variables. To run it, see
+[Running in Docker](../guides/docker.md).
 
 ## Python package
 
@@ -58,7 +58,7 @@ Install the CLI on its own to run backups from a shell.
     python -m pip install --user ezbak
     ```
 
-Verify the install:
+Make sure that the CLI runs:
 
 ```bash
 ezbak --help
@@ -68,4 +68,4 @@ See [Using the CLI](../guides/cli.md).
 
 ## Next step
 
-Head to the [quickstart](quickstart.md) for the shortest path to a first backup.
+Read the [quickstart](quickstart.md) for the shortest path to a first backup.

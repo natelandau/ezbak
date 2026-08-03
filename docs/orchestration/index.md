@@ -4,17 +4,18 @@ icon: lucide/workflow
 
 # The orchestration pattern
 
-ezbak exists to move shared state between hosts. A job owns some state, a database
-volume, a cache, or uploaded files, and runs under an orchestrator that can place
-it on any host. ezbak makes the backup follow the job, so a restart or a move to a
-new host comes up with the state already in place.
+ezbak exists to move shared state between hosts. A job owns some state: a
+database volume, a cache, or uploaded files. It runs under an orchestrator that
+can place it on any host. ezbak makes the backup follow the job, so a restart, or
+a move to a new host, comes up with the state already in place.
 
 This is the workflow ezbak is designed around. The container is the primary
 interface, and this section shows the full setup.
 
 ## Three tasks around one job
 
-The canonical deployment runs the same container image as three cooperating tasks:
+The canonical deployment runs the same container image as three cooperating
+tasks:
 
 - A **sidecar** takes backups on a cron schedule while the job runs.
 - A **post-stop** task takes one final backup before the orchestrator tears the
@@ -22,9 +23,9 @@ The canonical deployment runs the same container image as three cooperating task
 - A **pre-start** task fetches the most recent backup and stages it on the target
   host before the job starts.
 
-Point every task at the same S3 bucket, or shared storage, and set the same
-`EZBAK_NAME` so they operate on one backup set. The backups then follow the job
-wherever the orchestrator places it.
+Point every task at the same S3 bucket, or at the same shared storage. Set the
+same `EZBAK_NAME` on each one, so they operate on one backup set. The backups
+then follow the job wherever the orchestrator places it.
 
 ```mermaid
 sequenceDiagram
@@ -45,9 +46,10 @@ sequenceDiagram
     Post->>S3: final backup
 ```
 
-## Why each task uses the settings it does
+## Why each task is configured the way it is
 
-Each task is the same image with a different `EZBAK_ACTION` and cron setting.
+Each task is the same image with a different `EZBAK_ACTION` and a different cron
+option.
 
 | Task | `EZBAK_ACTION` | `EZBAK_CRON` | Role |
 | --- | --- | --- | --- |
@@ -55,9 +57,9 @@ Each task is the same image with a different `EZBAK_ACTION` and cron setting.
 | Post-stop | `backup` | unset | One final backup, then exit. |
 | Pre-start | `restore` | unset | Stage the latest backup, then exit. |
 
-The sidecar keeps `EZBAK_CRON` set so it stays up and backs up on a schedule. The
-post-stop and pre-start tasks leave cron unset, so each runs once and exits with a
-status code the orchestrator can act on.
+The sidecar keeps `EZBAK_CRON` set, so it stays up and backs up on a schedule.
+The post-stop and pre-start tasks leave cron unset. Each of them therefore runs
+once and exits with a status code the orchestrator can act on.
 
 ## Read next
 

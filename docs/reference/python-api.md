@@ -13,9 +13,10 @@ from ezbak import EZBak, BackupConfig, ezbak
 
 ## BackupConfig
 
-`BackupConfig` is the typed configuration model. It validates on construction and
-raises `pydantic.ValidationError` when a required option is missing or a value is
-malformed. Every field is listed in the [configuration reference](configuration.md).
+`BackupConfig` is the typed configuration model. It validates on construction. It
+raises `pydantic.ValidationError` when a required option is missing, or when a
+value is malformed. Every field is in the
+[configuration reference](configuration.md).
 
 ```python
 from pathlib import Path
@@ -31,7 +32,7 @@ config = BackupConfig(
 
 A `BackupConfig` needs a `name` and at least one storage location
 (`storage_paths`, `aws_s3_bucket_name`, or both). It does not read the
-environment; only the CLI and container do that.
+environment. Only the CLI and the container do that.
 
 ## EZBak
 
@@ -53,8 +54,8 @@ backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backu
 backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_paths=["/backups"]))
 ```
 
-Prefer `EZBak(BackupConfig(...))` when you want an explicit, reusable config
-object. Reach for `ezbak(**kwargs)` in quick scripts.
+When you want an explicit, reusable configuration object, prefer
+`EZBak(BackupConfig(...))`. Use `ezbak(**kwargs)` in quick scripts.
 
 ### Methods
 
@@ -62,9 +63,9 @@ object. Reach for `ezbak(**kwargs)` in quick scripts.
 | --- | --- | --- |
 | `create_backup()` | `list[Backup]` | Archive the sources and write to every storage location. |
 | `list_backups()` | `list[Backup]` | Every backup, oldest to newest. |
-| `prune_backups(dry_run=False)` | `list[Backup]` | Delete backups the keep rules no longer keep. |
+| `prune_backups(dry_run=False)` | `list[Backup]` | Delete the backups the keep rules no longer keep. |
 | `restore_backup(restore_path=None, *, clean_before_restore=False, backup=None)` | `RestoreOutcome` | Restore a backup into a directory. |
-| `get_latest_backup()` | `Backup \| None` | The newest backup, or `None` if there are none. |
+| `get_latest_backup()` | `Backup \| None` | The newest backup, or `None` when there are none. |
 | `get_backup_as_of(point_in_time)` | `Backup \| None` | The newest backup at or before a point in time. |
 
 ```python
@@ -74,19 +75,19 @@ backups.prune_backups()
 backups.restore_backup(restore_path="/restore")
 ```
 
-`prune_backups(dry_run=True)` returns the backups the policy would delete without
-removing any of them. A real prune returns the backups it confirmed deleted.
+`prune_backups(dry_run=True)` returns the backups the policy no longer keeps, and
+deletes none of them. A real prune returns the backups it confirmed deleted.
 
-`restore_backup()` returns a `RestoreOutcome` member instead of raising for the
-two cases that are not errors: no backup to restore, and a target ezbak declined
-to overwrite. It still raises `RestoreFailedError` on a real download or extract
+Two cases are not errors: no backup to restore, and a target ezbak declined to
+overwrite. For those, `restore_backup()` returns a `RestoreOutcome` member and
+raises nothing. It still raises `RestoreFailedError` on a real download or extract
 failure, so a failed restore never looks like a success.
 
 !!! warning "Breaking change: restore_backup() no longer returns a bool"
 
-    `restore_backup()` used to return `True` on a successful restore and `False`
-    when there was no backup to restore. It now returns a `RestoreOutcome`
-    member. Update code that checked the return value as a boolean:
+    `restore_backup()` returned `True` on a successful restore, and `False` when
+    there was no backup to restore. It now returns a `RestoreOutcome` member.
+    Update the code that reads the return value as a boolean:
 
     ```python
     # Before
@@ -108,9 +109,9 @@ tell an actual restore apart from a no-op:
 
 | Member | Meaning |
 | --- | --- |
-| `RestoreOutcome.RESTORED` | A backup was extracted into the target. |
+| `RestoreOutcome.RESTORED` | ezbak extracted a backup into the target. |
 | `RestoreOutcome.NO_BACKUP` | No backup matched the restore criteria. |
-| `RestoreOutcome.SKIPPED_POPULATED` | `skip_restore_if_populated` is set and the target already contained data, so ezbak left it alone. |
+| `RestoreOutcome.SKIPPED_POPULATED` | `skip_restore_if_populated` is set and the target already held data, so ezbak left it alone. |
 
 Import `RestoreOutcome` from `ezbak.constants`:
 
@@ -127,9 +128,9 @@ match outcome:
         print("Target already had data; left it alone")
 ```
 
-See [Restore backups](../guides/restore.md) for `skip_restore_if_populated` and
-[Fresh deploys](../orchestration/fresh-deploys.md) for the pre-start restore use
-case both outcomes support.
+See [Restore backups](../guides/restore.md) for `skip_restore_if_populated`, and
+[Fresh deploys](../orchestration/fresh-deploys.md) for the pre-start restore that
+both outcomes support.
 
 ### Point-in-time restore
 
@@ -147,8 +148,8 @@ which in turn takes priority over the latest backup.
 
 ### unreadable_locations
 
-`list_backups()` never raises: it returns whatever backups it found, even if a
-configured destination could not be read. Check the `unreadable_locations`
+`list_backups()` never raises. It returns whatever backups it found, even when a
+configured storage location cannot be read. Read the `unreadable_locations`
 property alongside it to know whether that result is the whole picture.
 
 ```python
@@ -157,32 +158,32 @@ if backups.unreadable_locations:
     print(f"Inventory incomplete: could not read {', '.join(backups.unreadable_locations)}")
 ```
 
-A non-empty list names the storage locations ezbak could not use or enumerate, a
-bad S3 credential, an unreachable bucket, a local path ezbak cannot read. It
-means a backup absent from `list_backups()` may still exist in one of those
-destinations. `create_backup()` and `restore_backup()` treat the same condition
-as a hard failure instead of an incomplete result; see
+A non-empty list names the storage locations ezbak cannot use or enumerate. The
+cause is a bad S3 credential, an unreachable bucket, or a local path ezbak cannot
+read. A backup absent from `list_backups()` can therefore still exist in one of those
+locations. `create_backup()` and `restore_backup()` treat the same condition as a
+hard failure instead of an incomplete result. See
 [BackupFailedError](#backupfailederror) and
 [RestoreFailedError](#restorefailederror) below.
 
-Reading the property indexes the storage locations if they have not been indexed
-yet, so the first access performs network I/O against S3 rather than returning a
+The property indexes the storage locations when they are not indexed yet. The
+first access therefore performs network I/O against S3, instead of returning a
 cached attribute.
 
 !!! note "An empty inventory is cached until the next backup run"
 
-    An index that finds zero backups is cached like any other, so
-    `list_backups()` keeps returning that result until `create_backup()` or
-    `prune_backups()` invalidates it. A long-lived process watching for archives
-    another writer creates has to set `rebuild_storage_locations = True` to force
-    a fresh scan.
+    ezbak caches an index that finds zero backups like any other index.
+    `list_backups()` therefore keeps returning that result until
+    `create_backup()` or `prune_backups()` invalidates it. A long-lived process
+    that watches for archives another writer creates has to set
+    `rebuild_storage_locations = True` to force a fresh scan.
 
 !!! note "ezbak builds its own boto3 session"
 
-    S3 access goes through a `boto3.Session` that ezbak constructs itself, so a
-    session installed with `boto3.setup_default_session()` is not used. Pass
-    credentials through `BackupConfig`, or leave them unset to use the ambient
-    credential chain.
+    S3 access goes through a `boto3.Session` that ezbak constructs itself, so
+    ezbak does not use a session installed with `boto3.setup_default_session()`.
+    Pass credentials through `BackupConfig`, or leave them unset to use the
+    ambient credential chain.
 
 ## Exceptions
 
@@ -203,14 +204,14 @@ classDiagram
 
 | Exception | Raised when |
 | --- | --- |
-| `ConfigurationError` | A path or other precondition is invalid: no sources, a source that does not exist, an unusable restore path. |
-| `StorageInitError` | A storage location cannot be initialized: bad credentials, unreachable bucket. |
+| `ConfigurationError` | A path or another precondition is invalid: no sources, a source that does not exist, an unusable restore path. |
+| `StorageInitError` | A storage location cannot be initialized: bad credentials, an unreachable bucket. |
 | `StorageWriteError` | A backend cannot write an archive. |
-| `StorageReadError` | A backend cannot read an archive back for restore. |
+| `StorageReadError` | A backend cannot read an archive back for a restore. |
 | `StorageDeleteError` | A backend cannot delete an archive during a prune. |
 | `BackendNotFoundError` | Internal invariant failure: no backend handles a storage type. |
-| `BackupFailedError` | One or more storage locations could not be written. |
-| `RestoreFailedError` | An archive could not be downloaded, read, or extracted. |
+| `BackupFailedError` | One or more storage locations cannot be written. |
+| `RestoreFailedError` | An archive cannot be downloaded, read, or extracted. |
 
 Import them from `ezbak.exceptions`:
 
@@ -236,15 +237,15 @@ except BackupFailedError as error:
 
 The error carries two attributes:
 
-- `failed_storage_locations`: the destinations that failed.
+- `failed_storage_locations`: the locations that failed.
 - `created_backups`: the `Backup` objects written before the failure.
 
 ### RestoreFailedError
 
-`restore_backup()` raises `RestoreFailedError` when the archive cannot be
-downloaded, read, or extracted. This matters most with `clean_before_restore`,
-which empties the target before extracting: without the raised error, a silent
-failure would leave an empty directory and no signal.
+`restore_backup()` raises `RestoreFailedError` when it cannot download, read, or
+extract the archive. This matters most with `clean_before_restore`, which empties
+the target before the extract. Without the raised error, a silent failure leaves
+an empty directory and no signal.
 
 ```python
 from ezbak.exceptions import RestoreFailedError
@@ -255,5 +256,5 @@ except RestoreFailedError as error:
     print(f"Restore failed: {error}")
 ```
 
-See [Failure behavior](../concepts/failure-behavior.md) for how the library, CLI,
-and container each surface these errors.
+See [Failure behavior](../concepts/failure-behavior.md) for how the library, the
+CLI, and the container each surface these errors.

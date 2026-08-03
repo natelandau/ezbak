@@ -2,9 +2,11 @@
 
 # ezbak
 
-ezbak is a backup manager. It creates, prunes, and restores compressed archives of files and directories on the local filesystem, in AWS S3, or both, with regex file filtering, count-based and time-based retention, and point-in-time restore. It was written primarily to move shared state between jobs and hosts in an orchestrated environment like Nomad or Kubernetes. In that setting the Docker container is the main way to run it; a Python package and a command-line tool run the same backups from your own code or a shell.
+ezbak is a backup manager. It creates, prunes, and restores compressed archives of files and directories. It writes them to the local filesystem, to AWS S3, or to both. It filters files with regular expressions, prunes with count-based and time-based rules, and restores a backup from a point in time.
 
-ezbak is a small, focused backup manager. It does not aim to replace restic, borg, or a full backup system.
+ezbak was written to move shared state between jobs and hosts under an orchestrator such as Nomad or Kubernetes. In that setting the Docker container is the main way to run it. A Python package and a command-line tool run the same backups from your own code or from a shell.
+
+ezbak stays small and focused. It is not a replacement for restic, borg, or a full backup system.
 
 ## Documentation
 
@@ -59,7 +61,7 @@ docker run -it \
     ghcr.io/natelandau/ezbak:latest
 ```
 
-See the [quickstart](https://natelandau.github.io/ezbak/getting-started/quickstart/) for listing and restoring across all three.
+To list and restore backups on all three interfaces, see the [quickstart](https://natelandau.github.io/ezbak/getting-started/quickstart/).
 
 ## Contributing
 

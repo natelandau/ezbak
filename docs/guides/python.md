@@ -29,13 +29,13 @@ backups.prune_backups()
 ```
 
 `BackupConfig` validates on construction. A missing `name` or storage location
-raises `pydantic.ValidationError`. Every field is in the [configuration
-reference](../reference/configuration.md).
+raises `pydantic.ValidationError`. Every field is in the
+[configuration reference](../reference/configuration.md).
 
 ## The ezbak() shortcut
 
-For quick scripts, `ezbak(**kwargs)` builds the config for you. These two lines
-are equivalent:
+For quick scripts, `ezbak(**kwargs)` builds the configuration for you. These two
+lines are equivalent:
 
 ```python
 from ezbak import EZBak, BackupConfig, ezbak
@@ -44,18 +44,20 @@ backups = ezbak(name="my-backup", source_paths=["/data"], storage_paths=["/backu
 backups = EZBak(BackupConfig(name="my-backup", source_paths=["/data"], storage_paths=["/backups"]))
 ```
 
-Prefer `EZBak(BackupConfig(...))` when you want an explicit, reusable config.
+When you want an explicit, reusable configuration, prefer
+`EZBak(BackupConfig(...))`.
 
 ## Restore
 
 `restore_backup()` restores the latest backup by default. Pass a `restore_path`,
-or set it on the config.
+or set it on the configuration.
 
 ```python
 backups.restore_backup(restore_path="/restore")
 ```
 
-To restore an older backup, select it with `get_backup_as_of()` and pass it in:
+To restore an older backup, select it with `get_backup_as_of()` and pass it to
+`restore_backup()`:
 
 ```python
 backup = backups.get_backup_as_of("20241201")
@@ -64,13 +66,13 @@ if backup:
 ```
 
 `get_backup_as_of(point_in_time)` returns the newest backup at or before the end
-of the period you name. An explicit `backup` argument beats a configured
-`restore_date`, which beats the latest backup.
+of the period you name. An explicit `backup` argument takes priority over a
+configured `restore_date`, which in turn takes priority over the latest backup.
 
 ## Preview a prune
 
-`prune_backups(dry_run=True)` returns the backups the keep rules would delete,
-without removing any:
+`prune_backups(dry_run=True)` returns the backups that the keep rules no longer
+keep. It deletes none of them:
 
 ```python
 would_delete = backups.prune_backups(dry_run=True)
@@ -80,7 +82,7 @@ print(f"Would delete {len(would_delete)} backups")
 ## Handle failures
 
 Every ezbak error subclasses `EZBakError`. A backup that cannot write to a
-storage location raises `BackupFailedError`, which still keeps the copies that
+storage location raises `BackupFailedError`, and it still keeps the copies that
 succeeded.
 
 ```python
@@ -105,11 +107,12 @@ except RestoreFailedError as error:
 ```
 
 `restore_backup()` returns a `RestoreOutcome` member and raises nothing for two
-non-error cases: `RestoreOutcome.NO_BACKUP` when there is simply no backup to
-restore, and `RestoreOutcome.SKIPPED_POPULATED` when `skip_restore_if_populated`
-is set and the target already has data. A library caller checks the return
-value and decides what to do, so `skip_if_no_backup` and
-`skip_restore_if_populated` mainly matter to the CLI and container, which turn
-those results into an exit code. See [Failure
-behavior](../concepts/failure-behavior.md) and the full [Python API
-reference](../reference/python-api.md).
+cases that are not errors. It returns `RestoreOutcome.NO_BACKUP` when there is no
+backup to restore. It returns `RestoreOutcome.SKIPPED_POPULATED` when
+`skip_restore_if_populated` is set and the target already holds data.
+
+A library caller reads the return value and decides what to do.
+`skip_if_no_backup` and `skip_restore_if_populated` therefore matter mainly to
+the CLI and the container, which turn those results into an exit code. See
+[Failure behavior](../concepts/failure-behavior.md) and the full
+[Python API reference](../reference/python-api.md).

@@ -43,8 +43,8 @@ make a backup, and restore it.
     ```
 
 A backup file appears in your storage location, named
-`my-backup-20241215T143022.tgz`. See [Backup names](../concepts/backup-names.md)
-for the format.
+`my-backup-20241215T143022.tgz`. For the format, see
+[Backup names](../concepts/backup-names.md).
 
 ## List what you have
 

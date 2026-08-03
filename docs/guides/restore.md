@@ -5,8 +5,8 @@ icon: lucide/rotate-ccw
 # Restore backups
 
 A restore extracts a backup archive into a target directory. By default ezbak
-restores the latest backup. You can restore an older one by naming a point in
-time, empty the target first, and set ownership on the restored files.
+restores the latest backup. You can also restore an older backup by a point in
+time, empty the target first, or set ownership on the restored files.
 
 ## Restore the latest backup
 
@@ -35,19 +35,20 @@ time, empty the target first, and set ownership on the restored files.
     backups.restore_backup(restore_path="/restore")
     ```
 
-!!! note "Restores verify a checksum sidecar by default"
+!!! note "Restores verify a checksum file by default"
 
-    With `use_checksums` enabled (the default), ezbak checks the archive against
-    its `.sha256` sidecar while extracting it and fails the restore before your
-    data is touched if they differ. A missing or unreadable sidecar logs a
-    warning and restores anyway. Set `use_checksums` to `false` (or pass
-    `--no-use-checksums`) to skip the check and ignore any sidecar. See [Archive
-    integrity checksums](../concepts/checksums.md).
+    With `use_checksums` enabled (the default), ezbak verifies the archive
+    against its `.sha256` file as it extracts. If the two digests differ, the
+    restore fails before ezbak touches your data. A missing or unreadable
+    checksum file logs a warning, and the restore runs anyway. To skip the
+    verification and ignore any checksum file, set `use_checksums` to `false`, or
+    pass `--no-use-checksums`. See
+    [Archive integrity checksums](../concepts/checksums.md).
 
 ## Restore a backup from a point in time
 
-Set a restore date to recover the state as of an earlier moment. ezbak restores
-the newest backup at or before the **end** of the period you name, not the backup
+Set a restore date to recover the state of an earlier moment. ezbak restores the
+newest backup at or before the **end** of the period you name, not the backup
 closest to it.
 
 ```bash
@@ -67,71 +68,73 @@ The date accepts six granularities, from a year down to a second:
 | `YYYYMMDDTHHMM` | `20241215T1430` | the end of the 14:30 minute |
 | `YYYYMMDDTHHMMSS` | `20241215T143022` | that exact second |
 
-The full `YYYYMMDDTHHMMSS` form matches the timestamp in each filename the `list`
-command prints, so you can copy that timestamp from a `list` entry to restore
-that exact backup.
+The full `YYYYMMDDTHHMMSS` form matches the timestamp in each filename that the
+`list` command prints. Copy that timestamp from a `list` entry to restore that
+exact backup.
 
-!!! note "A restore date that matches nothing fails, it does not fall back"
+!!! note "A restore date that matches nothing fails"
 
-    If a restore date resolves to no backup, ezbak reports that no backup was
-    found rather than silently restoring the latest. Restoring newer data than
-    you asked for would be the wrong result. Combine it with `--skip-if-no-backup` to turn
-    a miss into a clean no-op instead of a failure.
+    If a restore date resolves to no backup, ezbak reports that it found no
+    backup. It does not restore the latest backup instead, because newer data
+    than you asked for is the wrong result. Add `--skip-if-no-backup` to turn a
+    miss into a clean no-op instead of a failure.
 
-!!! note "Restore is all-or-nothing across destinations"
+!!! note "Restore is all-or-nothing across storage locations"
 
-    When both `--storage` and `--s3-bucket` are configured, ezbak must be able
-    to read every destination before it restores anything. One unreadable
-    destination fails the restore even though the healthy one could have
-    served it, since restoring an older archive while a possibly newer
-    destination is unreadable would silently stage stale state. See [An
-    unreadable destination is not an empty
-    one](../concepts/failure-behavior.md#an-unreadable-destination-is-not-an-empty-one).
+    With both `--storage` and `--s3-bucket` configured, ezbak has to read every
+    location before it restores anything. One unreadable location fails the
+    restore, even though the healthy one can serve it. A restore of an older
+    archive, while a possibly newer location is unreadable, stages stale state
+    without a word. See [An unreadable storage location is not an empty
+    one](../concepts/failure-behavior.md#an-unreadable-storage-location-is-not-an-empty-one).
 
 ## Empty the target before restoring
 
-`clean_before_restore` removes the existing contents of the restore path, so the
-result matches the backup exactly with no leftover files.
+`clean_before_restore` deletes the existing contents of the restore path, so the
+result matches the backup exactly, with no leftover files.
 
 ```bash
 ezbak --name my-backup --storage ~/Backups \
   restore --restore-path ~/restore --clean-before-restore
 ```
 
-ezbak extracts the archive into a staging directory inside the restore path and
-swaps it into place only after the extract succeeds. The target is emptied at
-that last step, so a download or extract failure leaves the existing contents
-intact instead of deleting them first. See [Failure
-behavior](../concepts/failure-behavior.md).
+ezbak extracts the archive into a staging directory inside the restore path. It
+swaps that directory into place only after the extract succeeds. ezbak empties
+the target at that last step, so a failed download or extract leaves the existing
+contents intact. See [Failure behavior](../concepts/failure-behavior.md).
 
 !!! warning "A clean restore refuses to target a storage location"
 
     ezbak rejects a clean restore whose path is, or contains, one of your
-    `--storage` locations, because emptying it would delete the backups. Restoring
-    into a subdirectory of a storage location is still allowed. The check compares
-    the real directories, so it also catches two container mounts that point at the
-    same host path.
+    `--storage` locations, because emptying that path deletes the backups. A
+    restore into a subdirectory of a storage location is still allowed. ezbak
+    compares the real directories, so it also catches two container mounts that
+    point at the same host path.
 
 !!! note "A restore clears stale SQLite journals it finds"
 
     A restore that does not empty the target first writes over the files the
-    archive contains and leaves everything else alone, with one exception. When
-    it restores a SQLite database, it also removes a `-wal`, `-shm`, or
-    `-journal` file already sitting beside that database, unless the archive
-    supplied the journal itself. SQLite replays a journal it finds next to a
-    database, so one left over from an earlier deployment would roll the
-    restored database back to that older data and still pass an integrity
-    check. This applies to any SQLite database in a backup, whether or not you
-    used [`sqlite_paths`](../concepts/sqlite.md). Nothing else is touched: the
-    file being restored must carry SQLite's own header, and a `-wal` or
-    `-journal` must carry the matching journal header, before either is
-    removed. See [Stale journals at the restore
+    archive contains and leaves everything else alone. When it restores a SQLite
+    database, it also deletes a `-wal`, `-shm`, or
+    `-journal` file already beside that database. There is one exception: a
+    journal that the archive supplied itself.
+
+    SQLite replays a journal it finds next to a database. One left over from an
+    earlier deployment therefore rolls the restored database back to that older
+    data, and the result still passes an integrity check. This applies to any
+    SQLite database in a backup, whether or not you used
+    [`sqlite_paths`](../concepts/sqlite.md).
+
+    ezbak touches nothing else. Before ezbak deletes either one, the restored
+    file has to carry the header of SQLite itself. A `-wal` or `-journal` has to
+    carry the matching journal header. See [Stale journals at the
+    restore
     target](../concepts/sqlite.md#stale-journals-at-the-restore-target-are-cleared).
 
 ## Set ownership on restored files
 
-`--uid` and `--gid` set the owner and group on the restored files, which is useful
-when restoring into a volume a service reads as a specific user. Set both.
+`--uid` and `--gid` set the owner and the group on the restored files. Use them
+when you restore into a volume that a service reads as a specific user. Set both.
 
 ```bash
 ezbak --name my-backup --storage ~/Backups \
@@ -140,32 +143,33 @@ ezbak --name my-backup --storage ~/Backups \
 
 ## Skip cleanly when no backup exists
 
-`--skip-if-no-backup` (`EZBAK_SKIP_IF_NO_BACKUP`) turns a missing backup into a clean
-no-op that exits zero, instead of a failure. This is what lets a pre-start restore
-run on a fresh deployment with no backup yet.
+`--skip-if-no-backup` (`EZBAK_SKIP_IF_NO_BACKUP`) turns a missing backup into a
+clean no-op that exits zero, instead of a failure. This is what lets a pre-start
+restore run on a fresh deployment that has no backup yet.
 
 ```bash
 ezbak --name my-backup --storage ~/Backups \
   restore --restore-path ~/restore --skip-if-no-backup
 ```
 
-A real download or extract failure still fails, with or without `--skip-if-no-backup`,
-and so does a destination ezbak cannot read: `--skip-if-no-backup` only covers a
-destination that is readable and genuinely empty. See [Fresh
-deploys](../orchestration/fresh-deploys.md) for the orchestration case.
+A real download or extract failure still fails the restore, with or without
+`--skip-if-no-backup`. So does a storage location ezbak cannot read.
+`--skip-if-no-backup` covers only a location that is readable and genuinely
+empty. For the orchestration case, see
+[Fresh deploys](../orchestration/fresh-deploys.md).
 
-A library caller does not need this option: `restore_backup()` returns
+A library caller does not need this option. `restore_backup()` returns
 `RestoreOutcome.NO_BACKUP` when there is nothing to restore, and the caller
 decides how to react.
 
 ## Skip the restore when the target already has data
 
 `--skip-if-populated` (`EZBAK_SKIP_RESTORE_IF_POPULATED`) skips the restore when
-the target directory already contains data, and treats the skip as success. This
-protects a pre-start restore that must not overlay live application state with an
-older snapshot: if the job's data volume already has files in it, whether from a
-service that already started or an orchestrator retry, ezbak leaves them alone
-instead of extracting on top of them.
+the target directory already holds data, and treats the skip as success. Use it
+on a pre-start restore that must not overlay live application state with an older
+snapshot. When the data volume of the job already holds files, ezbak leaves them
+alone instead of extracting on top of them. The files can come from a service
+that already started, or from an orchestrator retry.
 
 ```bash
 ezbak --name my-service --storage ~/Backups \
@@ -174,27 +178,29 @@ ezbak --name my-service --storage ~/Backups \
 
 !!! info "What counts as populated"
 
-    ezbak ignores the same OS cruft it never backs up (`.DS_Store`, `@eaDir`,
-    `.Trashes`, `__pycache__`, `Thumbs.db`, `IconCache.db`), plus `lost+found` (present on a
-    fresh ext-filesystem mount) and its own `.ezbak-restore-*` staging
-    directories. Only files beyond that list count as data. An empty target, or
-    one holding just that benign noise, still restores normally.
+    ezbak ignores the same noise files it never backs up (`.DS_Store`, `@eaDir`,
+    `.Trashes`, `__pycache__`, `Thumbs.db`, `IconCache.db`). It also ignores
+    `lost+found`, which a fresh ext-filesystem mount holds, and its own
+    `.ezbak-restore-*` staging directories. Only files beyond that list count as
+    data. An empty target, or one that holds only that benign noise, still
+    restores normally.
 
-`clean_before_restore` bypasses this guard. Emptying the target and restoring
-into it is an explicit replace, so it always runs even when the target is
-populated. Setting both options together means "wipe and restore, always."
+`clean_before_restore` bypasses this guard. A clean restore is an explicit
+replace, so it always runs, even when the target is populated. Both options
+together mean "wipe and restore, always".
 
-A populated-target skip does not run the post-restore hook: nothing was
-written, so there is nothing for the hook to act on. See [Container lifecycle
-hooks](hooks.md).
+A populated-target skip does not run the post-restore hook. ezbak wrote nothing,
+so the hook has nothing to act on. See
+[Container lifecycle hooks](hooks.md).
 
-`--skip-if-populated` is independent of `--skip-if-no-backup`. `--skip-if-no-backup`
-handles a *missing* backup; `--skip-if-populated` handles an *already-occupied*
-target. Use either alone or both together, most commonly on a pre-start restore
-task. See [Fresh deploys](../orchestration/fresh-deploys.md).
+`--skip-if-populated` is independent of `--skip-if-no-backup`.
+`--skip-if-no-backup` handles a *missing* backup. `--skip-if-populated` handles
+an *already-occupied* target. Use either alone, or both together, most commonly
+on a pre-start restore task. See
+[Fresh deploys](../orchestration/fresh-deploys.md).
 
 A library caller sets `skip_restore_if_populated=True` on `BackupConfig` and
-checks the return value:
+reads the return value:
 
 ```python
 from ezbak import BackupConfig, EZBak

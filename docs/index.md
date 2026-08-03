@@ -5,26 +5,30 @@ icon: lucide/house
 # ezbak
 
 ezbak is a backup manager. It creates, prunes, and restores compressed archives of
-files and directories on the local filesystem, in AWS S3, or both, with regex file
-filtering, count-based and time-based retention, and point-in-time restore. It was
-written primarily to move shared state between jobs and hosts in an orchestrated
-environment like Nomad or Kubernetes. In that setting the Docker container is the
-main way to run it; a Python package and a command-line tool run the same backups
-from your own code or a shell.
+files and directories. It writes them to the local filesystem, to AWS S3, or to
+both. It filters files with regular expressions, prunes with count-based and
+time-based rules, and restores a backup from a point in time.
 
-It stays small and focused, and does not aim to replace a full backup system like
-[Restic](https://restic.net) or [Borg](https://borgbackup.readthedocs.io/en/stable/).
+ezbak was written to move shared state between jobs and hosts under an
+orchestrator such as Nomad or Kubernetes. In that setting the Docker container is
+the main way to run it. A Python package and a command-line tool run the same
+backups from your own code or from a shell.
+
+ezbak stays small and focused. It is not a replacement for a full backup system
+such as [Restic](https://restic.net) or
+[Borg](https://borgbackup.readthedocs.io/en/stable/).
 
 ## What it does
 
 - Creates tar-gzipped (`.tgz`) backups of files and directories.
-- Stores backups on the local filesystem, in AWS S3, or both at once.
-- Filters files with include and exclude regex patterns.
+- Stores backups on the local filesystem, in AWS S3, or in both at once.
+- Filters files with include and exclude regular expressions.
 - Prunes old backups with keep rules that combine count-based and time-based
   retention.
 - Restores the latest backup, or the newest backup at or before a point in time.
 - Runs scheduled backups in a container with a cron expression.
-- Pings a healthcheck monitor from the container so a silent failure gets noticed.
+- Pings a healthcheck monitor from the container, so you learn about a silent
+  failure.
 - Runs shell hooks before and after a container backup or restore. See
   [Container lifecycle hooks](guides/hooks.md).
 
@@ -66,16 +70,16 @@ It stays small and focused, and does not aim to replace a full backup system lik
 
 </div>
 
-## The interface to reach for
+## Which interface to use
 
-ezbak has three interfaces that share one configuration. Which one you use depends
-on the job.
+ezbak has three interfaces that share one configuration. The job decides which
+one you use.
 
 | Interface                            | Use it for                                                          |
 | ------------------------------------ | ------------------------------------------------------------------- |
 | [Docker container](guides/docker.md) | The primary interface. Orchestrated deployments, scheduled backups. |
-| [Command line](guides/cli.md)        | Scripting, local testing, one-off backups from a shell.             |
+| [Command line](guides/cli.md)        | Scripting, local tests, one-off backups from a shell.               |
 | [Python library](guides/python.md)   | Driving ezbak from your own code.                                   |
 
-The container is the design center. If you are backing up state for a job under an
+The container is the design center. If you back up the state of a job under an
 orchestrator, start with [the orchestration pattern](orchestration/index.md).

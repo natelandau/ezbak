@@ -4,13 +4,13 @@ icon: lucide/filter
 
 # Including and excluding files
 
-By default ezbak backs up every regular file under your source paths. Two regex
-options narrow that selection, a small set of noise files is always skipped, and
-symlinks are never followed.
+By default ezbak backs up every regular file under your source paths. Two
+regular expressions narrow that selection. A small set of noise files is always
+skipped, and ezbak never follows a symlink.
 
 ## Always-excluded files
 
-ezbak never archives these names, regardless of your other settings:
+ezbak never archives these names, whatever else you configure:
 
 - `.DS_Store`
 - `@eaDir`
@@ -19,21 +19,21 @@ ezbak never archives these names, regardless of your other settings:
 - `Thumbs.db`
 - `IconCache.db`
 
-These are operating-system and tooling artifacts that add noise to a backup and
-never need restoring.
+These are operating-system and tooling artifacts. They add noise to a backup, and
+you never need to restore them.
 
 !!! note "Symlinks are skipped"
 
-    ezbak does not follow symbolic links. It logs a warning for each one and
-    leaves it out of the archive, so a backup never escapes the source tree
-    through a link.
+    ezbak does not follow a symbolic link. It logs a warning for each one and
+    skips it, so a backup never escapes the source tree through a link.
 
-## Include and exclude regex
+## Include and exclude regular expressions
 
-Two options filter the file list by matching against each file's path:
+Two options filter the file list. ezbak matches each one against the path of the
+file:
 
-- `include_regex` backs up only files whose path matches the pattern.
-- `exclude_regex` skips files whose path matches the pattern.
+- `include_regex` backs up only the files whose path matches the pattern.
+- `exclude_regex` skips the files whose path matches the pattern.
 
 ```python
 from pathlib import Path
@@ -57,10 +57,10 @@ On the command line, the same options are `create --include-regex` (`-i`) and
 
 !!! info "How include and exclude combine"
 
-    A file is archived when it matches `include_regex` (or no include pattern is
-    set) and does not match `exclude_regex`. The always-excluded names above are
-    skipped before either pattern runs.
+    ezbak archives a file when it matches `include_regex` (or you set no include
+    pattern) and does not match `exclude_regex`. ezbak skips the always-excluded
+    names above before either pattern runs.
 
-The patterns are standard Python regular expressions, matched against the file
-path. `\.log$` matches paths ending in `.log`; `debug` matches any path
-containing the substring `debug`.
+Both options take a standard Python regular expression, matched against the file
+path. `\.log$` matches a path that ends in `.log`. `debug` matches any path that
+contains the substring `debug`.
