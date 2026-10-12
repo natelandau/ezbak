@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from loguru import logger
-from whenever import Instant, PlainDateTime, TimeZoneNotFoundError
+from whenever import SYSTEM_TZ, Instant, PlainDateTime, TimeZoneNotFoundError
 
 from ezbak.constants import (
     DEFAULT_DATE_FORMAT,
@@ -43,11 +43,9 @@ class Backup:
             logger.warning(f"Could not parse timestamp: {name}")
             raise
 
-        plain_dt = PlainDateTime.parse(self.timestamp, format=DEFAULT_DATE_PATTERN)
+        plain_dt = PlainDateTime.parse(self.timestamp, pattern=DEFAULT_DATE_PATTERN)
         try:
-            self.zoned_datetime = (
-                plain_dt.assume_tz(self.tz) if self.tz else plain_dt.assume_system_tz()
-            )
+            self.zoned_datetime = plain_dt.assume_tz(self.tz or SYSTEM_TZ)
         except TimeZoneNotFoundError as e:
             logger.error(e)
             raise
@@ -116,7 +114,7 @@ class StorageLocation:
         i = Instant.now()
 
         try:
-            now = i.to_tz(self.tz) if self.tz else i.to_system_tz()
+            now = i.to_tz(self.tz or SYSTEM_TZ)
         except TimeZoneNotFoundError as e:
             logger.error(e)
             raise

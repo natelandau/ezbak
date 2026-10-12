@@ -14,7 +14,7 @@ from loguru import logger
 from nclutils.fs import clean_directory
 from nclutils.utils import new_uid
 from pydantic import ValidationError
-from whenever import PlainDateTime
+from whenever import SYSTEM_TZ, PlainDateTime
 
 from ezbak.checksums import HashingReader, HashingWriter
 from ezbak.config import BackupConfig
@@ -1281,7 +1281,7 @@ class EZBak:
                 raise AssertionError(msg)
 
         try:
-            period_start = PlainDateTime.parse(point_in_time + suffix, format=DEFAULT_DATE_PATTERN)
+            period_start = PlainDateTime.parse(point_in_time + suffix, pattern=DEFAULT_DATE_PATTERN)
             # Advance inside the try: an out-of-range field (e.g. month 13) fails the
             # parse, and a boundary past PlainDateTime's max year (e.g. "9999" + 1 year)
             # fails the add. Both must surface as a clean ConfigurationError, not a raw
@@ -1291,11 +1291,7 @@ class EZBak:
             msg = f"Invalid restore date: {point_in_time!r}"
             raise ConfigurationError(msg) from e
 
-        boundary = (
-            boundary_plain.assume_tz(self.settings.tz)
-            if self.settings.tz
-            else boundary_plain.assume_system_tz()
-        )
+        boundary = boundary_plain.assume_tz(self.settings.tz or SYSTEM_TZ)
         return boundary.timestamp()
 
     def get_backup_as_of(self, point_in_time: str) -> Backup | None:
