@@ -9,7 +9,7 @@ package, and a command-line tool. Install the one that matches how you plan to
 run it. The container is the primary interface. The package and the CLI are for
 scripting, local tests, and one-off backups.
 
-The package and the CLI require Python 3.11.4 or higher. The container bundles
+The package and the CLI require Python 3.11 or higher. The container bundles
 its own runtime.
 
 ## Docker container
