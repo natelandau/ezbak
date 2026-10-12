@@ -32,6 +32,8 @@ We use [Duty](https://pawamoy.github.io/duty/) as our task runner. Common tasks:
 -   `duty dev-clean` - Clean the development environment
 -   `duty dev-setup` - Set up the development environment
 
+The lint and test tasks run through [gate-cache](https://github.com/natelandau/gate-cache). When a task passes, gate-cache records the pass for the current content of the files. If the same task runs again on the same content, gate-cache skips it. The prek hooks call the same tasks, so a commit after `duty lint` and `duty test` does not run these checks again. `duty test` with arguments, such as `duty test -k unit`, always runs. To run every check without the cache, set `GATE_CACHE_DISABLE=1`. To delete all records, run `gate-cache clear`. In CI, gate-cache always runs the checks.
+
 ## Local Development Environment
 
 To set up a local development environment, run `duty dev-setup`. This will create a development environment in the `.dev` directory.

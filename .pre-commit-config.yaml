@@ -60,20 +60,14 @@ repos:
         files: ^.*\.(yaml|yml)$
         entry: yamllint --strict --config-file .yamllint.yml
 
-  - repo: "https://github.com/astral-sh/ruff-pre-commit"
-    rev: v0.17.0
-    hooks:
-      - id: ruff-check
-        args: [--no-fix]
-      - id: ruff-format
-        args: [--check]
-
+  # Checks the commit message only; the tree is checked by the local typos hook
   - repo: "https://github.com/adhtruong/mirrors-typos"
     rev: v1.51.1
     hooks:
       - id: typos
+        name: typos (commit message)
         args: ["--force-exclude"]
-        stages: [commit-msg, pre-commit]
+        stages: [commit-msg]
 
   - repo: "https://github.com/crate-ci/committed"
     rev: v1.1.11
@@ -86,18 +80,45 @@ repos:
     hooks:
       - id: gitleaks
 
+  # These hooks call duty recipes, which wrap each gate in gate-cache, so a hook,
+  # `duty lint`, and an agent share markers and skip work that already passed.
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run duty ruff
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run duty format
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: typos
+        name: typos
+        entry: uv run duty typos
+        language: system
+        pass_filenames: false
+
       - id: mypy
         name: mypy
-        entry: mypy --config-file pyproject.toml
-        exclude: "tests/|duties.py|tmp/"
+        entry: uv run duty mypy
         language: system
-        types: [python]
+        pass_filenames: false
+        files: |
+          (?x)^(
+          src/|
+          uv\.lock|
+          pyproject\.toml
+          )
 
       - id: pytest
         name: pytest
-        entry: pytest -c pyproject.toml src/ tests/
+        entry: uv run duty test
         language: system
         pass_filenames: false
         files: |
@@ -110,7 +131,7 @@ repos:
 
       - id: zensical-build
         name: zensical-build
-        entry: uv run zensical build --strict
+        entry: uv run gate-cache -- zensical build --strict
         language: system
         pass_filenames: false
         files: |
