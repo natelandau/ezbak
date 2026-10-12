@@ -57,8 +57,10 @@ frozen_time = datetime(2025, 6, 9, 0, 0, tzinfo=UTC)
 frozen_time_str = frozen_time.strftime(DEFAULT_DATE_FORMAT)
 fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
+pytestmark = pytest.mark.usefixtures("mock_run", "mock_os_environ")
 
-@pytest.fixture(autouse=True)
+
+@pytest.fixture
 def mock_run(mocker):
     """Mock the Run class to prevent infinite loop in scheduler."""
     # Mock the Run class to prevent infinite loop in scheduler
@@ -68,7 +70,7 @@ def mock_run(mocker):
     mocker.patch("time.sleep", return_value=None)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_os_environ(mocker):
     """Override items from .env file."""
     os.environ["EZBAK_AWS_ACCESS_KEY"] = ""
@@ -234,7 +236,7 @@ def test_entrypoint_cron_no_shutdown_backup_when_flag_off(filesystem, capsys, mo
 @time_machine.travel(frozen_time, tick=False)
 def test_entrypoint_cron_no_shutdown_backup_without_signal(filesystem, capsys):
     """Verify no final backup runs when the loop ends without a shutdown signal."""
-    # Given an opted-in cron backup container. The autouse mock_run fixture leaves the
+    # Given an opted-in cron backup container. The module-wide mock_run fixture leaves the
     # scheduler reporting not-running, so the loop exits on its own with no signal
     # delivered and the shutdown event never set.
     src_dir, dest1, _ = filesystem
@@ -277,7 +279,7 @@ def test_entrypoint_cron_sigusr1_triggers_a_run(filesystem, mocker):
 def test_entrypoint_cron_no_run_without_sigusr1(filesystem, mocker):
     """Verify a cron container forces no run when SIGUSR1 never arrives."""
     # Given a cron backup container whose loop actually runs (scheduler.running stays
-    # True, unlike the autouse mock_run fixture, so the run_now_event check inside the
+    # True, unlike the module-wide mock_run fixture, so the run_now_event check inside the
     # loop body genuinely executes) and only SIGTERM is ever delivered
     src_dir, dest1, _ = filesystem
     os.environ["EZBAK_NAME"] = "test"
@@ -1390,7 +1392,7 @@ def test_log_configured_hooks_silent_when_no_hooks(filesystem, capsys):
 def _wait_until(predicate, timeout=5.0):
     """Poll predicate until it is true or the timeout expires, returning the result.
 
-    time.sleep is patched out by the autouse mock_run fixture, so pace the loop with
+    time.sleep is patched out by the module-wide mock_run fixture, so pace the loop with
     an event wait instead.
 
     Returns:

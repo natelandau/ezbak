@@ -44,8 +44,8 @@ EZBak(
         name="logs",
         source_paths=[Path("/var/log")],
         storage_paths=[Path("/backups")],
-        include_regex=r"\.log$",   # only .log files
-        exclude_regex=r"debug",    # skip anything matching "debug"
+        include_regex=r"\.log$",  # only .log files
+        exclude_regex=r"debug",  # skip anything matching "debug"
         keep_last=10,
     )
 )

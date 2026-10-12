@@ -125,7 +125,14 @@ snapshots every database the pattern matches.
 === "Library"
 
     ```python
-    sqlite_paths=[Path("/data/shards/*.db")]
+    EZBak(
+        BackupConfig(
+            name="shards",
+            source_paths=[Path("/data")],
+            storage_paths=[Path("/backups")],
+            sqlite_paths=[Path("/data/shards/*.db")],
+        )
+    ).create_backup()
     ```
 
 === "CLI"

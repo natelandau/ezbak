@@ -206,12 +206,14 @@ reads the return value:
 from ezbak import BackupConfig, EZBak
 from ezbak.constants import RestoreOutcome
 
-backups = EZBak(BackupConfig(
-    name="my-service",
-    storage_paths=["/backups"],
-    restore_path="/data",
-    skip_restore_if_populated=True,
-))
+backups = EZBak(
+    BackupConfig(
+        name="my-service",
+        storage_paths=["/backups"],
+        restore_path="/data",
+        skip_restore_if_populated=True,
+    )
+)
 
 outcome = backups.restore_backup()
 if outcome is RestoreOutcome.SKIPPED_POPULATED:

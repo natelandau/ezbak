@@ -61,7 +61,7 @@ def s3_bucket(monkeypatch: pytest.MonkeyPatch) -> Generator[str, None, None]:
         yield "test-bucket"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  # ruff:ignore[pytest-fixture-autouse]
 def mock_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock environment variables for testing."""
     for k in [k for k in os.environ if k.startswith("EZBAK_")]:
@@ -107,7 +107,7 @@ def break_s3_listing(mocker: MockerFixture) -> Callable[[], MagicMock]:
     return _break
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  # ruff:ignore[pytest-fixture-autouse]
 def reset_logger() -> Generator[None, None, None]:
     """Reset logger handlers between tests to prevent closed file handle issues.
 
