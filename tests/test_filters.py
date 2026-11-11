@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ezbak.filters import chown_files
+from ezbak.filters import chown_files, passes_filters
 
 
 def test_chown_files_targets_symlink_not_its_target(tmp_path: Path, mocker) -> None:
@@ -47,3 +47,34 @@ def test_chown_files_continues_after_failure(tmp_path: Path, mocker) -> None:
 
     # Then: all three files were attempted despite the first failure
     assert lchown.call_count == 3
+
+
+def test_passes_filters_excludes_always_excluded_windows_paths() -> None:
+    """Verify always-excluded filenames match on Windows-style paths."""
+    # Given: an always-excluded filename joined with backslash separators
+    # When: evaluating whether the path is included in a backup
+    # Then: it is excluded just like its forward-slash spelling
+    assert (
+        passes_filters(
+            path="C:\\backups\\src\\Thumbs.db",
+            include_pattern=None,
+            exclude_pattern=None,
+        )
+        is False
+    )
+    assert (
+        passes_filters(
+            path="/backups/src/Thumbs.db",
+            include_pattern=None,
+            exclude_pattern=None,
+        )
+        is False
+    )
+    assert (
+        passes_filters(
+            path="C:\\backups\\src\\doc.txt",
+            include_pattern=None,
+            exclude_pattern=None,
+        )
+        is True
+    )

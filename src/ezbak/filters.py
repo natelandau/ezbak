@@ -93,7 +93,9 @@ def passes_filters(
         bool: True if the file should be included in the backup.
     """
     path_str = str(path)
-    name = path_str.rpartition("/")[2]
+    # Split on both separators so Windows-style paths match too; the hot loop
+    # passes prebuilt strings, so pathlib is deliberately avoided here.
+    name = path_str.rpartition("/")[2].rpartition("\\")[2]
     if name in ALWAYS_EXCLUDE_FILENAMES:
         logger.trace("Excluded file: {}", name)
         return False
