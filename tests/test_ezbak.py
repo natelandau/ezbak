@@ -18,7 +18,13 @@ from ezbak.backup import Backup
 from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome
 from ezbak.core import EZBak
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
-from tests.helpers import LEGACY_BACKUP_NAMES, SEEDED_MARKER, relative_tree, seed_backups
+from tests.helpers import (
+    LEGACY_BACKUP_NAMES,
+    SEEDED_MARKER,
+    relative_tree,
+    seed_backups,
+    skip_as_root,
+)
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -696,12 +702,7 @@ def test_create_backup_skips_a_file_swapped_for_a_symlink_mid_walk(
     assert all(b"TOP-SECRET" not in content for content in contents)
 
 
-requires_permission_checks = pytest.mark.skipif(
-    os.geteuid() == 0, reason="root bypasses file permission checks"
-)
-
-
-@requires_permission_checks
+@skip_as_root
 def test_create_backup_never_opens_a_file_the_filters_exclude(filesystem):
     """Verify an unreadable file that exclude_regex leaves out does not fail the backup."""
     # Given a source holding an unreadable file that the exclude regex matches
@@ -724,7 +725,7 @@ def test_create_backup_never_opens_a_file_the_filters_exclude(filesystem):
         assert "src/secret.key" not in tar.getnames()
 
 
-@requires_permission_checks
+@skip_as_root
 def test_create_backup_reaches_a_source_through_a_search_only_parent(tmp_path):
     """Verify a parent directory needs only execute permission, as a path lookup does."""
     # Given a source whose parent directory grants search but not read permission

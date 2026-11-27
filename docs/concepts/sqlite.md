@@ -108,12 +108,26 @@ close of the last connection deletes both files. The **post-stop backup** runs
 after that, finds neither file, cannot create them, and fails:
 
 ```text
-Failed to snapshot read-only sqlite database '/data/gitea.db': attempt to write a readonly database
+Failed to snapshot sqlite database '/data/gitea.db': attempt to write a readonly database
 ```
 
-ezbak does retry through a read-only connection first. Treat that as a narrow
-safety net rather than a supported configuration, because it cannot help a WAL
-database that has no `-shm`.
+## ezbak copies a database as its owner
+
+When ezbak runs as root, it copies each database in a separate process that runs
+as the user and group that own the database file. If root owns the file, the
+process runs as the owner of the directory that holds it. That process can read
+and create only the files that this user can. A symlink that the service puts in
+the path of its database cannot make ezbak read a file that the service cannot
+read. ezbak copies a database as root only when root owns both the file and its
+directory.
+
+The user that ezbak copies as must be able to read the database and create files
+in its directory. The service that writes the database already has this access.
+
+To change to that user, a root container must have the `CHOWN`, `SETUID`, and
+`SETGID` capabilities. Docker and Nomad give these capabilities by default. If a
+Kubernetes pod drops all capabilities, add these three back to the container of
+ezbak. Without them, the backup fails with an error that names the capabilities.
 
 ## Match databases with a pattern
 
@@ -319,6 +333,29 @@ cannot wedge a cron sidecar.
 
 ```text
 Failed to snapshot sqlite database '/data/app.db': Timed out after 300s waiting to copy '/data/app.db': another process is holding a write lock
+```
+
+### An interrupted write is rolled back in the snapshot only
+
+If a service stops during a write transaction in rollback-journal mode, the
+database keeps a hot `-journal` beside it. The journal holds the data that the
+unfinished transaction changed. ezbak copies the database and the journal to its
+temporary directory and rolls back the transaction in that copy. The snapshot
+holds the last committed data. The live database and its journal stay as they
+are, and the service recovers them when it starts again.
+
+```text
+INFO | Rolled back an unfinished transaction of '/data/app.db' in its snapshot
+```
+
+ezbak does not roll back a journal that names a super-journal. SQLite writes
+that type of journal only for a transaction across more than one attached
+database. The rollback deletes the super-journal file, and ezbak does not delete
+a file that the service names. The backup fails. Start the service once to
+recover the database, then run the backup again.
+
+```text
+Refusing to roll back the journal of '/data/app.db': it names a super-journal from a multi-database transaction, which ezbak does not recover. Start the service once to recover it
 ```
 
 ## Disk usage during a run

@@ -31,7 +31,11 @@ Mount your source and backup directories as volumes. Point the environment
 variables at the mount paths inside the container. The examples below mount the
 source `:ro`. If you set `EZBAK_SQLITE_PATHS`, delete that flag, because it
 requires a writable source (see
-[SQLite databases](../concepts/sqlite.md#mount-the-source-read-write)).
+[SQLite databases](../concepts/sqlite.md#mount-the-source-read-write)). If you
+run the container with `--cap-drop ALL` and set `EZBAK_SQLITE_PATHS`, also add
+`--cap-add CHOWN --cap-add SETUID --cap-add SETGID`. ezbak needs these
+capabilities to copy each database as its owner (see
+[ezbak copies a database as its owner](../concepts/sqlite.md#ezbak-copies-a-database-as-its-owner)).
 
 ## One-shot backup
 

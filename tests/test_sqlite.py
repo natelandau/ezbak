@@ -3,6 +3,7 @@
 import os
 import sqlite3
 import stat
+import struct
 import subprocess
 import sys
 import textwrap
@@ -27,14 +28,29 @@ from ezbak.sqlite import (
     static_pattern_prefix,
     unusable_pattern_component,
 )
-from tests.helpers import make_db, row_count
+from tests.helpers import make_db, only_as_root, row_count, skip_as_root
 
-# root bypasses the permission bits these tests rely on, so a directory stripped of write
-# permission stays writable and the case under test cannot be reproduced.
-skip_as_root = pytest.mark.skipif(
-    hasattr(os, "geteuid") and os.geteuid() == 0,
-    reason="root ignores permission bits",
-)
+# Header magic of a SQLite rollback journal, from the file format.
+ROLLBACK_JOURNAL_MAGIC = bytes.fromhex("d9d505f920a163d7")
+
+# A user that owns nothing on the host, for root-only tests that drop privileges.
+NOBODY_UID = 65534
+
+
+@pytest.fixture
+def others_can_traverse_tmp_path(tmp_path):
+    """Open `tmp_path` and every parent to traversal, as a service's data path is.
+
+    pytest creates its temporary root as 0700, which would stop a dropped worker before it
+    reaches the permission a test means to exercise. The original modes are restored after
+    the test, since the parents are shared with every other test and the host.
+    """
+    original_modes = {path: path.stat().st_mode for path in (tmp_path, *tmp_path.parents)}
+    for path, mode in original_modes.items():
+        path.chmod(mode | 0o111)
+    yield
+    for path, mode in original_modes.items():
+        path.chmod(stat.S_IMODE(mode))
 
 
 @pytest.fixture
@@ -158,23 +174,17 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
     """Verify a database abandoned mid-transaction snapshots to a recovered, clean file.
 
     This is the case a raw file copy gets wrong: copying the database alone discards the
-    rollback journal it needs to become consistent again, so the copy restores corrupt.
+    rollback journal it needs to become consistent again, so the copy restores corrupt. The
+    rollback happens on ezbak's own copy, so the live files stay as found for the service to
+    recover on its next start.
     """
-    # Given a DELETE-mode database whose writer was killed mid-transaction, leaving a hot
-    # journal on disk
-    source = tmp_path / "hot.db"
+    # Given a DELETE-mode database whose writer was killed mid-transaction, leaving its
+    # uncommitted pages in the database file and a hot journal on disk
+    source = tmp_path / "data" / "hot.db"
     make_db(source, rows=200, wal=False)
 
-    script = textwrap.dedent(f"""
-        import os, sqlite3
-        conn = sqlite3.connect({str(source)!r})
-        conn.execute("BEGIN IMMEDIATE")
-        conn.execute("UPDATE t SET v = 'clobbered'")
-        # Abandon the process without commit or rollback, leaving the journal behind.
-        os._exit(1)
-    """)
-    subprocess.run([sys.executable, "-c", script], check=False)
-    assert source.with_name("hot.db-journal").exists(), "expected a hot journal on disk"
+    _crash_mid_transaction(source)
+    live_files = {path.name: path.read_bytes() for path in source.parent.iterdir()}
 
     dest = tmp_path / "snap" / "hot.db"
 
@@ -186,6 +196,9 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
     with closing(sqlite3.connect(dest)) as conn:
         assert conn.execute("SELECT count(*) FROM t WHERE v = 'clobbered'").fetchone()[0] == 0
 
+    # And the live database and its journal are untouched
+    assert {path.name: path.read_bytes() for path in source.parent.iterdir()} == live_files
+
 
 @skip_as_root
 def test_snapshot_database_reads_a_rollback_database_in_a_readonly_directory(
@@ -193,8 +206,7 @@ def test_snapshot_database_reads_a_rollback_database_in_a_readonly_directory(
 ):
     """Verify a DELETE-mode database snapshots from a directory that cannot be written.
 
-    A rollback-mode database needs no sidecar file to be read, so the ordinary read-write
-    open succeeds and the backup never has to fall back.
+    A rollback-mode database needs no sidecar file to be read.
     """
     # Given a DELETE-mode database in a directory with no write permission
     data = tmp_path / "data"
@@ -214,9 +226,9 @@ def test_snapshot_database_fails_for_a_wal_database_in_a_readonly_directory(tmp_
     """Verify a WAL database with no -shm on disk cannot be snapshotted read-only.
 
     SQLite cannot read a WAL database without a usable -shm, and it cannot create one in a
-    directory it may not write. The read-only retry runs and fails too, so the whole backup
-    fails rather than archiving a database the run could not copy consistently. This is why
-    a source holding WAL databases must be mounted read-write.
+    directory it may not write, so the whole backup fails rather than archiving a database
+    the run could not copy consistently. This is why a source holding WAL databases must be
+    mounted read-write.
     """
     # Given an idle WAL database whose -wal and -shm were checkpointed away on close,
     # in a directory with no write permission
@@ -227,18 +239,16 @@ def test_snapshot_database_fails_for_a_wal_database_in_a_readonly_directory(tmp_
     readonly_dir(data)
 
     # When snapshotting it
-    with pytest.raises(SqliteSnapshotError) as excinfo:
+    # Then the snapshot fails
+    with pytest.raises(SqliteSnapshotError):
         snapshot_database(source, dest=tmp_path / "snap" / "live.db")
-
-    # Then the read-only retry was attempted and reported as the failure
-    assert str(excinfo.value).startswith("Failed to snapshot read-only sqlite database")
 
 
 @skip_as_root
 def test_snapshot_database_copies_a_readonly_database_file(tmp_path):
     """Verify a database file with no write permission snapshots when its directory is writable.
 
-    SQLite can still create the -shm beside it, so this needs no fallback.
+    SQLite can still create the -shm beside it.
     """
     # Given a WAL database whose file is not writable, in a writable directory
     data = tmp_path / "data"
@@ -251,6 +261,318 @@ def test_snapshot_database_copies_a_readonly_database_file(tmp_path):
 
     # Then the snapshot holds the full contents
     assert row_count(tmp_path / "snap" / "live.db") == 4
+
+
+def _write_hot_journal(database: Path, *, super_journal: Path | None) -> None:
+    """Plant the rollback journal a writer killed mid-transaction leaves beside `database`.
+
+    The journal holds no page records, so replaying it changes nothing in the database. A
+    super-journal record makes rollback delete the file it names.
+
+    Args:
+        database (Path): The DELETE-mode database to plant the journal beside.
+        super_journal (Path | None): The file the journal names as its super-journal, if any.
+    """
+    page_size = 4096
+    header = ROLLBACK_JOURNAL_MAGIC + struct.pack(
+        ">5I", 0, 0, database.stat().st_size // page_size, page_size, page_size
+    )
+    journal = header.ljust(page_size, b"\x00")
+    if super_journal is not None:
+        name = str(super_journal).encode()
+        journal += (
+            struct.pack(">I", 0)
+            + name
+            + struct.pack(">2I", len(name), sum(name) & 0xFFFFFFFF)
+            + ROLLBACK_JOURNAL_MAGIC
+        )
+    database.with_name(database.name + "-journal").write_bytes(journal)
+
+
+def test_snapshot_database_refuses_a_journal_that_names_a_super_journal(tmp_path):
+    """Verify a planted journal cannot make the snapshot delete a file it names.
+
+    Rolling back a journal deletes the super-journal it names. The service owns the database
+    directory and so controls that name, while ezbak may run with more privilege than it.
+    """
+    # Given a DELETE-mode database whose hot journal names an unrelated file
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    _write_hot_journal(source, super_journal=victim)
+
+    # When snapshotting it
+    # Then the snapshot is refused and the named file survives
+    with pytest.raises(SqliteSnapshotError, match="super-journal"):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+    assert victim.read_text() == "keep"
+
+
+def test_snapshot_database_refuses_a_symlinked_hot_journal(tmp_path):
+    """Verify a hot journal that is a symlink is not followed out of the source directory."""
+    # Given a database whose hot journal is a symlink to a journal elsewhere
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=None)
+    elsewhere = tmp_path / "elsewhere-journal"
+    source.with_name("app.db-journal").rename(elsewhere)
+    source.with_name("app.db-journal").symlink_to(elsewhere)
+
+    # When snapshotting it
+    # Then the snapshot is refused
+    with pytest.raises(SqliteSnapshotError):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+
+def test_snapshot_database_refuses_a_hot_journal_pair_that_changes_mid_copy(tmp_path, monkeypatch):
+    """Verify a database written to while its hot journal is copied is not archived.
+
+    Nothing locks the live files during that copy, so a service that writes in the meantime
+    would pair a journal and a database from different moments.
+    """
+    # Given a database with a hot journal that the service writes to during the copy
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=None)
+    copy_regular_file = ezbak_sqlite._copy_regular_file
+
+    def copy_then_write(path: Path, *, dest: Path) -> None:
+        copy_regular_file(path, dest=dest)
+        with source.open("ab") as live:
+            live.write(b"\x00" * 4096)
+
+    monkeypatch.setattr(ezbak_sqlite, "_copy_regular_file", copy_then_write)
+
+    # When snapshotting it
+    # Then the snapshot is refused
+    with pytest.raises(SqliteSnapshotError, match="changed while ezbak copied"):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+
+def test_snapshot_database_copies_normally_when_the_hot_journal_is_recovered_first(
+    tmp_path, monkeypatch
+):
+    """Verify a hot journal the service recovers before ezbak copies it does not fail the run."""
+    # Given a database whose hot journal the service recovers right after ezbak finds it
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=None)
+    copy_regular_file = ezbak_sqlite._copy_regular_file
+
+    def recover_then_copy(path: Path, *, dest: Path) -> None:
+        source.with_name("app.db-journal").unlink(missing_ok=True)
+        copy_regular_file(path, dest=dest)
+
+    monkeypatch.setattr(ezbak_sqlite, "_copy_regular_file", recover_then_copy)
+
+    # When snapshotting it
+    snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+    # Then the snapshot holds the database
+    assert row_count(tmp_path / "snap" / "app.db") == 3
+
+
+def _crash_mid_transaction(source: Path) -> None:
+    """Kill a writer mid-transaction, leaving uncommitted pages in `source` and a hot journal.
+
+    Args:
+        source (Path): An existing DELETE-mode database made by `make_db`.
+    """
+    script = textwrap.dedent(f"""
+        import os, sqlite3
+        conn = sqlite3.connect({str(source)!r})
+        # A tiny cache forces modified pages into the database file before any commit.
+        conn.execute("PRAGMA cache_size=1")
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE t SET v = 'clobbered'")
+        conn.executemany("INSERT INTO t (v) VALUES (?)", [("clobbered",)] * 2000)
+        # Abandon the process without commit or rollback, leaving the journal behind.
+        os._exit(1)
+    """)
+    subprocess.run([sys.executable, "-c", script], check=False)
+    assert source.with_name(source.name + "-journal").exists(), "expected a hot journal on disk"
+
+
+def test_snapshot_database_refuses_a_path_through_a_symlinked_directory(tmp_path):
+    """Verify a directory swapped for a symlink cannot redirect the snapshot elsewhere.
+
+    The service can replace a directory above its database at any moment, so the snapshot
+    itself refuses such a path, not only the earlier scan for configured databases.
+    """
+    # Given a database reached through a symlinked directory
+    real = tmp_path / "elsewhere"
+    make_db(real / "app.db", rows=3, wal=False)
+    (tmp_path / "data").symlink_to(real)
+
+    # When snapshotting it
+    # Then the snapshot is refused
+    with pytest.raises(SqliteSnapshotError, match="symlink"):
+        snapshot_database(tmp_path / "data" / "app.db", dest=tmp_path / "snap" / "app.db")
+
+
+@pytest.fixture
+def snapshot_through_worker(monkeypatch):
+    """Send every snapshot through the owner worker, running as the test's own user.
+
+    The worker path is otherwise taken only by root for a database another user owns, so
+    this exercises it whatever user runs the suite.
+    """
+    owner = ezbak_sqlite._FileOwner(uid=os.getuid(), gid=os.getgid())
+    monkeypatch.setattr(ezbak_sqlite, "_owner_to_snapshot_as", lambda _: owner)
+
+
+@pytest.mark.parametrize(
+    "journal", [pytest.param(False, id="clean"), pytest.param(True, id="hot-journal")]
+)
+def test_snapshot_database_copies_through_the_owner_worker(
+    tmp_path, snapshot_through_worker, journal
+):
+    """Verify a snapshot through the owner worker holds the committed rows."""
+    # Given a database copied through the owner worker
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=200, wal=False)
+    if journal:
+        _crash_mid_transaction(source)
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    snapshot_database(source, dest=dest)
+
+    # Then the snapshot holds only the committed rows
+    assert row_count(dest) == 200
+    with closing(sqlite3.connect(dest)) as conn:
+        assert conn.execute("SELECT count(*) FROM t WHERE v = 'clobbered'").fetchone()[0] == 0
+
+
+def test_snapshot_database_copies_a_relative_path_through_the_owner_worker(
+    tmp_path, monkeypatch, snapshot_through_worker
+):
+    """Verify a relative database path names the same file inside the worker as outside it."""
+    # Given a database named relative to the working directory, copied through the worker
+    make_db(tmp_path / "data" / "app.db", rows=3, wal=False)
+    monkeypatch.chdir(tmp_path)
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    snapshot_database(Path("data") / "app.db", dest=dest)
+
+    # Then the snapshot holds that database
+    assert row_count(dest) == 3
+
+
+def test_snapshot_database_reports_a_failure_inside_the_owner_worker(
+    tmp_path, snapshot_through_worker
+):
+    """Verify a failure inside the worker fails the snapshot with the worker's reason."""
+    # Given a database copied through the owner worker, whose journal names a super-journal
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=tmp_path / "victim.txt")
+
+    # When snapshotting it
+    # Then the snapshot fails with the worker's reason
+    with pytest.raises(SqliteSnapshotError, match="super-journal"):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+
+def _stat_owned_by(uid: int) -> os.stat_result:
+    """Build stat metadata owned by `uid`, with matching group, for owner-choice tests.
+
+    Args:
+        uid (int): The owner, also used as the group.
+
+    Returns:
+        os.stat_result: Metadata whose only meaningful fields are the owner and group.
+    """
+    return os.stat_result((0o100644, 0, 0, 1, uid, uid, 0, 0, 0, 0))
+
+
+@pytest.mark.parametrize(
+    ("euid", "database_uid", "directory_uid", "expected_uid"),
+    [
+        pytest.param(1000, 1000, 1000, None, id="not-root"),
+        pytest.param(0, 1000, 1000, 1000, id="service-owns-both"),
+        pytest.param(0, 1000, 0, 1000, id="service-owns-database"),
+        pytest.param(0, 0, 1000, 1000, id="root-database-in-service-directory"),
+        pytest.param(0, 0, 0, None, id="root-owns-both"),
+    ],
+)
+def test_snapshot_runs_as_a_user_who_controls_the_database(
+    monkeypatch, euid, database_uid, directory_uid, expected_uid
+):
+    """Verify a root snapshot drops to whoever controls the database or its directory.
+
+    A root-owned database in a directory the service owns is still the service's to tamper
+    with, so only a database where root owns both is copied as root.
+    """
+    # Given ezbak's user and the owners of a database and its directory
+    monkeypatch.setattr(os, "geteuid", lambda: euid)
+    source_stat = ezbak_sqlite._DatabaseStat(
+        database=_stat_owned_by(database_uid), directory=_stat_owned_by(directory_uid)
+    )
+
+    # When choosing the user to snapshot as
+    owner = ezbak_sqlite._owner_to_snapshot_as(source_stat)
+
+    # Then the copy runs as the expected user, or in this process
+    assert (owner.uid if owner else None) == expected_uid
+
+
+@pytest.mark.parametrize("planted", ["symlink", "hardlink"])
+def test_snapshot_database_refuses_worker_output_that_is_not_its_own_file(
+    tmp_path, monkeypatch, snapshot_through_worker, planted
+):
+    """Verify the worker's output is refused when it is a link to another file.
+
+    The worker's user owns its work directory, so it can replace the output with a link to a
+    file only root can read. Moving that into ezbak's staging would archive the file.
+    """
+    # Given a worker whose output is a link to another file
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    other = tmp_path / "other.db"
+    make_db(other, rows=9, wal=False)
+
+    def _plant_link(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        worker_dest = Path(command[-1])
+        if planted == "symlink":
+            worker_dest.symlink_to(other)
+        else:
+            worker_dest.hardlink_to(other)
+        return subprocess.CompletedProcess(command, returncode=0, stdout="copied", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _plant_link)
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    # Then the output is refused and nothing is left in staging
+    with pytest.raises(SqliteSnapshotError, match="one link"):
+        snapshot_database(source, dest=dest)
+    assert not dest.exists()
+    assert row_count(other) == 9
+
+
+@only_as_root
+@pytest.mark.usefixtures("others_can_traverse_tmp_path")
+def test_snapshot_worker_cannot_read_what_the_owner_cannot(tmp_path):
+    """Verify a path redirected after the owner lookup reaches only what the owner can read.
+
+    The service can swap a directory for a symlink between the lookup and the worker's open.
+    The worker then opens the redirected path with the service's own privileges.
+    """
+    # Given a root-only database, and a worker for an unprivileged owner whose path leads to it
+    secret = tmp_path / "secret" / "root.db"
+    make_db(secret, rows=3, wal=False)
+    secret.parent.chmod(0o700)
+    owner = ezbak_sqlite._FileOwner(uid=NOBODY_UID, gid=NOBODY_UID)
+    dest = tmp_path / "snap" / "root.db"
+    dest.parent.mkdir()
+
+    # When the worker copies it
+    # Then the copy fails on the owner's permissions
+    with pytest.raises(SqliteSnapshotError, match="unable to open database file"):
+        ezbak_sqlite._copy_live_database_as(owner, source=secret, dest=dest)
 
 
 def test_snapshot_database_preserves_the_source_permissions(tmp_path):
@@ -506,7 +828,7 @@ def test_is_sqlite_database_rejects_an_unreadable_file(tmp_path):
         pytest.param("-wal", b"\x37\x7f\x06\x83", True, id="wal-little-endian-checksums"),
         pytest.param("-wal", b"not a wal file", False, id="wal-lookalike"),
         pytest.param("-wal", b"", False, id="wal-zeroed"),
-        pytest.param("-journal", b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7", True, id="journal"),
+        pytest.param("-journal", ROLLBACK_JOURNAL_MAGIC, True, id="journal"),
         pytest.param("-journal", b"plain text file", False, id="journal-lookalike"),
         pytest.param("-shm", b"anything at all", True, id="shm-has-no-magic"),
     ],
@@ -716,7 +1038,7 @@ def test_expand_sqlite_paths_drops_journal_siblings(tmp_path):
     make_db(source / "app.db")
     (source / "app.db-wal").write_bytes(b"\x37\x7f\x06\x82" + b"\x00" * 28)
     (source / "app.db-shm").write_bytes(b"\x00" * 32)
-    (source / "app.db-journal").write_bytes(b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7")
+    (source / "app.db-journal").write_bytes(ROLLBACK_JOURNAL_MAGIC)
 
     # When expanding a pattern broad enough to match them
     result = expand_sqlite_paths([source / "app.db*"], source_paths=[source])
