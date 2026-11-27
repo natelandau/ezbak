@@ -37,11 +37,12 @@ class Backup:
         # Full path to the backup file, used for local backups
         self.path = path
 
-        try:
-            self.timestamp = TIMESTAMP_REGEX.search(name).group(0)
-        except AttributeError:
-            logger.warning(f"Could not parse timestamp: {name}")
-            raise
+        timestamp_match = TIMESTAMP_REGEX.search(name)
+        if timestamp_match is None:
+            msg = f"Could not parse a timestamp from backup name '{name}'"
+            logger.warning(msg)
+            raise ValueError(msg)
+        self.timestamp = timestamp_match.group(0)
 
         plain_dt = PlainDateTime.parse(self.timestamp, pattern=DEFAULT_DATE_PATTERN)
         try:
@@ -78,7 +79,7 @@ class StorageLocation:
     def __init__(
         self,
         *,
-        storage_path: str | Path,
+        storage_path: str | Path | None,
         storage_type: StorageType,
         backups: list[Backup],
         name: str,

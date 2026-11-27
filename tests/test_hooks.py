@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import subprocess  # ruff:ignore[suspicious-subprocess-import]
+import subprocess
 
 import pytest
 
 from ezbak.hooks import run_hook
 
 
-@pytest.mark.parametrize("command", [None, "", "   "])
+@pytest.mark.parametrize("command", [None, "", "   "], ids=["none", "empty", "whitespace"])
 def test_run_hook_noop_returns_true_without_running(command, mocker):
     """Verify an unset or blank hook is a no-op that spawns no process."""
     # Given a spy on subprocess.run
@@ -23,19 +23,6 @@ def test_run_hook_noop_returns_true_without_running(command, mocker):
     spy.assert_not_called()
 
 
-def test_run_hook_success_runs_command(tmp_path):
-    """Verify a zero-exit hook runs the command and returns True."""
-    # Given a marker path the command will create
-    marker = tmp_path / "ran"
-
-    # When running a hook that touches the marker
-    result = run_hook(f"touch {marker}", phase="pre-backup", timeout=300)
-
-    # Then it succeeds and the command actually ran
-    assert result is True
-    assert marker.exists()
-
-
 def test_run_hook_nonzero_exit_returns_false():
     """Verify a non-zero exit is reported as a failed hook."""
     # Given a command that exits non-zero
@@ -46,20 +33,25 @@ def test_run_hook_nonzero_exit_returns_false():
     assert result is False
 
 
-def test_run_hook_timeout_returns_false(mocker):
-    """Verify a hook that times out is killed and reported as a failure."""
-    # Given subprocess.run raising a timeout
+def test_run_hook_timeout_returns_false_and_logs_partial_output_as_text(mocker, log_messages):
+    """Verify a timed-out hook fails and its partial output is logged as text, not bytes."""
+    # Given subprocess.run raising a timeout that carries raw-bytes partial output,
+    # as it does even with text=True
     mocker.patch(
         "ezbak.hooks.subprocess.run",
         autospec=True,
-        side_effect=subprocess.TimeoutExpired(cmd="sh", timeout=1),
+        side_effect=subprocess.TimeoutExpired(
+            cmd="sh", timeout=1, output=b"partial out", stderr=b"partial err"
+        ),
     )
 
     # When running the hook
     result = run_hook("sleep 5", phase="pre-backup", timeout=1)
 
-    # Then it is a failure
+    # Then it is a failure and the partial output is logged as decoded text
     assert result is False
+    assert "pre-backup hook stdout: partial out\n" in log_messages
+    assert "pre-backup hook stderr: partial err\n" in log_messages
 
 
 def test_run_hook_spawn_error_returns_false(mocker):

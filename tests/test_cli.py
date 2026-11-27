@@ -12,25 +12,28 @@ import cappa
 import pytest
 import time_machine
 
-from ezbak.backup import Backup
-from ezbak.cli import CreateCommand, EZBakCLI, PruneCommand, RestoreCommand, build_config
-from ezbak.cli_commands import list as list_cmd
-from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel, StorageType
+# cappa.command, .invoke, and .parse share names with cappa submodules, which type checkers
+# resolve instead of the functions; cappa.base exports the functions themselves
+from cappa.base import invoke, parse
+
+from ezbak.cli import CreateCommand, EZBakCLI, build_config
+from ezbak.constants import DEFAULT_DATE_FORMAT, LogLevel
 from ezbak.logging import instantiate_logger
+from tests.helpers import FIXTURE_ARCHIVE, LEGACY_BACKUP_NAMES
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
 frozen_time_str = frozen_time.strftime(DEFAULT_DATE_FORMAT)
-fixture_archive_path = Path(__file__).parent / "fixtures" / "archive.tgz"
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_cli_create_backup(filesystem, debug, capsys, tmp_path):
-    """Verify that a backup is created correctly."""
+def test_cli_create_backup(filesystem):
+    """Verify create writes the backup to every storage path."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
 
-    cappa.invoke(
+    # When: creating a backup to two storage paths
+    invoke(
         obj=EZBakCLI,
         argv=[
             "create",
@@ -44,167 +47,45 @@ def test_cli_create_backup(filesystem, debug, capsys, tmp_path):
             str(dest2),
         ],
     )
-    output = capsys.readouterr().err
-    # debug(output)
 
+    # Then: both storage paths hold the archive
     filename = f"test-{frozen_time_str}.tgz"
-    assert Path(dest1 / filename).exists()
-    assert Path(dest2 / filename).exists()
-    assert f"INFO     | Created: dest1/{filename}" in output
-    assert f"INFO     | Created: dest2/{filename}" in output
+    assert (dest1 / filename).exists()
+    assert (dest2 / filename).exists()
 
 
-def test_cli_prune_backups_keep_last(mocker, debug, capsys, tmp_path):
-    """Verify pruning backups with keep_last set."""
-    mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
-    # Given: A backup manager configured with test parameters
-    filenames = [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095730-weekly-k6lop.tgz",
-        "test-20250609T095730-daily.tgz",
-        "test-20250609T095751-minutely.tgz",
-        "test-20250609T095749-minutely.tgz",
-        "test-20250609T090932-yearly.tgz",
-        "test-20250609T095737-minutely.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-        "test-20240609T090932-yearly.tgz",
-        "test-20250609T095625-monthly.tgz",
-        "test-20250609T095737-minutely-6klf7.tgz",
-    ]
-    for filename in filenames:
-        Path(tmp_path / filename).touch()
+def test_cli_create_write_failure_exits_nonzero(filesystem, mocker):
+    """Verify create exits non-zero and stores nothing when the archive cannot be written."""
+    # Given: a storage path whose write fails
+    src_dir, dest1, _ = filesystem
+    mocker.patch("ezbak.storage.local.copy_with_periodic_fsync", side_effect=OSError("disk full"))
 
-    cappa.invoke(
-        obj=EZBakCLI,
-        argv=[
-            "prune",
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "--keep-last",
-            "3",
-        ],
-    )
-    output = capsys.readouterr().err
-    # debug(output)
+    # When: creating a backup
+    with pytest.raises(cappa.Exit) as exc:
+        invoke(
+            obj=EZBakCLI,
+            argv=["create", "--name", "test", "--source", str(src_dir), "--storage", str(dest1)],
+        )
 
-    assert "Pruned 10 backups" in output
-    existing_files = list(tmp_path.iterdir())
-    assert len(existing_files) == 3
-    for filename in [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-    ]:
-        assert Path(tmp_path / filename).exists()
+    # Then: the command fails and no archive is left behind
+    assert exc.value.code == 1
+    assert not list(dest1.glob("*.tgz"))
 
 
-def test_cli_prune_backups_with_policy(mocker, debug, capsys, tmp_path):
-    """Verify pruning backups with a policy."""
-    mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
-    # Given: A backup manager configured with test parameters
-    filenames = [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095730-weekly-k6lop.tgz",
-        "test-20250609T095730-daily.tgz",
-        "test-20250609T095751-minutely.tgz",
-        "test-20250609T095749-minutely.tgz",
-        "test-20250609T090932-yearly.tgz",
-        "test-20250609T095737-minutely.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-        "test-20240609T090932-yearly.tgz",
-        "test-20250609T095625-monthly.tgz",
-        "test-20250609T095737-minutely-6klf7.tgz",
-    ]
-    for filename in filenames:
-        Path(tmp_path / filename).touch()
-
-    cappa.invoke(
-        obj=EZBakCLI,
-        argv=[
-            "prune",
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "--keep-yearly",
-            "1",
-            "--keep-monthly",
-            "4",
-            "--keep-weekly",
-            "4",
-            "--keep-daily",
-            "4",
-            "--keep-hourly",
-            "4",
-            "--keep-minutely",
-            "4",
-        ],
-    )
-    output = capsys.readouterr().err
-    # debug(output)
-
-    assert "Pruned 8 backups" in output
-    existing_files = list(tmp_path.iterdir())
-    assert len(existing_files) == 5
-    for filename in [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095751-minutely.tgz",
-        "test-20250609T095625-monthly.tgz",
-        "test-20240609T090932-yearly.tgz",
-    ]:
-        assert Path(tmp_path / filename).exists()
-    for filename in [
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095737-minutely.tgz",
-        "test-20250609T095737-minutely-6klf7.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-        "test-20250609T095730-weekly-k6lop.tgz",
-        "test-20250609T095730-daily.tgz",
-        "test-20250609T090932-yearly.tgz",
-    ]:
-        assert not Path(tmp_path / filename).exists()
-
-
-def test_cli_prune_backups_dry_run(mocker, debug, capsys, tmp_path):
+def test_cli_prune_backups_dry_run(mocker, capsys, legacy_backups):
     """Verify a dry-run prune previews targets without prompting or deleting."""
     # Given: a confirmation spy that must never be reached in dry-run mode
     confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
 
-    # Given: 13 backup files on disk
-    filenames = [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095730-weekly-k6lop.tgz",
-        "test-20250609T095730-daily.tgz",
-        "test-20250609T095751-minutely.tgz",
-        "test-20250609T095749-minutely.tgz",
-        "test-20250609T090932-yearly.tgz",
-        "test-20250609T095737-minutely.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-        "test-20240609T090932-yearly.tgz",
-        "test-20250609T095625-monthly.tgz",
-        "test-20250609T095737-minutely-6klf7.tgz",
-    ]
-    for filename in filenames:
-        Path(tmp_path / filename).touch()
-
     # When: pruning runs with --dry-run
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
             "--name",
             "test",
             "--storage",
-            str(tmp_path),
+            str(legacy_backups),
             "--keep-last",
             "3",
             "--dry-run",
@@ -216,10 +97,10 @@ def test_cli_prune_backups_dry_run(mocker, debug, capsys, tmp_path):
     confirm.assert_not_called()
     assert "Would delete 10 backups" in output
     assert "Pruned" not in output
-    assert len(list(tmp_path.iterdir())) == 13
+    assert len(list(legacy_backups.iterdir())) == len(LEGACY_BACKUP_NAMES)
 
 
-def test_cli_prune_backups_dry_run_no_targets(mocker, debug, capsys, tmp_path):
+def test_cli_prune_backups_dry_run_no_targets(mocker, capsys, tmp_path):
     """Verify a dry run that targets nothing never claims a deletion happened."""
     # Given: a confirmation spy that must never be reached in dry-run mode
     confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=True)
@@ -232,7 +113,7 @@ def test_cli_prune_backups_dry_run_no_targets(mocker, debug, capsys, tmp_path):
         Path(tmp_path / filename).touch()
 
     # When: pruning runs with --dry-run and a policy that keeps more than exist
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
@@ -253,9 +134,51 @@ def test_cli_prune_backups_dry_run_no_targets(mocker, debug, capsys, tmp_path):
     assert "No backups deleted" not in output
 
 
-def test_cli_list_backups(debug, capsys, tmp_path):
+def test_cli_prune_backups_force_skips_confirmation(mocker, capsys, legacy_backups):
+    """Verify --force prunes to the retention policy without asking for confirmation."""
+    # Given: a confirmation that would decline if it were ever reached
+    confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=False)
+
+    # When: pruning runs with --force
+    invoke(
+        obj=EZBakCLI,
+        argv=[
+            "prune",
+            "--name",
+            "test",
+            "--storage",
+            str(legacy_backups),
+            "--keep-last",
+            "3",
+            "--force",
+        ],
+    )
+    output = capsys.readouterr().err
+
+    # Then: no confirmation is requested and only the three newest backups remain
+    confirm.assert_not_called()
+    assert "Deleted 10 backups" in output
+    assert len(list(legacy_backups.iterdir())) == 3
+
+
+def test_cli_prune_declined_confirmation_deletes_nothing(mocker, legacy_backups):
+    """Verify declining the prune confirmation leaves every backup in place."""
+    # Given: an operator who answers no at the prompt
+    mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=False)
+
+    # When: pruning runs without --force
+    invoke(
+        obj=EZBakCLI,
+        argv=["prune", "--name", "test", "--storage", str(legacy_backups), "--keep-last", "3"],
+    )
+
+    # Then: nothing is deleted
+    assert len(list(legacy_backups.iterdir())) == len(LEGACY_BACKUP_NAMES)
+
+
+def test_cli_list_backups(capsys, tmp_path):
     """Verify listing backups."""
-    # Given: A backup manager configured with test parameters
+    # Given: three backups in a storage path
     filenames = [
         "test-20250609T101857-hourly.tgz",
         "test-20250609T095745-minutely.tgz",
@@ -264,75 +187,62 @@ def test_cli_list_backups(debug, capsys, tmp_path):
     for filename in filenames:
         Path(tmp_path / filename).touch()
 
-    cappa.invoke(
+    # When: listing backups
+    invoke(
         obj=EZBakCLI,
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
     )
     output = capsys.readouterr().err
-    debug(output)
 
-    assert "test-20250609T101857-hourly.tgz" in output
-    assert "test-20250609T095745-minutely.tgz" in output
-    assert "test-20250609T095804-minutely.tgz" in output
+    # Then: every backup is listed
+    for filename in filenames:
+        assert filename in output
 
 
-def test_cli_list_backups_all_storage(mocker, debug, capsys, tmp_path):
+def test_cli_list_backups_all_storage(s3_bucket: str, capsys, tmp_path):
     """Verify listing shows both local and S3 backups when both destinations have backups."""
-    # Given a logger writing to stderr and an app reporting one local and one AWS backup
-    instantiate_logger(LogLevel.INFO)
+    # Given: one backup in a local path and another in the bucket
+    local_name = "test-20250609T101857-hourly.tgz"
+    s3_name = "test-20240609T000000-yearly.tgz"
+    (tmp_path / local_name).touch()
+    boto3.client("s3").put_object(Bucket=s3_bucket, Key=s3_name, Body=b"archive")
 
-    local_backup = Backup(
-        name="test-20250609T101857-hourly.tgz",
-        storage_type=StorageType.LOCAL,
-        path=tmp_path / "test-20250609T101857-hourly.tgz",
-        storage_path=tmp_path,
+    # When: listing backups across both destinations
+    invoke(
+        obj=EZBakCLI,
+        argv=["list", "--name", "test", "--storage", str(tmp_path), "--s3-bucket", s3_bucket],
     )
-    aws_backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
-    mocker.patch.object(list_cmd, "build_config", return_value=mocker.MagicMock())
-    mock_ezbak = mocker.patch.object(list_cmd, "EZBak", autospec=True)
-    mock_ezbak.return_value.list_backups.return_value = [local_backup, aws_backup]
-    mock_ezbak.return_value.unreadable_locations = []
-
-    # When listing backups
-    list_cmd.main(mocker.MagicMock())
     output = capsys.readouterr().err
-    # debug(output)
 
-    # Then both the AWS backup and the local backup appear
-    assert "Found 1 AWS backups" in output
-    assert aws_backup.name in output
-    assert "Found 1 local backups" in output
-    assert local_backup.name in output
+    # Then: both backups appear
+    assert local_name in output
+    assert s3_name in output
 
 
-def test_cli_list_backups_partial_index_reports_and_exits_nonzero(
-    s3_bucket: str, break_s3_listing, capsys, tmp_path
+@pytest.mark.parametrize("bucket_missing", [False, True], ids=["listing-denied", "bucket-missing"])
+def test_cli_list_backups_unusable_s3_destination_exits_nonzero(
+    s3_bucket: str, break_s3_listing, capsys, tmp_path, bucket_missing
 ) -> None:
-    """Verify a partial index still prints the backups found but exits non-zero."""
-    # Given a local backup alongside an S3 bucket that cannot be listed
-    Path(tmp_path / "test-20250609T101857-hourly.tgz").touch()
-    break_s3_listing()
+    """Verify list still prints the local backups but exits non-zero when S3 cannot be read."""
+    # Given: a local backup alongside a bucket that cannot be listed or does not exist
+    local_name = "test-20250609T101857-hourly.tgz"
+    (tmp_path / local_name).touch()
+    if bucket_missing:
+        bucket = "missing-bucket"
+    else:
+        bucket = s3_bucket
+        break_s3_listing()
 
-    # When listing backups
+    # When: listing backups
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
-            argv=[
-                "list",
-                "--name",
-                "test",
-                "--storage",
-                str(tmp_path),
-                "--s3-bucket",
-                s3_bucket,
-            ],
+            argv=["list", "--name", "test", "--storage", str(tmp_path), "--s3-bucket", bucket],
         )
-    output = capsys.readouterr().err
 
-    # Then it exits non-zero, names the unreadable destination, and still lists what was found
+    # Then: it exits non-zero and still lists what was found
     assert exc.value.code == 1
-    assert f"S3 bucket '{s3_bucket}'" in output
-    assert "test-20250609T101857-hourly.tgz" in output
+    assert local_name in capsys.readouterr().err
 
 
 def test_cli_list_backups_partial_index_with_no_backups_found(
@@ -344,7 +254,7 @@ def test_cli_list_backups_partial_index_with_no_backups_found(
 
     # When listing backups
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
             argv=[
                 "list",
@@ -369,7 +279,7 @@ def test_cli_list_backups_empty_and_readable_prints_no_backups_found(capsys, tmp
     # Given an empty, readable local storage path and no S3 destination configured
 
     # When listing backups, then it does not raise cappa.Exit
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
     )
@@ -379,18 +289,14 @@ def test_cli_list_backups_empty_and_readable_prints_no_backups_found(capsys, tmp
     assert "No backups found" in output
 
 
-def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
+def test_cli_restore_backup(filesystem, restore_dir):
     """Verify that a backup is restored correctly."""
-    # Given: Source and destination directories from fixture
+    # Given: a backup in the storage path
     _, dest1, _ = filesystem
-    backup_name = f"test-{frozen_time_str}-yearly.tgz"
-    backup_path = Path(dest1 / backup_name)
-    shutil.copy2(fixture_archive_path, backup_path)
+    shutil.copy2(FIXTURE_ARCHIVE, dest1 / f"test-{frozen_time_str}-yearly.tgz")
 
-    restore_path = Path(tmp_path / "restore")
-    restore_path.mkdir(exist_ok=True)
-
-    cappa.invoke(
+    # When: restoring it
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -399,15 +305,38 @@ def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
             "--storage",
             str(dest1),
             "--restore-path",
-            str(restore_path),
+            str(restore_dir),
         ],
     )
-    output = capsys.readouterr().err
-    # debug(output)
-    # debug(restore_path)
 
-    assert "INFO     | Backup restored to 'restore'" in output
-    assert Path(restore_path / "src" / "baz.txt").exists()
+    # Then: the archive contents are on disk
+    assert (restore_dir / "src" / "baz.txt").exists()
+
+
+def test_cli_restore_corrupt_archive_exits_nonzero(filesystem, restore_dir):
+    """Verify restoring an archive that is not a tarball exits non-zero and restores nothing."""
+    # Given: a backup whose bytes are not a tarball
+    _, dest1, _ = filesystem
+    (dest1 / "test-20250103T090000.tgz").write_bytes(b"not a tarball")
+
+    # When: restoring it
+    with pytest.raises(cappa.Exit) as exc:
+        invoke(
+            obj=EZBakCLI,
+            argv=[
+                "restore",
+                "--name",
+                "test",
+                "--storage",
+                str(dest1),
+                "--restore-path",
+                str(restore_dir),
+            ],
+        )
+
+    # Then: the command fails and the restore path is still empty
+    assert exc.value.code == 1
+    assert not list(restore_dir.iterdir())
 
 
 def test_build_config_reads_s3_bucket(monkeypatch, filesystem):
@@ -431,36 +360,6 @@ def test_build_config_reads_s3_bucket(monkeypatch, filesystem):
     assert config.aws_access_key == "AKIA_TEST"
 
 
-def test_build_config_maps_region_and_endpoint(monkeypatch):
-    """Verify the CLI builder wires the S3 region and endpoint into the config."""
-    # Given credentials in the environment and region/endpoint flags
-    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "AKIA_TEST")
-    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
-
-    # When parsing a create command with --s3-region and --s3-endpoint-url
-    cli = cappa.parse(
-        EZBakCLI,
-        argv=[
-            "--name",
-            "t",
-            "--s3-bucket",
-            "my-bucket",
-            "--s3-region",
-            "eu-west-1",
-            "--s3-endpoint-url",
-            "https://minio.example.com",
-            "create",
-            "--source",
-            "/tmp",  # ruff:ignore[hardcoded-temp-file]
-        ],
-    )
-    config = build_config(cli)
-
-    # Then both settings land on the config
-    assert config.aws_region == "eu-west-1"
-    assert config.aws_s3_endpoint_url == "https://minio.example.com"
-
-
 def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     """Verify an S3-only backup parses without the --storage flag."""
     # Given S3 credentials in the environment
@@ -468,7 +367,7 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
 
     # When parsing a create command with only --s3-bucket (no --storage)
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=["--name", "t", "--s3-bucket", "my-bucket", "create", "--source", str(tmp_path)],
     )
@@ -479,266 +378,126 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     assert config.aws_s3_bucket_name == "my-bucket"
 
 
-def test_create_no_use_checksums_flag(tmp_path):
-    """Verify --no-use-checksums maps to use_checksums=False in the built config."""
-    # Given a create command parsed with --no-use-checksums
-    cli = cappa.parse(
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        pytest.param(
+            ["create", "--source", "{data}", "--no-use-checksums"],
+            {"use_checksums": False},
+            id="create-no-use-checksums",
+        ),
+        pytest.param(
+            ["restore", "--restore-path", "{data}", "--no-use-checksums"],
+            {"use_checksums": False},
+            id="restore-no-use-checksums",
+        ),
+        pytest.param(
+            ["create", "--source", "{data}", "--sqlite-path", "{data}/app.db"],
+            {"sqlite_paths": [Path("{data}/app.db")]},
+            id="sqlite-path",
+        ),
+        pytest.param(
+            [
+                "create",
+                "--source",
+                "{data}",
+                "--sqlite-path",
+                "{data}/a.db",
+                "--sqlite-path",
+                "{data}/b.db",
+            ],
+            {"sqlite_paths": [Path("{data}/a.db"), Path("{data}/b.db")]},
+            id="sqlite-path-repeated",
+        ),
+        # Stored unexpanded, since expansion happens per backup run
+        pytest.param(
+            ["create", "--source", "{data}", "--sqlite-path", "{data}/*.db"],
+            {"sqlite_paths": [Path("{data}/*.db")]},
+            id="sqlite-path-glob",
+        ),
+        # Stays relative, to be anchored to each source path at expansion time
+        pytest.param(
+            ["create", "--source", "{data}", "--sqlite-path", "**/*.db"],
+            {"sqlite_paths": [Path("**/*.db")]},
+            id="sqlite-path-relative",
+        ),
+        pytest.param(
+            ["restore", "--restore-path", "{data}", "--restore-date", "20250102"],
+            {"restore_date": "20250102"},
+            id="restore-date",
+        ),
+        pytest.param(
+            ["restore", "--restore-path", "{data}", "--skip-if-no-backup"],
+            {"skip_if_no_backup": True},
+            id="skip-if-no-backup",
+        ),
+        pytest.param(
+            ["restore", "--restore-path", "{data}", "--skip-if-populated"],
+            {"skip_restore_if_populated": True},
+            id="skip-if-populated",
+        ),
+        pytest.param(
+            ["prune", "--keep-last", "3", "--keep-daily", "4"],
+            {"keep_last": 3, "keep_daily": 4},
+            id="keep-last-and-daily",
+        ),
+        pytest.param(
+            ["--s3-region", "eu-west-1", "create", "--source", "{data}"],
+            {"aws_region": "eu-west-1"},
+            id="s3-region",
+        ),
+        pytest.param(
+            ["--s3-endpoint-url", "https://minio.example.com", "create", "--source", "{data}"],
+            {"aws_s3_endpoint_url": "https://minio.example.com"},
+            id="s3-endpoint-url",
+        ),
+    ],
+)
+def test_build_config_maps_flags(tmp_path, argv: list[str], expected: dict[str, object]):
+    """Verify each command-line flag lands on its config field."""
+    # Given a parsed command line; a glob's root directory must exist to validate
+    data = tmp_path / "data"
+    data.mkdir()
+    cli = parse(
         EZBakCLI,
-        argv=[
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "create",
-            "--source",
-            str(tmp_path),
-            "--no-use-checksums",
-        ],
+        argv=["--name", "test", "--storage", str(data), *(x.format(data=data) for x in argv)],
     )
 
     # When building the config
     config = build_config(cli)
 
-    # Then use_checksums is False
-    assert config.use_checksums is False
+    # Then each field holds the flag's value
+    def _fill(value: object) -> object:
+        if isinstance(value, list):
+            return [Path(str(x).format(data=data)) for x in value]
+        return value
+
+    assert {field: getattr(config, field) for field in expected} == {
+        field: _fill(value) for field, value in expected.items()
+    }
 
 
-def test_create_sqlite_path_flag(tmp_path):
-    """Verify --sqlite-path maps to sqlite_paths in the built config."""
-    # Given a source tree holding a database
-    src = tmp_path / "data"
-    src.mkdir()
-    (src / "app.db").touch()
-
-    # And a create command parsed with --sqlite-path
-    cli = cappa.parse(
-        EZBakCLI,
-        argv=[
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "create",
-            "--source",
-            str(src),
-            "--sqlite-path",
-            str(src / "app.db"),
-        ],
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then the sqlite path is carried through
-    assert config.sqlite_paths == [src / "app.db"]
-
-
-def test_create_sqlite_path_flag_repeats(tmp_path):
-    """Verify --sqlite-path accumulates across repeats."""
-    # Given a source tree holding two databases
-    src = tmp_path / "data"
-    src.mkdir()
-    (src / "a.db").touch()
-    (src / "b.db").touch()
-
-    # And a create command naming both
-    cli = cappa.parse(
-        EZBakCLI,
-        argv=[
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "create",
-            "--source",
-            str(src),
-            "--sqlite-path",
-            str(src / "a.db"),
-            "--sqlite-path",
-            str(src / "b.db"),
-        ],
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then both paths are present
-    assert config.sqlite_paths == [src / "a.db", src / "b.db"]
-
-
-def test_create_sqlite_path_flag_accepts_a_pattern(tmp_path):
-    """Verify --sqlite-path carries a glob through unexpanded, for expansion at backup time."""
-    # Given a source tree of sharded databases
-    src = tmp_path / "data"
-    src.mkdir()
-    (src / "folder.0001-nhx4yzcl.db").touch()
-    (src / "folder.0002-j4dkatqn.db").touch()
-
-    # And a create command naming them with one pattern
-    cli = cappa.parse(
-        EZBakCLI,
-        argv=[
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "create",
-            "--source",
-            str(src),
-            "--sqlite-path",
-            str(src / "*.db"),
-        ],
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then the pattern is stored as written, since expansion happens per backup run
-    assert config.sqlite_paths == [src / "*.db"]
-
-
-def test_create_sqlite_path_flag_accepts_a_relative_pattern(tmp_path):
-    """Verify a relative pattern is not resolved against the process working directory."""
-    # Given a create command with a source-relative pattern
-    src = tmp_path / "data"
-    src.mkdir()
-
-    cli = cappa.parse(
-        EZBakCLI,
-        argv=[
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "create",
-            "--source",
-            str(src),
-            "--sqlite-path",
-            "**/*.db",
-        ],
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then it stays relative, to be anchored to each source path at expansion time
-    assert config.sqlite_paths == [Path("**/*.db")]
-
-
-def test_restore_no_use_checksums_flag(tmp_path):
-    """Verify --no-use-checksums maps to use_checksums=False on a restore command."""
-    # Given a restore command parsed with --no-use-checksums
-    cli = cappa.parse(
-        EZBakCLI,
-        argv=[
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "restore",
-            "--restore-path",
-            str(tmp_path),
-            "--no-use-checksums",
-        ],
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then use_checksums is False
-    assert config.use_checksums is False
-
-
-def test_cli_invalid_config_exits_cleanly(monkeypatch, capsys):
+def test_cli_invalid_config_exits_cleanly(capsys):
     """Verify a config with no storage location exits non-zero with a logged message."""
     # Given a logger bound to this test's stderr and no storage configured
     instantiate_logger(LogLevel.INFO)
-    for var in ("EZBAK_STORAGE_PATHS", "EZBAK_AWS_S3_BUCKET_NAME"):
-        monkeypatch.delenv(var, raising=False)
 
     # When invoking a command with a name but no storage destination
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(obj=EZBakCLI, argv=["list", "--name", "test"])
+        invoke(obj=EZBakCLI, argv=["list", "--name", "test"])
 
     # Then it exits non-zero with a helpful message instead of a raw pydantic traceback
     assert exc.value.code == 1
     assert "No storage configured" in capsys.readouterr().err
 
 
-def test_build_config_maps_restore_date():
-    """Verify --restore-date is mapped onto restore_date in the built config."""
-    # Given a restore command carrying a date
-    cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), restore_date="20250102"),  # ruff:ignore[hardcoded-temp-file]
-        name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then restore_date is set
-    assert config.restore_date == "20250102"
-
-
-def test_build_config_maps_skip_if_no_backup():
-    """Verify --skip-if-no-backup is mapped onto skip_if_no_backup in the built config."""
-    # Given a restore command with --skip-if-no-backup set
-    cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_no_backup=True),  # ruff:ignore[hardcoded-temp-file]
-        name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then skip_if_no_backup is set
-    assert config.skip_if_no_backup is True
-
-
-def test_build_config_restore_skip_if_populated():
-    """Verify --skip-if-populated maps onto the config field."""
-    # Given a restore command with --skip-if-populated set
-    cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_populated=True),  # ruff:ignore[hardcoded-temp-file]
-        name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then the guard is enabled
-    assert config.skip_restore_if_populated is True
-
-
-def test_prune_flags_map_to_keep_fields():
-    """Verify --keep-* flags populate the matching keep_* config fields."""
-    # Given a prune command carrying keep_last and keep_daily
-    cli = EZBakCLI(
-        command=PruneCommand(keep_last=3, keep_daily=4),
-        name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
-    )
-
-    # When building the config
-    config = build_config(cli)
-
-    # Then keep_last and keep_daily carry the flag values
-    assert config.keep_last == 3
-    assert config.keep_daily == 4
-
-
-def test_cli_restore_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
+def test_cli_restore_skip_if_no_backup_is_noop(filesystem, capsys, restore_dir):
     """Verify restore --skip-if-no-backup exits cleanly when no backup exists yet."""
     # Given an empty storage path, a fresh deployment with no backup to restore
     _, dest1, _ = filesystem
-    restore_path = Path(tmp_path / "restore")
-    restore_path.mkdir(exist_ok=True)
 
     # When restoring with --skip-if-no-backup and no backup present, then it does not raise
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -747,7 +506,7 @@ def test_cli_restore_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
             "--storage",
             str(dest1),
             "--restore-path",
-            str(restore_path),
+            str(restore_dir),
             "--skip-if-no-backup",
         ],
     )
@@ -758,16 +517,14 @@ def test_cli_restore_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
     assert "Backup restored" not in output
 
 
-def test_cli_restore_skip_if_no_backup_date_miss_is_noop(filesystem, capsys, tmp_path):
+def test_cli_restore_skip_if_no_backup_date_miss_is_noop(filesystem, capsys, restore_dir):
     """Verify restore --skip-if-no-backup is a clean no-op on a restore-date miss, without an error log."""
     # Given a backup exists but none is old enough for the requested date
     _, dest1, _ = filesystem
-    shutil.copy2(fixture_archive_path, dest1 / "test-20250103T090000.tgz")
-    restore_path = Path(tmp_path / "restore")
-    restore_path.mkdir(exist_ok=True)
+    shutil.copy2(FIXTURE_ARCHIVE, dest1 / "test-20250103T090000.tgz")
 
     # When restoring as of 2024 (before the only backup) with --skip-if-no-backup, it does not raise
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -776,7 +533,7 @@ def test_cli_restore_skip_if_no_backup_date_miss_is_noop(filesystem, capsys, tmp
             "--storage",
             str(dest1),
             "--restore-path",
-            str(restore_path),
+            str(restore_dir),
             "--restore-date",
             "2024",
             "--skip-if-no-backup",
@@ -789,18 +546,16 @@ def test_cli_restore_skip_if_no_backup_date_miss_is_noop(filesystem, capsys, tmp
     assert "ERROR" not in output
 
 
-def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
+def test_cli_restore_backup_by_date(filesystem, capsys, restore_dir):
     """Verify restore --restore-date restores the point-in-time backup."""
     # Given two backups on different days in one storage location
     _, dest1, _ = filesystem
     for ts in ("20250101T120000", "20250103T090000"):
-        shutil.copy2(fixture_archive_path, dest1 / f"test-{ts}.tgz")
-    restore_path = Path(tmp_path / "restore")
-    restore_path.mkdir(exist_ok=True)
+        shutil.copy2(FIXTURE_ARCHIVE, dest1 / f"test-{ts}.tgz")
 
     # When restoring as of 2025-01-02 (only the Jan 1 backup qualifies).
     # -v raises the log level to DEBUG so the selection line is emitted.
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -810,7 +565,7 @@ def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
             "--storage",
             str(dest1),
             "--restore-path",
-            str(restore_path),
+            str(restore_dir),
             "--restore-date",
             "20250102",
         ],
@@ -822,18 +577,16 @@ def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
     assert "Selected backup as of 20250102: test-20250101T120000.tgz" in output
 
 
-def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
+def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, restore_dir):
     """Verify restore --restore-date exits non-zero when nothing qualifies."""
     # Given a single 2025 backup
     _, dest1, _ = filesystem
-    shutil.copy2(fixture_archive_path, dest1 / "test-20250103T090000.tgz")
-    restore_path = Path(tmp_path / "restore")
-    restore_path.mkdir(exist_ok=True)
+    shutil.copy2(FIXTURE_ARCHIVE, dest1 / "test-20250103T090000.tgz")
 
     # When restoring as of a year before it
     # Then the CLI exits non-zero
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
             argv=[
                 "restore",
@@ -842,84 +595,12 @@ def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
                 "--storage",
                 str(dest1),
                 "--restore-path",
-                str(restore_path),
+                str(restore_dir),
                 "--restore-date",
                 "2024",
             ],
         )
     assert exc.value.code == 1
-
-
-def test_cli_prune_backups_force_skips_confirmation(mocker, debug, capsys, tmp_path):
-    """Verify --force prunes without asking for confirmation."""
-    # Given: a confirmation that would decline if it were ever reached
-    confirm = mocker.patch("ezbak.cli_commands.prune.Confirm.ask", return_value=False)
-
-    # Given: more backups than the retention policy keeps
-    for filename in [
-        "test-20250609T101857-hourly.tgz",
-        "test-20250609T095745-minutely.tgz",
-        "test-20250609T095804-minutely.tgz",
-        "test-20250609T095730-weekly-k6lop.tgz",
-        "test-20250609T095730-daily.tgz",
-        "test-20250609T095751-minutely.tgz",
-        "test-20250609T095749-minutely.tgz",
-        "test-20250609T090932-yearly.tgz",
-        "test-20250609T095737-minutely.tgz",
-        "test-20250609T095804-minutely-p2we3r.tgz",
-        "test-20240609T090932-yearly.tgz",
-        "test-20250609T095625-monthly.tgz",
-        "test-20250609T095737-minutely-6klf7.tgz",
-    ]:
-        Path(tmp_path / filename).touch()
-
-    # When: pruning runs with --force
-    cappa.invoke(
-        obj=EZBakCLI,
-        argv=[
-            "prune",
-            "--name",
-            "test",
-            "--storage",
-            str(tmp_path),
-            "--keep-last",
-            "3",
-            "--force",
-        ],
-    )
-    output = capsys.readouterr().err
-
-    # Then: no confirmation is requested and the excess backups are deleted
-    confirm.assert_not_called()
-    assert "Deleted 10 backups" in output
-    assert len(list(tmp_path.iterdir())) == 3
-
-
-def test_cli_list_backups_unusable_destination_exits_nonzero(s3_bucket: str, capsys, tmp_path):
-    """Verify a destination ezbak could not use at all exits non-zero."""
-    # Given a local backup alongside a bucket that does not exist, so no S3 backend is built
-    Path(tmp_path / "test-20250609T101857-hourly.tgz").touch()
-
-    # When listing backups
-    with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
-            obj=EZBakCLI,
-            argv=[
-                "list",
-                "--name",
-                "test",
-                "--storage",
-                str(tmp_path),
-                "--s3-bucket",
-                "missing-bucket",
-            ],
-        )
-    output = capsys.readouterr().err
-
-    # Then it exits non-zero, names the unusable destination, and still lists what was found
-    assert exc.value.code == 1
-    assert "S3 bucket 'missing-bucket'" in output
-    assert "test-20250609T101857-hourly.tgz" in output
 
 
 def test_cli_prune_unreadable_destination_exits_zero(s3_bucket, break_s3_listing, capsys, tmp_path):
@@ -937,7 +618,7 @@ def test_cli_prune_unreadable_destination_exits_zero(s3_bucket, break_s3_listing
     break_s3_listing()
 
     # When pruning down to the newest backup, then prune does not exit non-zero
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",

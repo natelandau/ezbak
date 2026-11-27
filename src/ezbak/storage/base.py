@@ -10,6 +10,8 @@ from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import format_sidecar, is_sidecar, parse_sidecar
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
+from ezbak.exceptions import ConfigurationError
+from ezbak.naming import is_backup_filename
 
 
 class StorageBackend(ABC):
@@ -44,7 +46,13 @@ class StorageBackend(ABC):
 
         Returns:
             StorageLocation: The populated, sorted storage location.
+
+        Raises:
+            ConfigurationError: If no backup name is configured.
         """
+        if not self.settings.name:
+            msg = "A storage location needs a backup name, got none"
+            raise ConfigurationError(msg)
         return StorageLocation(
             name=self.settings.name,
             tz=self.settings.tz,
@@ -54,19 +62,28 @@ class StorageBackend(ABC):
         )
 
     @staticmethod
-    def _exclude_sidecars(names: list[str]) -> list[str]:
-        """Drop checksum sidecars from a list of discovered object names.
+    def _backup_names(names: list[str]) -> list[str]:
+        """Keep only the discovered names that are backups this set can order and restore.
 
-        Use so a `.sha256` sidecar is never parsed as a backup and counted
-        against retention, with one shared definition of what a sidecar is.
+        Drop checksum sidecars, so a `.sha256` is never counted against retention, and skip
+        names with no backup timestamp, so a foreign file in a storage location cannot stop
+        every list, prune, and restore.
 
         Args:
-            names (list[str]): The discovered object names or keys.
+            names (list[str]): The discovered filenames or object keys.
 
         Returns:
-            list[str]: The names that are backups rather than sidecars.
+            list[str]: The names that are backups.
         """
-        return [name for name in names if not is_sidecar(name)]
+        backups: list[str] = []
+        for name in names:
+            if is_sidecar(name):
+                continue
+            if not is_backup_filename(name):
+                logger.warning(f"Skipping '{name}': the name has no backup timestamp")
+                continue
+            backups.append(name)
+        return backups
 
     def get_checksum(self, backup: Backup) -> str | None:
         """Return the expected hex SHA-256 for a backup, or None when no usable sidecar exists.

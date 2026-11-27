@@ -8,7 +8,7 @@ import shutil
 import tarfile
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
-from typing import IO, TYPE_CHECKING, Literal, NoReturn, assert_never, cast
+from typing import IO, TYPE_CHECKING, Any, Literal, NoReturn, assert_never, cast
 
 from loguru import logger
 from nclutils.fs import clean_directory
@@ -71,7 +71,7 @@ PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
 _STAGING_PREFIX = ".ezbak-restore-"
 
 
-def ezbak(**kwargs: object) -> EZBak:
+def ezbak(**kwargs: Any) -> EZBak:  # ruff:ignore[any-type]
     """Build an ``EZBak`` from keyword options without importing ``BackupConfig``.
 
     Convenience for quick scripts. Validates via ``BackupConfig`` and returns a ready core. Prefer ``EZBak(BackupConfig(...))`` when you want an explicit, reusable config object.
@@ -83,7 +83,7 @@ def ezbak(**kwargs: object) -> EZBak:
         ValidationError: If provided settings are invalid.
     """
     try:
-        config = BackupConfig(**kwargs)  # type: ignore[arg-type]
+        config = BackupConfig(**kwargs)
     except ValidationError as e:
         log_validation_errors(e)
         raise
@@ -873,16 +873,6 @@ class EZBak:
         """
         return self._backend_for_type(backup.storage_type)
 
-    def _delete_backup(self, backup: Backup) -> None:
-        """Delete a backup file from the storage locations.
-
-        Remove a specific backup file from its storage location, whether local filesystem or cloud storage. Use this to clean up individual backup files during pruning operations or manual cleanup.
-
-        Args:
-            backup (Backup): The backup object containing information about the file to delete.
-        """
-        self._backend_for(backup).delete(backup)
-
     def _do_restore(self, backup: Backup, destination: Path, *, clean: bool) -> bool:
         """Restore a backup archive into the destination directory.
 
@@ -1144,8 +1134,13 @@ class EZBak:
                     # just record it so create_backup fails loudly after the loop. A
                     # destination whose index already failed is recorded under that label,
                     # so naming it again here would report one failure as two.
+                    # Local writes name the specific directory, since one of several can fail.
                     if not index_failed:
-                        write_failures.append(str(storage_location.logging_name))
+                        write_failures.append(
+                            self._backend_label(backend)
+                            if backend.storage_type is StorageType.AWS
+                            else str(storage_location.logging_name)
+                        )
 
         return created_backups, write_failures
 
@@ -1204,7 +1199,7 @@ class EZBak:
         """Advance a plain date/time by one calendar or exact unit.
 
         Dispatched on the literal ``unit`` string (rather than **kwargs-unpacked) so
-        each ``add()`` call has a literal keyword mypy can match against its
+        each ``add()`` call has a literal keyword a type checker can match against its
         overloads.
 
         Args:
@@ -1275,7 +1270,7 @@ class EZBak:
             case _:
                 # Unreachable: RESTORE_DATE_REGEX above only matches these six
                 # lengths, so no other length can reach this branch. `len()`
-                # returns plain `int`, not a Literal, so mypy can't prove this
+                # returns plain `int`, not a Literal, so a type checker cannot prove this
                 # via `assert_never`; fail loudly instead of a silent fallback.
                 msg = f"Unhandled restore date length: {len(point_in_time)}"
                 raise AssertionError(msg)
@@ -1462,19 +1457,18 @@ class EZBak:
             RestoreFailedError: If the backup archive is missing or corrupt, extraction fails, the restore target cannot be read to check whether it is populated, or a configured storage location could not be read to determine which backups exist.
         """  # ruff:ignore[docstring-extraneous-exception]
         target_path = restore_path or self.settings.restore_path
+        if not target_path:
+            msg = "No restore path provided and none configured"
+            raise ConfigurationError(msg)
 
         try:
             dest = Path(target_path).expanduser().absolute()
         except (TypeError, ValueError, OSError, RuntimeError) as e:
-            # Covers a None/bad-type restore path (TypeError), an unresolvable ~ home
+            # Covers a bad-type restore path (TypeError), an unresolvable ~ home
             # (RuntimeError from expanduser), and a removed cwd for a relative path
             # (OSError from absolute()), all of which mean the restore path is unusable.
             msg = f"Invalid restore path: {target_path}"
             raise ConfigurationError(msg) from e
-
-        if not dest:
-            msg = "No restore path provided and none configured"
-            raise ConfigurationError(msg)
 
         if not dest.exists() or not dest.is_dir():
             msg = f"Restore path does not exist: {dest}"

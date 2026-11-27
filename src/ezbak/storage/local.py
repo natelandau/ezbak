@@ -9,14 +9,14 @@ from loguru import logger
 from nclutils.fs import find_files
 
 from ezbak.backup import Backup, StorageLocation
-from ezbak.checksums import is_sidecar, sidecar_name
+from ezbak.checksums import sidecar_name
 from ezbak.constants import (
     BACKUP_EXTENSION,
     COPY_CHUNK_SIZE,
     COPY_FSYNC_INTERVAL,
     StorageType,
 )
-from ezbak.exceptions import StorageWriteError
+from ezbak.exceptions import ConfigurationError, StorageDeleteError, StorageWriteError
 from ezbak.filters import validate_storage_paths
 from ezbak.storage.base import StorageBackend
 
@@ -94,16 +94,31 @@ class LocalBackend(StorageBackend):
 
     storage_type = StorageType.LOCAL
 
+    @property
+    def _storage_paths(self) -> list[Path]:
+        """Configured storage directories, which every local operation needs.
+
+        Returns:
+            list[Path]: The configured storage directories.
+
+        Raises:
+            ConfigurationError: If no storage paths are configured.
+        """
+        if not self.settings.storage_paths:
+            msg = "Local storage needs at least one storage path, got none"
+            raise ConfigurationError(msg)
+        return self.settings.storage_paths
+
     def index(self) -> list[StorageLocation]:
         """Scan each configured storage directory for matching backup files.
 
         Returns:
             list[StorageLocation]: One storage location per configured storage path.
         """
-        validate_storage_paths(storage_paths=self.settings.storage_paths, create_if_missing=True)
+        validate_storage_paths(storage_paths=self._storage_paths, create_if_missing=True)
 
         locations: list[StorageLocation] = []
-        for storage_path in self.settings.storage_paths:
+        for storage_path in self._storage_paths:
             logger.trace(f"Indexing: {storage_path}")
             # Anchor on "{name}-" so a set does not swallow siblings that merely
             # share its prefix (name "gitea" must not match "giteasave-*"). The
@@ -111,10 +126,8 @@ class LocalBackend(StorageBackend):
             found_files = find_files(
                 path=storage_path, globs=[f"{self.settings.name}-*.{BACKUP_EXTENSION}"]
             )
-            # The `.tgz` glob already excludes `.sha256` sidecars, but filter
-            # explicitly through the shared definition so the exclusion cannot
-            # regress if the glob is ever loosened.
-            found_files = [f for f in found_files if not is_sidecar(f.name)]
+            backup_names = set(self._backup_names([f.name for f in found_files]))
+            found_files = [f for f in found_files if f.name in backup_names]
             location = self._build_storage_location(
                 storage_path=storage_path,
                 backups=[
@@ -143,7 +156,7 @@ class LocalBackend(StorageBackend):
         """
         return [
             self._build_storage_location(storage_path=storage_path, backups=[])
-            for storage_path in self.settings.storage_paths
+            for storage_path in self._storage_paths
         ]
 
     def write(
@@ -161,8 +174,11 @@ class LocalBackend(StorageBackend):
             Backup: The created backup.
 
         Raises:
-            StorageWriteError: If the copy fails.
+            StorageWriteError: If the storage location has no directory or the copy fails.
         """
+        if storage_location.storage_path is None:
+            msg = f"Local write needs a storage directory, got none for '{storage_location.name}'"
+            raise StorageWriteError(msg)
         backup_name = storage_location.generate_new_backup_name()
         backup_path = Path(storage_location.storage_path) / backup_name
         logger.debug(f"Copy tmp backup to local: {backup_path}")
@@ -195,25 +211,32 @@ class LocalBackend(StorageBackend):
 
         Returns:
             bool: True if the file was unlinked, False if it was already gone.
+
+        Raises:
+            StorageDeleteError: If the backup has no file path.
         """
+        path = backup.path
+        if path is None:
+            msg = f"Local delete needs a file path, got none for backup '{backup.name}'"
+            raise StorageDeleteError(msg)
         # Catch instead of missing_ok so the whole job does not abort when another
         # process already pruned this file from a shared storage location. Catch the
         # broader OSError (not just FileNotFoundError) so an NFS stale handle (ESTALE,
         # errno 116) degrades to a warning instead of aborting the job.
         try:
-            backup.path.unlink()
-            logger.info(f"Deleted: {backup.path}")
+            path.unlink()
+            logger.info(f"Deleted: {path}")
             self._remove_sidecar(backup)
         except OSError as e:
-            logger.warning(f"Missing, not deleted: {backup.path} (errno={e.errno}: {e.strerror})")
+            logger.warning(f"Missing, not deleted: {path} (errno={e.errno}: {e.strerror})")
             # Forensics for shared-storage cache skew: if the directory listing still
             # shows this file after the unlink proved it gone, the client mount cache
             # is serving a stale 'present' view rather than racing a live delete.
             try:
-                parent = backup.path.parent
-                still_listed = backup.path.name in {p.name for p in parent.iterdir()}
+                parent = path.parent
+                still_listed = path.name in {p.name for p in parent.iterdir()}
                 logger.debug(
-                    f"Post-failure check: exists()={backup.path.exists()}, "
+                    f"Post-failure check: exists()={path.exists()}, "
                     f"present_in_parent_listing={still_listed}, parent={parent}"
                 )
             except OSError as check_error:

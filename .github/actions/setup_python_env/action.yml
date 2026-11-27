@@ -13,7 +13,7 @@ runs:
   using: composite
   steps:
     - name: Setup uv with cache
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       with:
         version: "latest"
         enable-cache: true
@@ -21,12 +21,14 @@ runs:
 
     - name: Install the project
       shell: bash
-      run: uv sync --all-extras --dev
+      run: uv sync --locked --all-extras --dev
 
     - name: Debug Python version
       shell: bash
+      env:
+        INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
       run: |
-        echo "Input python-version: ${{ inputs.python-version }}"
+        echo "Input python-version: $INPUT_PYTHON_VERSION"
         echo "Python version: $(python --version)"
         echo "Python location: $(which python)"
         echo "uv Python version: $(uv run python --version)"

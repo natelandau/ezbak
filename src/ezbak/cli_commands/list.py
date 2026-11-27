@@ -32,7 +32,7 @@ def main(cmd: EZBakCLI) -> None:
 
     if local_backups:
         print_backups = "\n  - ".join(
-            [str(x.path) for x in sorted(local_backups, key=lambda x: x.path)]
+            [str(path) for path in sorted(x.path for x in local_backups if x.path is not None)]
         )
         logger.info(f"Found {len(local_backups)} local backups\n  - {print_backups}")
 

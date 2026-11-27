@@ -26,6 +26,8 @@ CI = os.environ.get("CI", "").strip().lower() not in {"", "0", "false"}
 PROJECT_ROOT = Path(__file__).parent
 DEV_DIR = PROJECT_ROOT / ".dev"
 TEMPLATES_DIR = PROJECT_ROOT / "dev-templates"
+# Must stay under a git-ignored directory, or the new file changes the content and voids the pass
+TEST_JUNIT_REPORT = ".cache/junit/test.xml"
 
 
 def strip_ansi(text: str) -> str:
@@ -43,17 +45,29 @@ def strip_ansi(text: str) -> str:
     return ansi_chars.sub("", text).replace("[", r"\[")
 
 
-def gated(name: str, cmd: list[str]) -> list[str]:
-    """Wrap a gate command in gate-cache so it skips on a tree where it already passed.
+def gated(
+    name: str,
+    cmd: list[str],
+    *,
+    paths: tuple[str, ...] = (),
+    junit: str | None = None,
+) -> list[str]:
+    """Wrap a gate command in gate-cache so it skips on content where it already passed.
 
     Args:
         name (str): Marker name for the gate.
         cmd (list[str]): Command to run.
+        paths (tuple[str, ...]): Git pathspecs the command reads. When given, changes outside
+            them do not rerun the gate, so every tracked input must be listed.
+        junit (str | None): JUnit XML report the command writes, for per-test run stats.
 
     Returns:
         list[str]: The command prefixed with the gate-cache invocation.
     """
-    return ["gate-cache", "--name", name, "--", *cmd]
+    options = [arg for path in paths for arg in ("--path", path)]
+    if junit:
+        options += ["--junit", junit]
+    return ["gate-cache", "--name", name, *options, "--", *cmd]
 
 
 def pyprefix(title: str) -> str:
@@ -83,7 +97,7 @@ def clean(ctx: Context) -> None:
 def ruff(ctx: Context) -> None:
     """Check the code quality with ruff."""
     ctx.run(
-        gated("ruff", ["ruff", "check", "--config", "pyproject.toml", "--no-fix", *PY_SRC_LIST]),
+        ["ruff", "check", "--config", "pyproject.toml", "--no-fix", *PY_SRC_LIST],
         title=pyprefix("code quality check"),
     )
 
@@ -92,19 +106,15 @@ def ruff(ctx: Context) -> None:
 def format(ctx: Context) -> None:  # ruff:ignore[builtin-variable-shadowing]
     """Format the code with ruff."""
     ctx.run(
-        gated("format", ["ruff", "format", "--check", "--config", "pyproject.toml", *PY_SRC_LIST]),
+        ["ruff", "format", "--check", "--config", "pyproject.toml", *PY_SRC_LIST],
         title=pyprefix("code formatting"),
     )
 
 
 @duty
-def mypy(ctx: Context) -> None:
-    """Check the code with mypy."""
-    os.environ["FORCE_COLOR"] = "1"
-    ctx.run(
-        gated("mypy", ["mypy", "--config-file", "pyproject.toml", "src/"]),
-        title=pyprefix("mypy check"),
-    )
+def ty(ctx: Context) -> None:
+    """Check types with ty."""
+    ctx.run(["ty", "check"], title=pyprefix("ty check"))
 
 
 @duty
@@ -116,16 +126,20 @@ def typos(ctx: Context) -> None:
     )
 
 
-@duty(skip_if=CI, skip_reason="skip prek in CI environments")
+@duty
 def precommit(ctx: Context) -> None:
-    """Run prek hooks."""
+    """Run the prek hooks that the other lint duties and the test suite do not cover.
+
+    Runs in CI too, so commits made without local hooks (web edits, Dependabot, --no-verify)
+    still get the secret scan and workflow audits.
+    """
     ctx.run(
-        "SKIP=ruff-check,ruff-format,mypy,typos,pytest gate-cache --name prek -- prek run --all-files",
+        "SKIP=ruff-check,ruff-format,ty,typos,pytest gate-cache --name prek -- prek run --all-files",
         title=pyprefix("prek hooks"),
     )
 
 
-@duty(pre=[ruff, format, mypy, typos, precommit], capture=CI)
+@duty(pre=[ruff, format, ty, typos, precommit], capture=CI)
 def lint(ctx: Context) -> None:
     """Run all linting duties."""
 
@@ -166,11 +180,19 @@ def test(ctx: Context, *cli_args: str) -> None:
         "--cov-config=pyproject.toml",
         "--cov-report=xml",
         "--cov-report=term",
+        f"--junitxml={TEST_JUNIT_REPORT}",
         *cli_args,
     ]
     # A marker covers the name, not the arguments, so a filtered pass must not skip the full suite
     ctx.run(
-        cmd if cli_args else gated("test", cmd),
+        cmd
+        if cli_args
+        else gated(
+            "test",
+            cmd,
+            paths=("src/", "tests/", "pyproject.toml", "uv.lock", "duties.py"),
+            junit=TEST_JUNIT_REPORT,
+        ),
         title=pyprefix("Running tests"),
         capture=CI,
     )

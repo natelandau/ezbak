@@ -5,7 +5,22 @@ Single source of truth for how backup filenames are composed and disambiguated, 
 
 from nclutils.utils import new_uid
 
-from ezbak.constants import BACKUP_EXTENSION
+from ezbak.constants import BACKUP_EXTENSION, TIMESTAMP_REGEX
+
+
+def is_backup_filename(name: str) -> bool:
+    """Report whether a filename carries a backup timestamp, so indexing can skip foreign files.
+
+    A storage location can hold files that match a set's glob or prefix but were not written by
+    ezbak, such as a hand-named copy. Those have no timestamp to order or restore by.
+
+    Args:
+        name (str): The filename or object key to check.
+
+    Returns:
+        bool: True if the name contains a backup timestamp.
+    """
+    return TIMESTAMP_REGEX.search(name) is not None
 
 
 def new_staging_filename() -> str:

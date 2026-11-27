@@ -3,24 +3,31 @@ version: 2
 
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # "/" covers .github/workflows; the glob adds each local composite action
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "ci"
-      prefix-development: "ci"
       include: scope
     groups:
       ci-deps:
         patterns:
           - "*"
+
+  # Dev dependencies update through `duty update`
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "build"
-      prefix-development: "build"
       include: scope
     versioning-strategy: increase
     allow:

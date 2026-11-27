@@ -7,13 +7,15 @@ import subprocess  # ruff:ignore[suspicious-subprocess-import]
 from loguru import logger
 
 
-def _log_hook_output(phase: str, stdout: str | None, stderr: str | None, *, error: bool) -> None:
+def _log_hook_output(
+    phase: str, stdout: str | bytes | None, stderr: str | bytes | None, *, error: bool
+) -> None:
     """Log a hook's captured stdout/stderr at error level on failure, else debug."""
     log = logger.error if error else logger.debug
-    if stdout:
-        log(f"{phase} hook stdout: {stdout}")
-    if stderr:
-        log(f"{phase} hook stderr: {stderr}")
+    for stream_name, output in (("stdout", stdout), ("stderr", stderr)):
+        text = output.decode(errors="replace") if isinstance(output, bytes) else output
+        if text:
+            log(f"{phase} hook {stream_name}: {text}")
 
 
 def run_hook(command: str | None, *, phase: str, timeout: int) -> bool:
@@ -56,9 +58,8 @@ def run_hook(command: str | None, *, phase: str, timeout: int) -> bool:
         )
     except subprocess.TimeoutExpired as e:
         logger.error(f"{phase} hook timed out after {timeout}s and was killed: {command}")
-        # mypy's stdlib stubs declare TimeoutExpired.stdout/stderr as bytes | None
-        # regardless of text=True; at runtime they are str here since text=True above.
-        _log_hook_output(phase, e.stdout, e.stderr, error=True)  # type: ignore[arg-type]
+        # TimeoutExpired carries the partial output as raw bytes even with text=True
+        _log_hook_output(phase, e.stdout, e.stderr, error=True)
         return False
     except OSError as e:
         logger.error(f"{phase} hook could not be started: {e}")

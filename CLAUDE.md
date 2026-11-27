@@ -1,51 +1,42 @@
 # ezbak
 
-Backup tool: tar.gz archives with local + S3 destinations and retention policies. One codebase, three interfaces (Python library, CLI, Docker container).
+## Purpose
 
-## Primary purpose
+ezbak moves shared state between jobs and hosts under an orchestrator (Nomad, Kubernetes). The container is the primary surface, deployed as three tasks around a job:
 
-ezbak exists to move shared state between jobs and hosts in an orchestrated setting (Nomad, Kubernetes, etc.). **The container is the primary surface.** The canonical deployment is three cooperating tasks around a job:
+- sidecar: cron backups while the job runs
+- post-stop: final backup before the orchestrator clears the job
+- pre-start: fetch the newest backup and stage it on the host before the job starts
 
-- a **sidecar** taking cron-based backups while the job runs,
-- a **post-stop** task taking a final backup before the orchestrator clears the job, and
-- a **pre-start** task that fetches the most recent backup and stages it on the target host before the job starts.
+The CLI and Python library are conveniences. ezbak is not a full-featured backup tool. Judge every design and feature decision against the orchestrated container workflow first.
 
-The CLI and Python library are conveniences: ezbak happens to be an extensible backup manager, so they are exposed, but they are not the design center. ezbak is **not** trying to compete with a feature-complete backup tool. Weigh design and feature decisions against the orchestrated container workflow first.
+## Design rules
 
-## Architecture
+- `BackupConfig` (`config.py`) is the only option schema and never reads the environment. Library callers build it directly.
+- `EnvConfig` (`env.py`) adds `EZBAK_` env vars and `.env`/`.env.secrets`, for the CLI and container only.
+- Backends follow destinations: `storage_paths` gives local, `aws_s3_bucket_name` gives S3, both give both. No `storage_type` selector.
 
-One typed config schema, one core class, thin adapters.
+## Checks
 
-- `config.py` — `BackupConfig` (pydantic `BaseModel`): the **sole** option schema. Library callers construct it directly; it does **not** read the environment.
-- `env.py` — `EnvConfig(BackupConfig, BaseSettings)`: loads `EZBAK_`-prefixed env + `.env`/`.env.secrets`. Used only by the CLI and container.
-- `core.py` — `EZBak`: the one public class. `EZBak(BackupConfig(...))` is primary; `ezbak(**kwargs)` is a thin shortcut. Owns the temp staging dir; derives backends from destinations.
-- `cli.py` + `cli_commands/` — cappa CLI. `build_config()` maps parsed args to a config.
-- `container.py` — Docker entrypoint (env → `EnvConfig` → `EZBak`) with an APScheduler cron loop.
-- `storage/` — `base.py` (ABC), `local.py`, `s3.py`, `aws.py`.
-- Other modules: `backup.py` (`Backup`, `StorageLocation`), `naming.py`, `retention.py`, `filters.py`, `logging.py`, `constants.py`.
+Run checks through duty recipes, not bare tools. Recipes wrap slow checks in gate-cache, which skips a check already passed on the same content and shares the result with the git hooks.
 
-Backends follow the destinations: `storage_paths` gives local, `aws_s3_bucket_name` gives S3, both give both. There is no `storage_type` selector.
-
-## Commands
-
-uv only.
-
-- Test: `uv run pytest` (runs with `--doctest-modules`, so every module and docstring example must import/run cleanly)
-- Lint/format: `uv run ruff check src/ tests/` and `uv run ruff format src/ tests/`
-- Types: `uv run mypy --config-file=pyproject.toml src/`
-
-Tool config (ruff, mypy, pytest, coverage) lives in `pyproject.toml`.
+- Lint: `uv run duty lint`, or one of `uv run duty ruff|format|ty|typos`.
+- Test: `uv run duty test`. Extra args run uncached: `uv run duty test -k unit`.
+- Format: `uv run ruff format src/ tests/`.
+- A gate printing `already passed on ... skipping` passed. Do not rerun the tool to confirm.
+- Before adding or changing a gate in `duties.py` or `.pre-commit-config.yaml`, run `uv run gate-cache --skill` and follow it.
+- Pytest runs `--doctest-modules`: every module and docstring example must import and run.
+- Tests run in random order and every warning is an error. If a test fails only in some orders, rerun with the seed from its `Using --randomly-seed=N` line (`uv run duty test --randomly-seed=N`) and fix the shared state. Never pin the order. Set env vars with `monkeypatch.setenv`, not `os.environ`.
+- Fix a ty diagnostic before suppressing it. Suppress with `# ty: ignore[rule-name]`, not `# type: ignore`.
 
 ## Conventions
 
-- Ruff runs `select = ["ALL"]` with `preview = true`, so suppressions are common and their format matters. Write them as `# ruff:ignore[full-rule-name]` (no space after the colon, full rule name, never the short code). Do **not** write `# noqa: E501`: preview rule RUF105 rewrites `noqa` into the `ruff:ignore` form on the next `ruff check --fix`, so a `noqa` you commit will not survive. The rule name must be exact; a wrong one re-flags the original violation and adds `invalid-rule-code`, which is the quickest way to tell a live suppression from a dead one.
-- `[tool.ruff]` sets `fix = true`, so a plain `uv run ruff check` **rewrites files in place**; it is not a read-only inspection. Use `uv run ruff check --no-fix` to look without touching anything. Never run a narrowed `--select` with fixing on: ruff then applies fixes the full rule set would not, and rewrites files you never meant to change.
-- Commit subject max **72** chars, enforced by the `committed` hook at the `commit-msg` stage (`committed.toml`). Body line length is not enforced (`line_length = 500`), but wrap bodies at 72 by convention.
-- `CHANGELOG.md` is commitizen-managed and regenerated on `cz bump`. Never hand-edit it, including for breaking changes; the release tooling owns it.
-- Version source is `constants.py:__version__` (commitizen `version_files`).
-- User-facing documentation lives in `docs/` (the Zensical site). `README.md` is intentionally kept light: a short overview that links into the site. Add or expand user docs under `docs/`, not in the README.
+- Ruff suppressions: `# ruff:ignore[full-rule-name]`, no space after the colon, never the short code. Ruff rewrites `# noqa` into this form on the next fix. A wrong rule name re-flags the violation and adds `invalid-rule-code`.
+- Ruff config sets `fix = true`, so `uv run ruff check` rewrites files. Inspect with `--no-fix`. Never combine a narrowed `--select` with fixing: it applies fixes the full rule set would not.
+- `CHANGELOG.md` is regenerated by `cz bump`. Never edit it.
+- User docs go in `docs/` (Zensical site). Keep `README.md` a short overview that links into the site.
 
 ## Gotchas
 
-- A bare `EnvConfig()` runs full validation (requires `name` + a destination). The CLI builds `EnvConfig(**cli_values, _env_file=None)` so the environment only fills fields with no flag (tz, AWS creds).
-- The container reads `.env`/`.env.secrets`, so running it locally picks up real S3 credentials.
+- Bare `EnvConfig()` runs full validation and fails without `name` and a destination. The CLI builds `EnvConfig(**cli_values, _env_file=None)` so env vars fill only fields that have no flag (tz, AWS credentials).
+- The container reads `.env`/`.env.secrets`, so running it locally uses real S3 credentials.

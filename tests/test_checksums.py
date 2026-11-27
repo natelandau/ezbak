@@ -80,7 +80,11 @@ def test_format_and_parse_round_trip() -> None:
     assert parse_sidecar(content) == digest
 
 
-@pytest.mark.parametrize("bad", ["", "   ", "nothex " * 8, "abc  file", "z" * 64, "a" * 63])
+@pytest.mark.parametrize(
+    "bad",
+    ["", "   ", "nothex " * 8, "abc  file", "z" * 64, "a" * 63],
+    ids=["empty", "whitespace", "words", "short-digest", "non-hex", "one-char-short"],
+)
 def test_parse_sidecar_rejects_malformed(bad: str) -> None:
     """Verify parse_sidecar rejects malformed input and returns None."""
     assert parse_sidecar(bad) is None
