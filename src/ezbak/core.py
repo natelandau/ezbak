@@ -1134,8 +1134,13 @@ class EZBak:
                     # just record it so create_backup fails loudly after the loop. A
                     # destination whose index already failed is recorded under that label,
                     # so naming it again here would report one failure as two.
+                    # Local writes name the specific directory, since one of several can fail.
                     if not index_failed:
-                        write_failures.append(str(storage_location.logging_name))
+                        write_failures.append(
+                            self._backend_label(backend)
+                            if backend.storage_type is StorageType.AWS
+                            else str(storage_location.logging_name)
+                        )
 
         return created_backups, write_failures
 
