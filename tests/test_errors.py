@@ -5,6 +5,7 @@ import io
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import BinaryIO
 
 import boto3
 import pytest
@@ -22,6 +23,7 @@ from ezbak.exceptions import (
     StorageInitError,
     StorageReadError,
 )
+from ezbak.storage import local as local_module
 from ezbak.storage.aws import AWSService
 from tests.helpers import access_denied
 
@@ -192,16 +194,16 @@ def test_create_backup_raises_when_archive_creation_fails(filesystem, mocker):
 def _local_app_failing_sidecar_write(
     mocker: MockerFixture, make_s3_app: Callable[..., EZBak], dest: Path
 ) -> tuple[EZBak, Callable[[], set[str]]]:
-    original_write_text = Path.write_text
+    original_publish = local_module._publish_new_file
 
-    # Fail only the sidecar, so the archive reaching disk proves it is not written this way
-    def _write_text(self: Path, data: str, encoding: str | None = None) -> int:
-        if self.name.endswith(".sha256"):
-            msg = f"Read-only file system: {self}"
+    # Fail only the sidecar, so the archive reaching disk proves the failure is contained
+    def _publish(*, dst: Path, write: Callable[[BinaryIO], object], mode: int) -> None:
+        if dst.name.endswith(".sha256"):
+            msg = f"Read-only file system: {dst}"
             raise OSError(msg)
-        return original_write_text(self, data, encoding=encoding)
+        original_publish(dst=dst, write=write, mode=mode)
 
-    mocker.patch.object(Path, "write_text", autospec=True, side_effect=_write_text)
+    mocker.patch.object(local_module, "_publish_new_file", side_effect=_publish)
     app = make_s3_app(aws_s3_bucket_name=None, storage_paths=[dest])
     return app, lambda: {path.name for path in dest.iterdir()}
 

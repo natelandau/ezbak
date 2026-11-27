@@ -22,6 +22,7 @@ from typing import IO, TYPE_CHECKING, cast
 from loguru import logger
 
 from ezbak.exceptions import ConfigurationError
+from ezbak.no_follow import NO_FOLLOW_READ_FLAGS
 
 if TYPE_CHECKING:
     import tarfile
@@ -36,8 +37,6 @@ _DIR_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | _CLOEXEC
 # and macOS O_SEARCH.
 _SEARCH_ONLY = getattr(os, "O_PATH", 0) or getattr(os, "O_SEARCH", 0) or os.O_RDONLY
 _TRAVERSE_OPEN_FLAGS = _SEARCH_ONLY | os.O_DIRECTORY | os.O_NOFOLLOW | _CLOEXEC
-# O_NONBLOCK so an entry swapped for a FIFO between lstat and open cannot stall the run.
-_ENTRY_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | _CLOEXEC
 # Errors an open with O_NOFOLLOW reports when the entry was replaced after it was lstat'd.
 _REPLACED_ERRNOS = frozenset({errno.ELOOP, errno.ENOTDIR, errno.ENOENT})
 
@@ -86,7 +85,7 @@ def _component_open_flags(
     if stat.S_ISDIR(st.st_mode):
         return _DIR_OPEN_FLAGS if is_last else _TRAVERSE_OPEN_FLAGS
     if is_last and stat.S_ISREG(st.st_mode):
-        return _ENTRY_OPEN_FLAGS
+        return NO_FOLLOW_READ_FLAGS
     if is_last:
         msg = f"Not a file or directory: {source}"
     else:
@@ -266,7 +265,7 @@ def _open_entry(
         return os.open(entry.name, _DIR_OPEN_FLAGS, dir_fd=dir_fd)
     if not keep_file(arcname):
         return None
-    return os.open(entry.name, _ENTRY_OPEN_FLAGS, dir_fd=dir_fd)
+    return os.open(entry.name, NO_FOLLOW_READ_FLAGS, dir_fd=dir_fd)
 
 
 def _add_entry(
