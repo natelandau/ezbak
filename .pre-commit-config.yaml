@@ -79,6 +79,13 @@ repos:
         # Informational findings are suggestions, so only low severity and up fail the hook
         args: [--no-progress, --min-severity, low]
 
+  # Checks workflow syntax, action inputs, and expressions. Lints `run:` scripts
+  # only when shellcheck is installed.
+  - repo: "https://github.com/Mateusz-Grzelinski/actionlint-py"
+    rev: v1.7.12.25
+    hooks:
+      - id: actionlint
+
   # These hooks call duty recipes, which wrap the slower gates in gate-cache, so a
   # hook, `duty lint`, and an agent share markers and skip work that already passed.
   # Each `files` pattern lists the tool's config too, so a settings change reruns it.
