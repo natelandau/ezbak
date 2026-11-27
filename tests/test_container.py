@@ -10,6 +10,7 @@ import time
 import urllib.error
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -67,7 +68,7 @@ def mock_run(mocker):
     mock_scheduler = mocker.patch("ezbak.container.BackgroundScheduler")
     mock_scheduler_instance = mock_scheduler.return_value
     mock_scheduler_instance.running = False
-    mocker.patch("time.sleep", return_value=None)
+    mocker.patch("ezbak.container.time", SimpleNamespace(sleep=mocker.Mock(return_value=None)))
 
 
 @pytest.fixture
@@ -172,7 +173,7 @@ def _run_entrypoint_with_signals(
         for signum in batch if isinstance(batch, list) else [batch]:
             handlers[signum](signum, None)
 
-    mocker.patch("time.sleep", side_effect=deliver)
+    mocker.patch("ezbak.container.time", SimpleNamespace(sleep=mocker.Mock(side_effect=deliver)))
 
     entrypoint()
 
