@@ -46,6 +46,7 @@ from ezbak.filters import (
 )
 from ezbak.logging import instantiate_logger, log_validation_errors
 from ezbak.naming import new_staging_filename
+from ezbak.no_follow import open_regular_file
 from ezbak.sources import (
     SourceHandle,
     add_directory_contents,
@@ -231,13 +232,13 @@ def _extract_archive(
     mismatch aborts via `_fail_restore`, which logs and raises RestoreFailedError.
     """
     if expected_checksum is None:
-        with _FsyncTarFile.open(tarfile_path) as archive:
+        with open_regular_file(tarfile_path) as raw, _FsyncTarFile.open(fileobj=raw) as archive:
             _extract_all(archive=archive, staging=staging)
         return
 
     hasher = hashlib.sha256()
     extract_error: tarfile.TarError | OSError | None = None
-    with tarfile_path.open("rb") as raw:
+    with open_regular_file(tarfile_path) as raw:
         reader = HashingReader(fileobj=raw, hasher=hasher)
         try:
             # Explicit "r:gz" (not auto-detect "r") reads the stream forward-only, so

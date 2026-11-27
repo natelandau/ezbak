@@ -24,6 +24,7 @@ from urllib.parse import quote
 from loguru import logger
 
 from ezbak.exceptions import ConfigurationError, SqliteSnapshotError
+from ezbak.no_follow import NO_FOLLOW_READ_FLAGS
 from ezbak.sources import open_source
 
 # Longest a snapshot waits on another process's write lock. `Connection.backup()` retries
@@ -78,7 +79,7 @@ def _copy_regular_file(source: Path, *, dest: Path) -> None:
     Raises:
         SqliteSnapshotError: If `source` is not a regular file.
     """
-    fd = os.open(source, flags=os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = os.open(source, flags=NO_FOLLOW_READ_FLAGS)
     with os.fdopen(fd, mode="rb") as src_file:
         if not stat.S_ISREG(os.fstat(src_file.fileno()).st_mode):
             msg = f"Expected '{source}' to be a regular file"
@@ -680,7 +681,7 @@ def _take_worker_output(worker_dest: Path, *, dest: Path, owner: _FileOwner, sou
         f"{owner.uid} with one link at '{worker_dest}'"
     )
     try:
-        fd = os.open(worker_dest, flags=os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(worker_dest, flags=NO_FOLLOW_READ_FLAGS)
     except OSError as e:
         msg = f"{expected}: {e}"
         raise SqliteSnapshotError(msg) from e

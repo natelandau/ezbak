@@ -14,10 +14,11 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
-from ezbak.backup import Backup
+from ezbak.backup import Backup, StorageLocation
 from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome
 from ezbak.core import EZBak
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
+from ezbak.storage.local import LocalBackend
 from tests.helpers import (
     LEGACY_BACKUP_NAMES,
     SEEDED_MARKER,
@@ -334,14 +335,18 @@ def test_prune_missing_file(tmp_path, mocker):
     for filename in real_files:
         Path(tmp_path / filename).touch()
 
-    # Given: the index also reports a file that no longer exists on disk, simulating a
-    # concurrent host having already pruned it from a shared storage location
+    # Given: the index also reports a file that vanishes right after indexing, simulating
+    # a concurrent host having already pruned it from a shared storage location
     phantom = tmp_path / "test-20200101T000000-yearly.tgz"
-    mocker.patch(
-        "ezbak.storage.local.find_files",
-        autospec=True,
-        return_value=[tmp_path / f for f in real_files] + [phantom],
-    )
+    phantom.touch()
+    original_index = LocalBackend.index
+
+    def index_then_vanish(self: LocalBackend) -> list[StorageLocation]:
+        locations = original_index(self)
+        phantom.unlink()
+        return locations
+
+    mocker.patch.object(LocalBackend, "index", autospec=True, side_effect=index_then_vanish)
 
     # Given: A backup manager configured with test parameters
     backup_manager = ezbak(

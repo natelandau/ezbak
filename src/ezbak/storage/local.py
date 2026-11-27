@@ -1,12 +1,13 @@
 """Local-filesystem storage backend for backup operations."""
 
 import os
-import shutil
+import stat
+from collections.abc import Callable
 from pathlib import Path
-from uuid import uuid4
+from typing import BinaryIO
 
 from loguru import logger
-from nclutils.fs import find_files
+from nclutils.utils import new_uid
 
 from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import sidecar_name
@@ -18,7 +19,91 @@ from ezbak.constants import (
 )
 from ezbak.exceptions import ConfigurationError, StorageDeleteError, StorageWriteError
 from ezbak.filters import validate_storage_paths
+from ezbak.no_follow import open_regular_file
 from ezbak.storage.base import StorageBackend
+
+# O_EXCL refuses any existing name, a planted symlink included, and
+# O_NOFOLLOW guards the same case on filesystems with weak O_EXCL semantics.
+_CREATE_NEW_FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+
+
+def _publish_new_file(*, dst: Path, write: Callable[[BinaryIO], object], mode: int) -> None:
+    """Write a fresh regular file and atomically publish it as `dst`, never following a link.
+
+    Use this for every write into a storage directory, which other principals can write to.
+    A failed or killed write never leaves a truncated file under the final name.
+
+    Args:
+        dst (Path): The final path to publish.
+        write (Callable[[BinaryIO], object]): Writes the content into the open staging file.
+        mode (int): Permission bits for the published file.
+
+    Raises:
+        OSError: If the write or rename fails, or if `dst` is not the staged file after the
+            rename; the staging file and any link or special file at `dst` are removed
+            before raising.
+    """
+    # Unique per writer so concurrent backups to the same destination never clobber each
+    # other's staging file; the leading dot keeps it out of the `{name}-*.tgz` index glob.
+    tmp_dst = dst.with_name(f".{dst.name}.{new_uid(bits=64)}.partial")
+    try:
+        written = _write_staging_file(path=tmp_dst, write=write, mode=mode)
+        tmp_dst.replace(dst)
+        _require_published_file(dst=dst, written=written)
+    except OSError:
+        tmp_dst.unlink(missing_ok=True)
+        raise
+
+
+def _write_staging_file(
+    *, path: Path, write: Callable[[BinaryIO], object], mode: int
+) -> os.stat_result:
+    """Create `path` exclusively, fill it, and set its mode through the open descriptor.
+
+    Args:
+        path (Path): The staging path, which must not exist.
+        write (Callable[[BinaryIO], object]): Writes the content into the open file.
+        mode (int): Permission bits to set.
+
+    Returns:
+        os.stat_result: The fstat of the written file, to check the published name against.
+    """
+    # 0o600 keeps the content private until fchmod sets the final mode.
+    fd = os.open(path=path, flags=_CREATE_NEW_FILE_FLAGS, mode=0o600)
+    with os.fdopen(fd=fd, mode="wb") as f:
+        write(f)
+        os.fchmod(fd=f.fileno(), mode=mode)
+        return os.fstat(f.fileno())
+
+
+def _require_published_file(*, dst: Path, written: os.stat_result) -> None:
+    """Raise unless `dst` is the file ezbak just wrote, removing it if it is not a regular file.
+
+    A storage-directory writer can swap the staging file for a link between the
+    write and the rename. Checking after the rename, not before, leaves no window
+    in which the swapped name stays published.
+
+    Args:
+        dst (Path): The just-published path.
+        written (os.stat_result): The fstat of the file ezbak wrote.
+
+    Raises:
+        OSError: If `dst` is a different file than the one ezbak wrote.
+    """
+    published = dst.lstat()
+    # Positional: Python 3.15 makes samestat's parameters positional-only.
+    if os.path.samestat(published, written):
+        return
+    # A regular file here is a concurrent writer's complete copy under the same
+    # name, so leave it published; only a link or special file is removed.
+    if not stat.S_ISREG(published.st_mode):
+        dst.unlink(missing_ok=True)
+    msg = (
+        f"Refusing to publish '{dst}': it is not the file ezbak wrote "
+        f"(expected device {written.st_dev} inode {written.st_ino}, "
+        f"found device {published.st_dev} inode {published.st_ino})"
+    )
+    raise OSError(msg)
 
 
 def copy_with_periodic_fsync(
@@ -37,56 +122,48 @@ def copy_with_periodic_fsync(
     fsync also guarantees the archive is durable before the copy is reported
     successful.
 
-    Stage under a hidden unique name and publish with an atomic rename so a
-    failed or killed copy never leaves a truncated archive under the final
-    backup name, where the next index would treat it as the newest backup and
-    hand it to a restore.
+    The copy is published with `_publish_new_file`, so a truncated archive never
+    appears under the final backup name, where the next index would treat it as
+    the newest backup and hand it to a restore.
 
     Args:
         src (Path): Source file to copy.
         dst (Path): Destination path for the copy.
         fsync_interval (int): Bytes written between forced flushes.
         chunk_size (int): Bytes read per iteration.
-
-    Raises:
-        OSError: If the copy or the final rename fails; the staging file is
-            removed before re-raising.
     """
-    # Unique per writer so concurrent backups to the same destination never
-    # clobber each other's staging file; the leading dot keeps it out of the
-    # `{name}-*.tgz` index glob.
-    tmp_dst = dst.with_name(f".{dst.name}.{uuid4().hex[:8]}.partial")
-    try:
-        _write_chunks_with_fsync(
-            src=src, dst=tmp_dst, fsync_interval=fsync_interval, chunk_size=chunk_size
+    with src.open("rb") as fsrc:
+        mode = stat.S_IMODE(os.fstat(fsrc.fileno()).st_mode)
+        _publish_new_file(
+            dst=dst,
+            write=lambda fdst: _write_chunks_with_fsync(
+                src=fsrc, dst=fdst, fsync_interval=fsync_interval, chunk_size=chunk_size
+            ),
+            mode=mode,
         )
-        shutil.copymode(src, tmp_dst)
-        tmp_dst.replace(dst)
-    except OSError:
-        tmp_dst.unlink(missing_ok=True)
-        raise
 
 
-def _write_chunks_with_fsync(*, src: Path, dst: Path, fsync_interval: int, chunk_size: int) -> None:
+def _write_chunks_with_fsync(
+    *, src: BinaryIO, dst: BinaryIO, fsync_interval: int, chunk_size: int
+) -> None:
     """Stream `src` into `dst` in chunks, fsyncing every `fsync_interval` bytes.
 
     Args:
-        src (Path): Source file to copy.
-        dst (Path): Destination path for the copy.
+        src (BinaryIO): Open source file.
+        dst (BinaryIO): Open destination file.
         fsync_interval (int): Bytes written between forced flushes.
         chunk_size (int): Bytes read per iteration.
     """
-    with src.open("rb") as fsrc, dst.open("wb") as fdst:
-        unsynced = 0
-        while chunk := fsrc.read(chunk_size):
-            fdst.write(chunk)
-            unsynced += len(chunk)
-            if unsynced >= fsync_interval:
-                fdst.flush()
-                os.fsync(fdst.fileno())
-                unsynced = 0
-        fdst.flush()
-        os.fsync(fdst.fileno())
+    unsynced = 0
+    while chunk := src.read(chunk_size):
+        dst.write(chunk)
+        unsynced += len(chunk)
+        if unsynced >= fsync_interval:
+            dst.flush()
+            os.fsync(dst.fileno())
+            unsynced = 0
+    dst.flush()
+    os.fsync(dst.fileno())
 
 
 class LocalBackend(StorageBackend):
@@ -123,11 +200,11 @@ class LocalBackend(StorageBackend):
             # Anchor on "{name}-" so a set does not swallow siblings that merely
             # share its prefix (name "gitea" must not match "giteasave-*"). The
             # naming grammar always joins name and timestamp with "-".
-            found_files = find_files(
-                path=storage_path, globs=[f"{self.settings.name}-*.{BACKUP_EXTENSION}"]
-            )
+            # A plain glob, not a filter that follows links, so every symlink at a
+            # backup name, dangling or not, reaches the warning in `_is_regular_file`.
+            found_files = list(storage_path.glob(f"{self.settings.name}-*.{BACKUP_EXTENSION}"))
             backup_names = set(self._backup_names([f.name for f in found_files]))
-            found_files = [f for f in found_files if f.name in backup_names]
+            found_files = [f for f in found_files if f.name in backup_names and _is_regular_file(f)]
             location = self._build_storage_location(
                 storage_path=storage_path,
                 backups=[
@@ -255,7 +332,13 @@ class LocalBackend(StorageBackend):
             return
         sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
         try:
-            sidecar_path.write_text(content)
+            # Match the archive's mode so the sidecar is never more readable than it. A
+            # link swapped in at the archive name reports 0o777, so fall back to private.
+            archive_st_mode = backup.path.lstat().st_mode
+            archive_mode = stat.S_IMODE(archive_st_mode) if stat.S_ISREG(archive_st_mode) else 0o600
+            _publish_new_file(
+                dst=sidecar_path, write=lambda f: f.write(content.encode()), mode=archive_mode
+            )
         except OSError as e:
             # Best-effort: the archive is intact, just unverifiable later.
             logger.warning(f"Failed to write checksum sidecar '{sidecar_path}': {e}")
@@ -312,7 +395,8 @@ class LocalBackend(StorageBackend):
         sidecar_path = backup.path.parent / sidecar_name(backup.path.name)
         logger.trace(f"Reading checksum sidecar '{sidecar_path}'")
         try:
-            return sidecar_path.read_text()
+            with open_regular_file(sidecar_path) as f:
+                return f.read().decode()
         except FileNotFoundError:
             logger.trace(f"No checksum sidecar at '{sidecar_path}'")
             return None
@@ -322,3 +406,26 @@ class LocalBackend(StorageBackend):
             # not crash the restore.
             logger.warning(f"Could not read checksum sidecar '{sidecar_path}': {e}")
             return None
+
+
+def _is_regular_file(path: Path) -> bool:
+    """Return True if `path` is a regular file itself, warning about anything else.
+
+    A link in a storage directory could point a restore at any file the container can read,
+    so only a regular file at the name is a backup.
+
+    Args:
+        path (Path): A file found by the index glob.
+
+    Returns:
+        bool: True if `path` is a regular file and not a link to one.
+    """
+    try:
+        mode = path.lstat().st_mode
+    except OSError as e:
+        logger.warning(f"Skipping '{path}': cannot read its file type: {e}")
+        return False
+    if stat.S_ISREG(mode):
+        return True
+    logger.warning(f"Skipping '{path}': expected a regular file, not a symlink or special file")
+    return False
