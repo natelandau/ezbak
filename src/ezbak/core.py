@@ -193,6 +193,31 @@ class _FsyncTarFile(tarfile.TarFile):
                     unsynced = 0
 
 
+def _extract_all(*, archive: tarfile.TarFile, staging: Path) -> None:
+    """Extract every member into staging, so a broken archive fails as a TarError or OSError.
+
+    tarfile raises a bare KeyError for a hard link whose target member is not in the
+    archive. Translating it lets the callers' TarError handling turn it into a failed
+    restore instead of an unhandled exception that skips the failure alert.
+
+    Args:
+        archive (tarfile.TarFile): The archive opened for reading.
+        staging (Path): The directory to extract into.
+
+    Raises:
+        tarfile.ExtractError: If a hard link member names a target the archive lacks.
+    """
+    try:
+        archive.extractall(path=staging, filter="data")
+    except KeyError as e:
+        # str() of a KeyError is the repr of its argument, so read the argument directly.
+        detail = e.args[0] if e.args else e
+        msg = f"Archive holds a hard link to a member it does not contain: {detail}"
+        raise tarfile.ExtractError(msg) from e
+    # getmembers() is cached by extractall, so this is not a re-read.
+    logger.trace(f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'")
+
+
 def _extract_archive(
     *, tarfile_path: Path, staging: Path, expected_checksum: str | None, backup_name: str
 ) -> None:
@@ -207,11 +232,7 @@ def _extract_archive(
     """
     if expected_checksum is None:
         with _FsyncTarFile.open(tarfile_path) as archive:
-            archive.extractall(path=staging, filter="data")
-            # getmembers() is cached by extractall, so this is not a re-read.
-            logger.trace(
-                f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"
-            )
+            _extract_all(archive=archive, staging=staging)
         return
 
     hasher = hashlib.sha256()
@@ -222,10 +243,7 @@ def _extract_archive(
             # Explicit "r:gz" (not auto-detect "r") reads the stream forward-only, so
             # the non-seekable HashingReader sees every compressed byte exactly once.
             with _FsyncTarFile.open(fileobj=cast("IO[bytes]", reader), mode="r:gz") as archive:
-                archive.extractall(path=staging, filter="data")
-                logger.trace(
-                    f"Extracted {len(archive.getmembers())} entries to staging dir '{staging}'"
-                )
+                _extract_all(archive=archive, staging=staging)
         except (tarfile.TarError, OSError) as e:
             extract_error = e
         # Drain whatever tarfile left unread so the digest spans the whole file:

@@ -770,6 +770,56 @@ def test_create_backup_keeps_fifos_and_hardlinks(filesystem):
         assert link.linkname == "src/dir1/foo.txt"
 
 
+@pytest.mark.parametrize(
+    ("dropped_name", "overrides"),
+    [(".DS_Store", {}), ("a.txt", {"exclude_regex": r"/a\.txt$"})],
+    ids=["always-excluded", "exclude-regex"],
+)
+def test_restore_keeps_content_when_first_hardlink_name_is_filtered(
+    filesystem, restore_dir, dropped_name, overrides
+):
+    """Verify a file restores with its content when the filters drop its first-walked link."""
+    # Given a file whose other hard link sorts first in the walk and is filtered out
+    src_dir, dest1, _ = filesystem
+    (src_dir / "kept.txt").write_text("shared content")
+    (src_dir / dropped_name).hardlink_to(src_dir / "kept.txt")
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], **overrides)
+
+    # When backing up and restoring
+    app.create_backup()
+    app.restore_backup(restore_path=restore_dir)
+
+    # Then the kept name restores with the file's content and the dropped name does not
+    restored = restore_dir / src_dir.name
+    assert (restored / "kept.txt").read_text() == "shared content"
+    assert not (restored / dropped_name).exists()
+
+
+@pytest.mark.parametrize("with_sidecar", [True, False], ids=["checksum-verified", "no-sidecar"])
+def test_restore_fails_cleanly_on_a_hardlink_to_a_missing_member(
+    tmp_path, restore_dir, with_sidecar
+):
+    """Verify an archive whose hard link names an absent member fails as RestoreFailedError."""
+    # Given a stored archive holding a hard link whose target member is not in the archive
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    archive = storage / "test-20250624T084727.tgz"
+    with tarfile.open(archive, "w:gz") as tar:
+        link = tarfile.TarInfo("src/data.txt")
+        link.type = tarfile.LNKTYPE
+        link.linkname = "src/.DS_Store"
+        tar.addfile(link)
+    if with_sidecar:
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        (storage / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
+    app = ezbak(name="test", storage_paths=[storage])
+
+    # When/Then the restore fails as a restore failure and leaves the destination untouched
+    with pytest.raises(RestoreFailedError, match="hard link"):
+        app.restore_backup(restore_path=restore_dir)
+    assert not any(restore_dir.iterdir())
+
+
 def test_delete_source_after_backup_keeps_a_file_replaced_after_archiving(
     tmp_path, filesystem, mocker
 ):
