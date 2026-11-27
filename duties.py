@@ -126,9 +126,13 @@ def typos(ctx: Context) -> None:
     )
 
 
-@duty(skip_if=CI, skip_reason="skip prek in CI environments")
+@duty
 def precommit(ctx: Context) -> None:
-    """Run prek hooks."""
+    """Run the prek hooks that the other lint duties and the test suite do not cover.
+
+    Runs in CI too, so commits made without local hooks (web edits, Dependabot, --no-verify)
+    still get the secret scan and workflow audits.
+    """
     ctx.run(
         "SKIP=ruff-check,ruff-format,ty,typos,pytest gate-cache --name prek -- prek run --all-files",
         title=pyprefix("prek hooks"),
