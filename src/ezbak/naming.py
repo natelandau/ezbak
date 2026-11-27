@@ -4,23 +4,43 @@ Single source of truth for how backup filenames are composed and disambiguated, 
 """
 
 from nclutils.utils import new_uid
+from whenever import PlainDateTime
 
-from ezbak.constants import BACKUP_EXTENSION, TIMESTAMP_REGEX
+from ezbak.constants import BACKUP_EXTENSION, DEFAULT_DATE_PATTERN, TIMESTAMP_REGEX
+
+
+def parse_backup_timestamp(name: str) -> PlainDateTime | None:
+    """Read the timestamp from a backup filename, so a backup can be ordered and bucketed by time.
+
+    Args:
+        name (str): The filename or object key to read.
+
+    Returns:
+        PlainDateTime | None: The timestamp, or None when the name has none or it is not a real
+            calendar date and time, such as a month of 13.
+    """
+    match = TIMESTAMP_REGEX.search(name)
+    if match is None:
+        return None
+    try:
+        return PlainDateTime.parse(match.group(0), pattern=DEFAULT_DATE_PATTERN)
+    except ValueError:
+        return None
 
 
 def is_backup_filename(name: str) -> bool:
     """Report whether a filename carries a backup timestamp, so indexing can skip foreign files.
 
     A storage location can hold files that match a set's glob or prefix but were not written by
-    ezbak, such as a hand-named copy. Those have no timestamp to order or restore by.
+    ezbak, such as a hand-named copy. Those have no valid timestamp to order or restore by.
 
     Args:
         name (str): The filename or object key to check.
 
     Returns:
-        bool: True if the name contains a backup timestamp.
+        bool: True if the name contains a valid backup timestamp.
     """
-    return TIMESTAMP_REGEX.search(name) is not None
+    return parse_backup_timestamp(name) is not None
 
 
 def new_staging_filename() -> str:

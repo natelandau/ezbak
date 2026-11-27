@@ -8,7 +8,8 @@ __version__ = "1.5.1"
 DEFAULT_DATE_FORMAT = "%Y%m%dT%H%M%S"
 # whenever's parse pattern equivalent of DEFAULT_DATE_FORMAT, Y/M/D for date, h/m/s for time, 'T' is a quoted literal
 DEFAULT_DATE_PATTERN = "YYYYMMDD'T'HHmmss"
-TIMESTAMP_REGEX = re.compile(r"\d{8}T\d{6}")
+# [0-9], not \d: \d also matches non-ASCII digits, which the timestamp parser rejects
+TIMESTAMP_REGEX = re.compile(r"[0-9]{8}T[0-9]{6}")
 # Accepts the no-dash filename timestamp shape at any granularity:
 # YYYY, YYYYMM, YYYYMMDD, YYYYMMDDTHH, YYYYMMDDTHHMM, YYYYMMDDTHHMMSS
 # `\Z` (not `$`) so a trailing newline does not slip through: `$` also matches
