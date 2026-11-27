@@ -1,5 +1,5 @@
 ---
-name: "Manual PyPy Publish"
+name: "Manual PyPI Publish"
 
 on:
     workflow_dispatch:
@@ -9,7 +9,7 @@ concurrency:
     cancel-in-progress: true
 
 permissions:
-    contents: write
+    contents: read
 
 jobs:
     publish-to-pypi:
@@ -17,12 +17,11 @@ jobs:
         env:
             TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
             TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-        strategy:
-            matrix:
-                python-version: [ "3.13" ]
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env

@@ -1,0 +1,7 @@
+---
+# https://docs.zizmor.sh/configuration/
+rules:
+  # actionlint does not accept the `$/` self-repository syntax, so local actions and
+  # reusable workflows keep `./` paths.
+  self-repository:
+    disable: true

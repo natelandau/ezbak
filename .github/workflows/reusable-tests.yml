@@ -9,17 +9,26 @@ on:
                 required: false
                 type: boolean
                 default: false
+        secrets:
+            CODECOV_TOKEN:
+                required: false
+
+permissions:
+    contents: read
 
 jobs:
     test-python-code:
         runs-on: ubuntu-latest
         strategy:
-            fail-fast: true
+            # Finish every Python version so one failure does not hide the others
+            fail-fast: false
             matrix:
                 python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env
@@ -32,7 +41,7 @@ jobs:
 
             - name: Upload coverage to Codecov
               if: ${{ inputs.run-coverage && matrix.python-version == '3.13' }}
-              uses: codecov/codecov-action@v7
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: .cache/coverage.xml
               env:
@@ -43,7 +52,9 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env
@@ -70,7 +81,9 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env

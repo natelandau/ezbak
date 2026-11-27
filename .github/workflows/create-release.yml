@@ -7,14 +7,17 @@ on:
         tags:
             - "v*"
 
+# Never cancel a release midway, which could leave a partial publish
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
-    cancel-in-progress: true
+    cancel-in-progress: false
+
+permissions:
+    contents: read
 
 jobs:
     run-tests:
         uses: ./.github/workflows/reusable-tests.yml
-        secrets: inherit
 
     auto-release:
         name: Create Release
@@ -24,8 +27,9 @@ jobs:
         needs: run-tests
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
+                  persist-credentials: false
                   fetch-depth: 0
 
             - name: Setup Python, uv, and the package
@@ -36,15 +40,16 @@ jobs:
             - name: Add version to environment vars
               run: |
                   PROJECT_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-                  echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_ENV
+                  echo "PROJECT_VERSION=$PROJECT_VERSION" >> "$GITHUB_ENV"
 
             - name: Check if tag version matches project version
               run: |
                   TAG=$(git describe HEAD --tags --abbrev=0)
-                  echo $TAG
-                  echo $PROJECT_VERSION
-                  if [[ "$TAG" != "v$PROJECT_VERSION" ]]; then exit 1; fi
-                  echo "CURRENT_TAG=refs/tags/${TAG}" >> $GITHUB_ENV
+                  if [[ "$TAG" != "v$PROJECT_VERSION" ]]; then
+                      echo "::error::Tag '$TAG' does not match project version 'v$PROJECT_VERSION'"
+                      exit 1
+                  fi
+                  echo "CURRENT_TAG=refs/tags/${TAG}" >> "$GITHUB_ENV"
 
             - name: Build the package
               shell: bash
@@ -55,13 +60,13 @@ jobs:
 
             - name: Get notes
               id: generate_notes
-              uses: anmarkoulis/commitizen-changelog-reader@master
+              uses: anmarkoulis/commitizen-changelog-reader@0692c1865c3ccf530ddfc8d0870f4d1ab559b767 # master
               with:
                   tag_name: ${{ env.CURRENT_TAG }}
                   changelog: CHANGELOG.md
 
             - name: Create Github Release
-              uses: softprops/action-gh-release@v3
+              uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
               with:
                   body: ${{join(fromJson(steps.generate_notes.outputs.notes).notes, '')}}
                   draft: false
@@ -71,9 +76,10 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    # Waits for auto-release, which fails when the tag does not match the project version
     publish-to-pypi:
         runs-on: ubuntu-latest
-        needs: run-tests
+        needs: auto-release
         permissions:
             contents: read
         env:
@@ -81,7 +87,9 @@ jobs:
             TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
 
             - name: Setup Python, uv, and the package
               uses: ./.github/actions/setup_python_env
@@ -100,18 +108,20 @@ jobs:
         needs: auto-release
         runs-on: ubuntu-latest
         permissions:
-            contents: write
+            contents: read
             packages: write
         env:
             REGISTRY: ghcr.io
             IMAGE_NAME: ${{ github.repository }}
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v7
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
 
             - name: Extract metadata (tags, labels) for Docker
               id: meta
-              uses: docker/metadata-action@v6
+              uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
               with:
                   images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
                   flavor: latest=true
@@ -122,25 +132,24 @@ jobs:
                       type=semver,pattern={{major}}
 
             - name: Set up QEMU
-              uses: docker/setup-qemu-action@v4
+              uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
             - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v4
+              uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
             - name: Log in to the Container registry
-              if: github.event_name != 'pull_request'
-              uses: docker/login-action@v4
+              uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
               with:
                   registry: ${{ env.REGISTRY }}
                   username: ${{ github.actor }}
                   password: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Build and push Docker image
-              uses: docker/build-push-action@v7
+              uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
               with:
                   context: .
                   platforms: linux/amd64,linux/arm64
-                  push: ${{ github.event_name != 'pull_request' }}
+                  push: true
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
                   outputs: type=image,name=target,annotation-index.org.opencontainers.image.description=A simple backup management tool.

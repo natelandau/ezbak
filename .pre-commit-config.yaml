@@ -71,6 +71,14 @@ repos:
     hooks:
       - id: gitleaks
 
+  # Audits GitHub workflows, Dependabot, actions, and this file for security issues
+  - repo: "https://github.com/zizmorcore/zizmor-pre-commit"
+    rev: v1.33.1
+    hooks:
+      - id: zizmor
+        # Informational findings are suggestions, so only low severity and up fail the hook
+        args: [--no-progress, --min-severity, low]
+
   # These hooks call duty recipes, which wrap the slower gates in gate-cache, so a
   # hook, `duty lint`, and an agent share markers and skip work that already passed.
   # Each `files` pattern lists the tool's config too, so a settings change reruns it.

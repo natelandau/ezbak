@@ -2,7 +2,9 @@
 name: Pull Request Linter
 
 on:
-    pull_request_target:
+    # Safe: the job reads only the PR title through the API and never checks out PR code.
+    # pull_request_target grants the statuses: write the linter needs on fork PRs.
+    pull_request_target: # zizmor: ignore[dangerous-triggers]
         types:
             - opened
             - edited
@@ -26,7 +28,7 @@ jobs:
 
         steps:
             - name: Lint Pull Request
-              uses: amannn/action-semantic-pull-request@v6
+              uses: amannn/action-semantic-pull-request@66e72920af32222769c386d81f89656ebcb6d6d5 # v6.1.4
               with:
                   validateSingleCommit: true
                   wip: true
