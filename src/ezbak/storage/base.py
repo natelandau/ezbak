@@ -10,6 +10,7 @@ from ezbak.backup import Backup, StorageLocation
 from ezbak.checksums import format_sidecar, is_sidecar, parse_sidecar
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
+from ezbak.exceptions import ConfigurationError
 
 
 class StorageBackend(ABC):
@@ -44,7 +45,13 @@ class StorageBackend(ABC):
 
         Returns:
             StorageLocation: The populated, sorted storage location.
+
+        Raises:
+            ConfigurationError: If no backup name is configured.
         """
+        if not self.settings.name:
+            msg = "A storage location needs a backup name, got none"
+            raise ConfigurationError(msg)
         return StorageLocation(
             name=self.settings.name,
             tz=self.settings.tz,

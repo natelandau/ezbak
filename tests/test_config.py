@@ -1,6 +1,7 @@
 """Tests for BackupConfig and EnvConfig."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -164,10 +165,12 @@ def test_retention_policy_derivation_keep_last():
 def test_negative_keep_rule_rejected(field):
     """Verify a negative keep rule is rejected instead of pruning the wrong backups."""
     # Given an otherwise valid config with one negative keep rule
+    negative_rule: dict[str, Any] = {field: -1}
+
     # When constructing it
     # Then validation fails rather than accepting the negative count
     with pytest.raises(ValidationError):
-        BackupConfig(name="x", storage_paths=["/tmp"], **{field: -1})  # ruff:ignore[hardcoded-temp-file]
+        BackupConfig(name="x", storage_paths=["/tmp"], **negative_rule)  # ruff:ignore[hardcoded-temp-file]
 
 
 @pytest.mark.parametrize("log_level", [None, "loud"])

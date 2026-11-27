@@ -104,14 +104,15 @@ repos:
         language: system
         pass_filenames: false
 
-      - id: mypy
-        name: mypy
-        entry: uv run duty mypy
+      - id: ty
+        name: ty
+        entry: uv run duty ty
         language: system
         pass_filenames: false
         files: |
           (?x)^(
           src/|
+          tests/|
           uv\.lock|
           pyproject\.toml
           )

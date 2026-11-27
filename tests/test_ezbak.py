@@ -174,6 +174,7 @@ def test_restore_backup(filesystem, debug, capsys, tmp_path):
         log_level="error",
     )
     latest_backup = backup_manager.get_latest_backup()
+    assert latest_backup is not None
     assert latest_backup.name == "test-20250624T084727-hourly-Tr5J7.tgz"
 
     # When: Restoring the latest backup
@@ -982,6 +983,7 @@ def test_create_writes_local_sidecar(filesystem) -> None:
 
     # Then: A sidecar file exists next to the archive and matches its digest
     archive = backups[0].path
+    assert archive is not None
     sidecar = archive.parent / (archive.name + ".sha256")
     assert sidecar.exists()
     assert hashlib.sha256(archive.read_bytes()).hexdigest() in sidecar.read_text()
@@ -1005,6 +1007,7 @@ def test_restore_rejects_corrupt_archive(filesystem, tmp_path) -> None:
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     backup = app.create_backup()[0]
+    assert backup.path is not None
 
     # Corrupt the archive so its bytes no longer match the sidecar digest.
     with backup.path.open("r+b") as handle:
@@ -1022,6 +1025,7 @@ def test_restore_skips_verification_when_checksums_disabled(filesystem, tmp_path
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     backup = app.create_backup()[0]
+    assert backup.path is not None
     sidecar = backup.path.parent / (backup.path.name + ".sha256")
     sidecar.write_text(f"{'0' * 64}  {backup.path.name}\n")
 
@@ -1045,6 +1049,7 @@ def test_restore_missing_sidecar_warns_and_succeeds(filesystem, tmp_path, capsys
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     backup = app.create_backup()[0]
+    assert backup.path is not None
     (backup.path.parent / (backup.path.name + ".sha256")).unlink()
 
     restore_dir = tmp_path / "restore"
@@ -1058,6 +1063,7 @@ def test_restore_non_utf8_sidecar_warns_and_succeeds(filesystem, tmp_path, capsy
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     backup = app.create_backup()[0]
+    assert backup.path is not None
 
     sidecar = backup.path.parent / (backup.path.name + ".sha256")
     sidecar.write_bytes(b"\xff\xfe\x00\x01garbage")
@@ -1089,6 +1095,7 @@ def test_restore_rejects_valid_archive_with_wrong_sidecar(filesystem, tmp_path) 
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     backup = app.create_backup()[0]
+    assert backup.path is not None
     sidecar = backup.path.parent / (backup.path.name + ".sha256")
     sidecar.write_text(f"{'0' * 64}  {backup.path.name}\n")
 

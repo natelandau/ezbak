@@ -23,6 +23,7 @@ from ezbak.exceptions import (
 )
 from ezbak.logging import instantiate_logger
 from ezbak.storage.aws import AWSService
+from tests.helpers import s3_backend
 
 UTC = ZoneInfo("UTC")
 frozen_time = datetime(2025, 6, 9, tzinfo=UTC)
@@ -241,7 +242,7 @@ def test_s3_backend_write_network_error_raises_storage_write_error(s3_bucket, fi
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     location = app.storage_locations[0]
     tmp_backup = app.tmp_dir / "staged.tgz"
     tmp_backup.write_bytes(b"data")
@@ -291,7 +292,7 @@ def test_s3_backend_write_raises_storage_write_error(s3_bucket, filesystem, mock
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     location = app.storage_locations[0]
     tmp_backup = app.tmp_dir / "staged.tgz"
     tmp_backup.write_bytes(b"data")
@@ -358,7 +359,7 @@ def test_s3_prepare_for_restore_network_error_raises_storage_read_error(
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     mocker.patch.object(
         backend.aws_service,
@@ -385,7 +386,7 @@ def test_s3_prepare_for_restore_client_error_raises_storage_read_error(
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     mocker.patch.object(
         backend.aws_service,
@@ -413,7 +414,7 @@ def test_s3_delete_client_error_raises_storage_delete_error(s3_bucket, filesyste
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     mocker.patch.object(
         backend.aws_service,
@@ -441,7 +442,7 @@ def test_s3_delete_many_network_error_raises_storage_delete_error(s3_bucket, fil
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     backup = Backup(name="test-20240609T000000-yearly.tgz", storage_type=StorageType.AWS)
     mocker.patch.object(
         backend.aws_service,
@@ -496,7 +497,7 @@ def test_s3_delete_many_chunks_large_batches(s3_bucket, filesystem, mocker):
         aws_secret_key="secret",
         tz="Etc/UTC",
     )
-    backend = app.backends[0]
+    backend = s3_backend(app)
     backups = [
         Backup(name=f"test-20240609T000000-{i:05d}.tgz", storage_type=StorageType.AWS)
         for i in range(1500)

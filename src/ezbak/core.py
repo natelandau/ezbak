@@ -8,7 +8,7 @@ import shutil
 import tarfile
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
-from typing import IO, TYPE_CHECKING, Literal, NoReturn, assert_never, cast
+from typing import IO, TYPE_CHECKING, Any, Literal, NoReturn, assert_never, cast
 
 from loguru import logger
 from nclutils.fs import clean_directory
@@ -71,7 +71,7 @@ PeriodUnit = Literal["years", "months", "days", "hours", "minutes", "seconds"]
 _STAGING_PREFIX = ".ezbak-restore-"
 
 
-def ezbak(**kwargs: object) -> EZBak:
+def ezbak(**kwargs: Any) -> EZBak:  # ruff:ignore[any-type]
     """Build an ``EZBak`` from keyword options without importing ``BackupConfig``.
 
     Convenience for quick scripts. Validates via ``BackupConfig`` and returns a ready core. Prefer ``EZBak(BackupConfig(...))`` when you want an explicit, reusable config object.
@@ -83,7 +83,7 @@ def ezbak(**kwargs: object) -> EZBak:
         ValidationError: If provided settings are invalid.
     """
     try:
-        config = BackupConfig(**kwargs)  # type: ignore[arg-type]
+        config = BackupConfig(**kwargs)
     except ValidationError as e:
         log_validation_errors(e)
         raise
@@ -1204,7 +1204,7 @@ class EZBak:
         """Advance a plain date/time by one calendar or exact unit.
 
         Dispatched on the literal ``unit`` string (rather than **kwargs-unpacked) so
-        each ``add()`` call has a literal keyword mypy can match against its
+        each ``add()`` call has a literal keyword a type checker can match against its
         overloads.
 
         Args:
@@ -1275,7 +1275,7 @@ class EZBak:
             case _:
                 # Unreachable: RESTORE_DATE_REGEX above only matches these six
                 # lengths, so no other length can reach this branch. `len()`
-                # returns plain `int`, not a Literal, so mypy can't prove this
+                # returns plain `int`, not a Literal, so a type checker cannot prove this
                 # via `assert_never`; fail loudly instead of a silent fallback.
                 msg = f"Unhandled restore date length: {len(point_in_time)}"
                 raise AssertionError(msg)
@@ -1462,19 +1462,18 @@ class EZBak:
             RestoreFailedError: If the backup archive is missing or corrupt, extraction fails, the restore target cannot be read to check whether it is populated, or a configured storage location could not be read to determine which backups exist.
         """  # ruff:ignore[docstring-extraneous-exception]
         target_path = restore_path or self.settings.restore_path
+        if not target_path:
+            msg = "No restore path provided and none configured"
+            raise ConfigurationError(msg)
 
         try:
             dest = Path(target_path).expanduser().absolute()
         except (TypeError, ValueError, OSError, RuntimeError) as e:
-            # Covers a None/bad-type restore path (TypeError), an unresolvable ~ home
+            # Covers a bad-type restore path (TypeError), an unresolvable ~ home
             # (RuntimeError from expanduser), and a removed cwd for a relative path
             # (OSError from absolute()), all of which mean the restore path is unusable.
             msg = f"Invalid restore path: {target_path}"
             raise ConfigurationError(msg) from e
-
-        if not dest:
-            msg = "No restore path provided and none configured"
-            raise ConfigurationError(msg)
 
         if not dest.exists() or not dest.is_dir():
             msg = f"Restore path does not exist: {dest}"

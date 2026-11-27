@@ -112,17 +112,9 @@ def format(ctx: Context) -> None:  # ruff:ignore[builtin-variable-shadowing]
 
 
 @duty
-def mypy(ctx: Context) -> None:
-    """Check the code with mypy."""
-    os.environ["FORCE_COLOR"] = "1"
-    ctx.run(
-        gated(
-            "mypy",
-            ["mypy", "--config-file", "pyproject.toml", "src/"],
-            paths=("src/", "pyproject.toml", "uv.lock", "duties.py"),
-        ),
-        title=pyprefix("mypy check"),
-    )
+def ty(ctx: Context) -> None:
+    """Check types with ty."""
+    ctx.run(["ty", "check"], title=pyprefix("ty check"))
 
 
 @duty
@@ -138,12 +130,12 @@ def typos(ctx: Context) -> None:
 def precommit(ctx: Context) -> None:
     """Run prek hooks."""
     ctx.run(
-        "SKIP=ruff-check,ruff-format,mypy,typos,pytest gate-cache --name prek -- prek run --all-files",
+        "SKIP=ruff-check,ruff-format,ty,typos,pytest gate-cache --name prek -- prek run --all-files",
         title=pyprefix("prek hooks"),
     )
 
 
-@duty(pre=[ruff, format, mypy, typos, precommit], capture=CI)
+@duty(pre=[ruff, format, ty, typos, precommit], capture=CI)
 def lint(ctx: Context) -> None:
     """Run all linting duties."""
 

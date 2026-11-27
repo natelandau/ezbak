@@ -8,6 +8,10 @@ from pathlib import Path  # ruff:ignore[typing-only-standard-library-import]
 from typing import TYPE_CHECKING, Annotated, Any
 
 import cappa
+
+# cappa.command, .invoke, and .parse share names with cappa submodules, which type checkers
+# resolve instead of the functions; cappa.base exports the functions themselves
+from cappa.base import command, invoke
 from nclutils import pp
 from pydantic import ValidationError
 
@@ -19,7 +23,7 @@ if TYPE_CHECKING:
     from ezbak.config import BackupConfig
 
 
-@cappa.command(name="ezbak")
+@command(name="ezbak")
 class EZBakCLI:
     """The EZBak CLI."""
 
@@ -37,7 +41,7 @@ class EZBakCLI:
         ),
     ]
     storage_paths: Annotated[
-        list[Path],
+        list[Path] | None,
         cappa.Arg(
             long="storage",
             help="Local storage path(s) for backups. Optional when --s3-bucket is set. Repeat --storage for multiple paths.",
@@ -60,7 +64,7 @@ class EZBakCLI:
     ] = CLILogLevel.INFO
 
     log_file: Annotated[
-        Path | str,
+        Path | str | None,
         cappa.Arg(
             long="log-file",
             required=False,
@@ -71,7 +75,7 @@ class EZBakCLI:
     ] = None
 
     log_prefix: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="log-prefix",
             help="Prefix for log messages.",
@@ -81,7 +85,7 @@ class EZBakCLI:
     ] = None
 
     s3_bucket: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="s3-bucket",
             help="S3 bucket name. Credentials come from EZBAK_AWS_ACCESS_KEY / EZBAK_AWS_SECRET_KEY.",
@@ -91,7 +95,7 @@ class EZBakCLI:
     ] = None
 
     s3_bucket_prefix: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="s3-bucket-prefix",
             help="Key prefix within the S3 bucket.",
@@ -101,7 +105,7 @@ class EZBakCLI:
     ] = None
 
     s3_region: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="s3-region",
             help="AWS region. Defaults to boto3's standard resolution (AWS_REGION/AWS_DEFAULT_REGION).",
@@ -111,7 +115,7 @@ class EZBakCLI:
     ] = None
 
     s3_endpoint_url: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="s3-endpoint-url",
             help="Custom S3 endpoint for S3-compatible storage such as MinIO.",
@@ -121,7 +125,7 @@ class EZBakCLI:
     ] = None
 
 
-@cappa.command(name="create", invoke="ezbak.cli_commands.create.main")
+@command(name="create", invoke="ezbak.cli_commands.create.main")
 class CreateCommand:
     """Create a backup."""
 
@@ -136,7 +140,7 @@ class CreateCommand:
     ]
 
     include_regex: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="include-regex",
             short="i",
@@ -146,7 +150,7 @@ class CreateCommand:
     ] = None
 
     exclude_regex: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="exclude-regex",
             short="e",
@@ -167,7 +171,7 @@ class CreateCommand:
     ] = False
 
     sqlite_paths: Annotated[
-        list[Path],
+        list[Path] | None,
         cappa.Arg(
             long="sqlite-path",
             help=(
@@ -185,7 +189,7 @@ class CreateCommand:
             long="compression-level",
             short="c",
             help="The compression level.",
-            choices=range(1, 10),
+            choices=[str(level) for level in range(1, 10)],
             group=(3, "Optional"),
         ),
     ] = DEFAULT_COMPRESSION_LEVEL
@@ -201,7 +205,7 @@ class CreateCommand:
     ] = True
 
 
-@cappa.command(name="restore", invoke="ezbak.cli_commands.restore.main")
+@command(name="restore", invoke="ezbak.cli_commands.restore.main")
 class RestoreCommand:
     """Restore a backup."""
 
@@ -244,7 +248,7 @@ class RestoreCommand:
     ] = False
 
     uid: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="uid",
             short="u",
@@ -254,7 +258,7 @@ class RestoreCommand:
     ] = None
 
     gid: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="gid",
             short="g",
@@ -264,7 +268,7 @@ class RestoreCommand:
     ] = None
 
     restore_date: Annotated[
-        str,
+        str | None,
         cappa.Arg(
             long="restore-date",
             short="t",
@@ -284,12 +288,12 @@ class RestoreCommand:
     ] = True
 
 
-@cappa.command(name="prune", invoke="ezbak.cli_commands.prune.main")
+@command(name="prune", invoke="ezbak.cli_commands.prune.main")
 class PruneCommand:
     """Prune backups."""
 
     keep_last: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-last",
             help="Number of most recent backups to keep.",
@@ -298,7 +302,7 @@ class PruneCommand:
     ] = None
 
     keep_yearly: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-yearly",
             short="Y",
@@ -308,7 +312,7 @@ class PruneCommand:
     ] = None
 
     keep_monthly: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-monthly",
             short="M",
@@ -318,7 +322,7 @@ class PruneCommand:
     ] = None
 
     keep_weekly: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-weekly",
             short="W",
@@ -328,7 +332,7 @@ class PruneCommand:
     ] = None
 
     keep_daily: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-daily",
             short="D",
@@ -338,7 +342,7 @@ class PruneCommand:
     ] = None
 
     keep_hourly: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-hourly",
             short="H",
@@ -348,7 +352,7 @@ class PruneCommand:
     ] = None
 
     keep_minutely: Annotated[
-        int,
+        int | None,
         cappa.Arg(
             long="keep-minutely",
             short="S",
@@ -378,7 +382,7 @@ class PruneCommand:
     ] = False
 
 
-@cappa.command(name="list", invoke="ezbak.cli_commands.list.main")
+@command(name="list", invoke="ezbak.cli_commands.list.main")
 class ListCommand:
     """List backups."""
 
@@ -411,7 +415,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
     # .env file (matches the prior factory behavior). EnvConfig is a BackupConfig subclass,
     # so returning it satisfies the -> BackupConfig contract.
     # dict[str, Any]: values fan out to differently-typed EnvConfig kwargs below via **splat,
-    # which mypy can only accept if the dict's value type is Any.
+    # which a type checker accepts only when the dict's value type is Any.
     common: dict[str, Any] = {
         "name": cli.name,
         "storage_paths": cli.storage_paths,
@@ -459,7 +463,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
         extra = {}
 
     try:
-        return EnvConfig(**common, **extra, _env_file=None)  # type: ignore[call-arg]
+        return EnvConfig(**common, **extra, _env_file=None)
     except ValidationError as e:
         log_validation_errors(e)
         raise cappa.Exit(code=1) from e
@@ -468,7 +472,7 @@ def build_config(cli: EZBakCLI) -> BackupConfig:
 def main() -> None:  # pragma: no cover
     """Main function."""  # ruff:ignore[docstring-missing-exception]
     try:
-        cappa.invoke(obj=EZBakCLI, completion=False)
+        invoke(obj=EZBakCLI, completion=False)
     except KeyboardInterrupt as e:
         pp.info("Exiting...")
         raise cappa.Exit(code=1) from e

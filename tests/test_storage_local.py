@@ -86,4 +86,5 @@ def test_local_backend_write_fsyncs_archive(filesystem, mocker):
 
     # Then the stored archive was fsynced and matches the staged bytes
     assert fsync_spy.call_count >= 1
+    assert backup.path is not None
     assert backup.path.read_bytes() == b"data"

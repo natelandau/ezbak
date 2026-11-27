@@ -1,13 +1,19 @@
 """Log configuration for ezbak."""
 
+from __future__ import annotations
+
 import sys
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
-from pydantic import ValidationError
 
-from ezbak.constants import LogLevel
+if TYPE_CHECKING:
+    from loguru import Record
+    from pydantic import ValidationError
+
+    from ezbak.constants import LogLevel
 
 
 def log_validation_errors(error: ValidationError) -> None:
@@ -23,13 +29,13 @@ def log_validation_errors(error: ValidationError) -> None:
         logger.error(err["msg"])
 
 
-def _stderr_log_formatter(record: dict, prefix: str | None = None) -> str:
+def _stderr_log_formatter(record: Record, prefix: str | None = None) -> str:
     """Build the colorized loguru format template for the stderr sink.
 
     Assemble the format string loguru applies to terminal output: timestamp, color-tagged level, optional prefix, message, any extra fields, and the exception traceback when present. Use as the `format` callable when adding a stderr sink.
 
     Args:
-        record (dict): The loguru record whose `extra`/`exception` keys decide which optional segments appear.
+        record (Record): The loguru record whose `extra`/`exception` keys decide which optional segments appear.
         prefix (str | None): Optional label inserted after the level. Defaults to None.
 
     Returns:
@@ -45,13 +51,13 @@ def _stderr_log_formatter(record: dict, prefix: str | None = None) -> str:
     return f"{timestamp}{level}{prefix}{message}{extras}{exception}\n"
 
 
-def _log_file_formatter(record: dict, prefix: str | None = None) -> str:
+def _log_file_formatter(record: Record, prefix: str | None = None) -> str:
     """Build the plain-text loguru format template for the log-file sink.
 
     Assemble the format string loguru applies to file output: timestamp, level, optional prefix, message, any extra fields, and the exception traceback when present. Unlike the stderr formatter this omits color tags so log files stay readable. Use as the `format` callable when adding a file sink.
 
     Args:
-        record (dict): The loguru record whose `extra`/`exception` keys decide which optional segments appear.
+        record (Record): The loguru record whose `extra`/`exception` keys decide which optional segments appear.
         prefix (str | None): Optional label inserted after the level. Defaults to None.
 
     Returns:

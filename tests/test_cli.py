@@ -12,6 +12,10 @@ import cappa
 import pytest
 import time_machine
 
+# cappa.command, .invoke, and .parse share names with cappa submodules, which type checkers
+# resolve instead of the functions; cappa.base exports the functions themselves
+from cappa.base import invoke, parse
+
 from ezbak.backup import Backup
 from ezbak.cli import CreateCommand, EZBakCLI, PruneCommand, RestoreCommand, build_config
 from ezbak.cli_commands import list as list_cmd
@@ -30,7 +34,7 @@ def test_cli_create_backup(filesystem, debug, capsys, tmp_path):
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
 
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "create",
@@ -76,7 +80,7 @@ def test_cli_prune_backups_keep_last(mocker, debug, capsys, tmp_path):
     for filename in filenames:
         Path(tmp_path / filename).touch()
 
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
@@ -124,7 +128,7 @@ def test_cli_prune_backups_with_policy(mocker, debug, capsys, tmp_path):
     for filename in filenames:
         Path(tmp_path / filename).touch()
 
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
@@ -197,7 +201,7 @@ def test_cli_prune_backups_dry_run(mocker, debug, capsys, tmp_path):
         Path(tmp_path / filename).touch()
 
     # When: pruning runs with --dry-run
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
@@ -232,7 +236,7 @@ def test_cli_prune_backups_dry_run_no_targets(mocker, debug, capsys, tmp_path):
         Path(tmp_path / filename).touch()
 
     # When: pruning runs with --dry-run and a policy that keeps more than exist
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
@@ -264,7 +268,7 @@ def test_cli_list_backups(debug, capsys, tmp_path):
     for filename in filenames:
         Path(tmp_path / filename).touch()
 
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
     )
@@ -315,7 +319,7 @@ def test_cli_list_backups_partial_index_reports_and_exits_nonzero(
 
     # When listing backups
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
             argv=[
                 "list",
@@ -344,7 +348,7 @@ def test_cli_list_backups_partial_index_with_no_backups_found(
 
     # When listing backups
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
             argv=[
                 "list",
@@ -369,7 +373,7 @@ def test_cli_list_backups_empty_and_readable_prints_no_backups_found(capsys, tmp
     # Given an empty, readable local storage path and no S3 destination configured
 
     # When listing backups, then it does not raise cappa.Exit
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=["list", "--name", "test", "--storage", str(tmp_path)],
     )
@@ -390,7 +394,7 @@ def test_cli_restore_backup(filesystem, debug, capsys, tmp_path):
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -438,7 +442,7 @@ def test_build_config_maps_region_and_endpoint(monkeypatch):
     monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
 
     # When parsing a create command with --s3-region and --s3-endpoint-url
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -468,7 +472,7 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
     monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "secret_test")
 
     # When parsing a create command with only --s3-bucket (no --storage)
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=["--name", "t", "--s3-bucket", "my-bucket", "create", "--source", str(tmp_path)],
     )
@@ -482,7 +486,7 @@ def test_s3_only_cli_parses_without_storage(monkeypatch, tmp_path):
 def test_create_no_use_checksums_flag(tmp_path):
     """Verify --no-use-checksums maps to use_checksums=False in the built config."""
     # Given a create command parsed with --no-use-checksums
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -511,7 +515,7 @@ def test_create_sqlite_path_flag(tmp_path):
     (src / "app.db").touch()
 
     # And a create command parsed with --sqlite-path
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -542,7 +546,7 @@ def test_create_sqlite_path_flag_repeats(tmp_path):
     (src / "b.db").touch()
 
     # And a create command naming both
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -575,7 +579,7 @@ def test_create_sqlite_path_flag_accepts_a_pattern(tmp_path):
     (src / "folder.0002-j4dkatqn.db").touch()
 
     # And a create command naming them with one pattern
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -603,7 +607,7 @@ def test_create_sqlite_path_flag_accepts_a_relative_pattern(tmp_path):
     src = tmp_path / "data"
     src.mkdir()
 
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -628,7 +632,7 @@ def test_create_sqlite_path_flag_accepts_a_relative_pattern(tmp_path):
 def test_restore_no_use_checksums_flag(tmp_path):
     """Verify --no-use-checksums maps to use_checksums=False on a restore command."""
     # Given a restore command parsed with --no-use-checksums
-    cli = cappa.parse(
+    cli = parse(
         EZBakCLI,
         argv=[
             "--name",
@@ -658,7 +662,7 @@ def test_cli_invalid_config_exits_cleanly(monkeypatch, capsys):
 
     # When invoking a command with a name but no storage destination
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(obj=EZBakCLI, argv=["list", "--name", "test"])
+        invoke(obj=EZBakCLI, argv=["list", "--name", "test"])
 
     # Then it exits non-zero with a helpful message instead of a raw pydantic traceback
     assert exc.value.code == 1
@@ -738,7 +742,7 @@ def test_cli_restore_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
     restore_path.mkdir(exist_ok=True)
 
     # When restoring with --skip-if-no-backup and no backup present, then it does not raise
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -767,7 +771,7 @@ def test_cli_restore_skip_if_no_backup_date_miss_is_noop(filesystem, capsys, tmp
     restore_path.mkdir(exist_ok=True)
 
     # When restoring as of 2024 (before the only backup) with --skip-if-no-backup, it does not raise
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -800,7 +804,7 @@ def test_cli_restore_backup_by_date(filesystem, debug, capsys, tmp_path):
 
     # When restoring as of 2025-01-02 (only the Jan 1 backup qualifies).
     # -v raises the log level to DEBUG so the selection line is emitted.
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "restore",
@@ -833,7 +837,7 @@ def test_cli_restore_by_date_no_match_exits_nonzero(filesystem, tmp_path):
     # When restoring as of a year before it
     # Then the CLI exits non-zero
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
             argv=[
                 "restore",
@@ -874,7 +878,7 @@ def test_cli_prune_backups_force_skips_confirmation(mocker, debug, capsys, tmp_p
         Path(tmp_path / filename).touch()
 
     # When: pruning runs with --force
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",
@@ -902,7 +906,7 @@ def test_cli_list_backups_unusable_destination_exits_nonzero(s3_bucket: str, cap
 
     # When listing backups
     with pytest.raises(cappa.Exit) as exc:
-        cappa.invoke(
+        invoke(
             obj=EZBakCLI,
             argv=[
                 "list",
@@ -937,7 +941,7 @@ def test_cli_prune_unreadable_destination_exits_zero(s3_bucket, break_s3_listing
     break_s3_listing()
 
     # When pruning down to the newest backup, then prune does not exit non-zero
-    cappa.invoke(
+    invoke(
         obj=EZBakCLI,
         argv=[
             "prune",

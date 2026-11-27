@@ -18,6 +18,7 @@ from ezbak.exceptions import (
     StorageReadError,
 )
 from ezbak.storage.aws import AWSService
+from tests.helpers import s3_backend
 
 
 def test_s3_bucket_fixture_smoke(s3_bucket: str) -> None:
@@ -158,7 +159,7 @@ def test_s3_write_wraps_managed_transfer_error(s3_bucket: str, filesystem, mocke
         aws_secret_key="s",
     )
     mocker.patch.object(
-        app.backends[0].aws_service,
+        s3_backend(app).aws_service,
         "upload_object",
         side_effect=S3UploadFailedError("denied"),
     )
@@ -182,7 +183,7 @@ def test_s3_restore_wraps_managed_transfer_error(s3_bucket: str, filesystem, moc
     )
     app.create_backup()
     mocker.patch.object(
-        app.backends[0].aws_service,
+        s3_backend(app).aws_service,
         "get_object",
         side_effect=RetriesExceededError(OSError("connection reset")),
     )

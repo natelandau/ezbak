@@ -1,4 +1,4 @@
-"""Shared helpers for building SQLite fixtures in tests."""
+"""Shared test helpers."""
 
 import sqlite3
 import subprocess  # ruff:ignore[suspicious-subprocess-import]
@@ -6,6 +6,9 @@ import sys
 import textwrap
 from contextlib import closing
 from pathlib import Path
+
+from ezbak.core import EZBak
+from ezbak.storage.s3 import S3Backend
 
 
 def make_db(path: Path, *, rows: int = 5, wal: bool = True) -> None:
@@ -76,3 +79,17 @@ def row_count(path: Path) -> int:
     """
     with closing(sqlite3.connect(path)) as conn:
         return conn.execute("SELECT count(*) FROM t").fetchone()[0]
+
+
+def s3_backend(app: EZBak) -> S3Backend:
+    """Return the app's only backend as an S3Backend, so a test can reach its AWS service.
+
+    Args:
+        app (EZBak): An app configured with an S3 bucket and no storage paths.
+
+    Returns:
+        S3Backend: The app's S3 backend.
+    """
+    backend = app.backends[0]
+    assert isinstance(backend, S3Backend), f"Expected an S3Backend, got {type(backend).__name__}"
+    return backend

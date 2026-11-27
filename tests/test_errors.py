@@ -163,7 +163,7 @@ def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
         source_paths=[src_dir],
         storage_paths=[dest1],
     )
-    with pytest.raises(ConfigurationError, match="Invalid restore path: None"):
+    with pytest.raises(ConfigurationError, match="No restore path provided and none configured"):
         backup_manager.restore_backup(None)
 
 
