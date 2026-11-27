@@ -1,6 +1,6 @@
 """Backup and storage location models for managing backup archives and restoration operations."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from loguru import logger
 from whenever import SYSTEM_TZ, Instant, TimeZoneNotFoundError
@@ -10,7 +10,7 @@ from ezbak.constants import (
     DEFAULT_DATE_PATTERN,
     StorageType,
 )
-from ezbak.naming import add_uid_suffix, build_backup_name, parse_backup_timestamp
+from ezbak.naming import add_uid_suffix, build_backup_name, parse_backup_filename
 
 
 class Backup:
@@ -36,11 +36,12 @@ class Backup:
         # Full path to the backup file, used for local backups
         self.path = path
 
-        plain_dt = parse_backup_timestamp(name)
-        if plain_dt is None:
-            msg = f"Backup name '{name}' has no valid YYYYMMDDTHHMMSS timestamp"
+        parsed = parse_backup_filename(name)
+        if parsed is None:
+            msg = f"Backup name '{name}' is not '{{name}}-YYYYMMDDTHHMMSS' with a real timestamp"
             logger.warning(msg)
             raise ValueError(msg)
+        plain_dt = parsed.timestamp
         self.timestamp = plain_dt.format(DEFAULT_DATE_PATTERN)
 
         try:
@@ -121,7 +122,10 @@ class StorageLocation:
         timestamp = now.to_stdlib().strftime(DEFAULT_DATE_FORMAT)
         filename = build_backup_name(name=self.name, timestamp=timestamp)
 
-        if any(x.name == filename for x in self.backups):
+        # Compare basenames: a local backup's name omits the subdirectory a set name with "/"
+        # puts it in, and every backup here belongs to this set, so they share that directory
+        new_basename = PurePosixPath(filename).name
+        if any(PurePosixPath(x.name).name == new_basename for x in self.backups):
             filename = add_uid_suffix(filename)
 
         logger.trace(f"Backup name: {filename}")

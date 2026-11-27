@@ -125,23 +125,34 @@ class AWSService:
             raise StorageInitError(msg) from e
 
     def build_full_key(self, key: str) -> str:
-        """Build the full S3 key by prepending bucket_path if needed.
+        """Build the full S3 key for a name relative to bucket_path.
+
+        Always prepend bucket_path, even to a name that already starts with it, so every name
+        maps to exactly one key and two names never share an object.
 
         Args:
-            key (str): The S3 object key.
+            key (str): The object name, relative to bucket_path.
 
         Returns:
-            str: The full S3 key with bucket_path prepended if necessary.
+            str: The full S3 key, with bucket_path prepended when one is configured.
         """
         if not self.bucket_path:
             return key
+        return f"{self.bucket_path.rstrip('/')}/{key}"
 
-        normalized_bucket_path = self.bucket_path.rstrip("/") + "/"
+    def _relative_name(self, full_key: str) -> str:
+        """Return the name relative to bucket_path for a key the bucket returned.
 
-        if key.startswith(normalized_bucket_path):
-            return key
+        The inverse of `build_full_key`, so every name this service returns can be passed
+        back to it unchanged.
 
-        return f"{normalized_bucket_path}{key}"
+        Args:
+            full_key (str): A full S3 key under bucket_path.
+
+        Returns:
+            str: The key with bucket_path removed.
+        """
+        return full_key.removeprefix(self.build_full_key(""))
 
     def delete_object(self, key: str) -> bool:
         """Delete a file from the configured S3 bucket.
@@ -149,7 +160,7 @@ class AWSService:
         Remove a file from the S3 bucket by its key. Use this method when you need to clean up files from S3 storage or remove outdated backups. The method automatically handles bucket path prefixes and provides detailed logging of the deletion process.
 
         Args:
-            key (str): The S3 object key to delete.
+            key (str): The object name to delete, relative to bucket_path.
 
         Returns:
             bool: True if deletion succeeds. Botocore errors from the delete propagate to the caller.
@@ -168,10 +179,10 @@ class AWSService:
         Remove multiple files from the S3 bucket by their keys using batch deletion. Use this method when you need to efficiently delete multiple files at once, such as cleaning up multiple outdated backups or removing a batch of files. The method automatically handles bucket path prefixes and provides detailed logging of the deletion process.
 
         Args:
-            keys (list[str]): List of S3 object keys to delete.
+            keys (list[str]): Object names to delete, relative to bucket_path.
 
         Returns:
-            list[str]: The full S3 keys that were confirmed deleted (empty if no keys were provided). Botocore errors from the delete propagate to the caller.
+            list[str]: The names that were confirmed deleted, relative to bucket_path (empty if no keys were provided). Botocore errors from the delete propagate to the caller.
 
         Raises:
             ValueError: If the keys list contains more than 1000 items.
@@ -211,7 +222,7 @@ class AWSService:
 
         logger.trace(f"S3: Successfully deleted {len(response_deleted_objects)} objects")
 
-        return [str(obj["Key"]) for obj in response.get("Deleted", [])]
+        return [self._relative_name(str(obj["Key"])) for obj in response_deleted_objects]
 
     def get_object(self, key: str, destination: Path) -> Path:
         """Retrieve the contents of an object from the S3 bucket using boto3's managed transfer.
@@ -219,7 +230,7 @@ class AWSService:
         Download a file from S3 to a local destination. Use this method when you need to retrieve files from S3 for local processing, backup restoration, or file analysis. The managed transfer downloads large objects with concurrent ranged requests and per-part retries, so a multi-gigabyte restore is not throttled by a single sequential stream. The method automatically handles bucket path prefixes.
 
         Args:
-            key (str): The S3 object key to retrieve.
+            key (str): The object name to retrieve, relative to bucket_path.
             destination (Path): The local path to save the object to.
 
         Returns:
@@ -241,7 +252,7 @@ class AWSService:
         prefixes.
 
         Args:
-            key (str): The S3 object key to read.
+            key (str): The object name to read, relative to bucket_path.
 
         Returns:
             str: The object body decoded as UTF-8. Botocore errors from the read and
@@ -260,10 +271,10 @@ class AWSService:
         Discover files in the S3 bucket that match a specific prefix pattern. Use this method when you need to enumerate files for backup management, cleanup operations, or to find specific file patterns. The method automatically handles bucket path prefixes and provides efficient pagination for large buckets.
 
         Args:
-            prefix (str, optional): The prefix to filter object keys by. If empty, return all objects.
+            prefix (str, optional): The name prefix to filter by, relative to bucket_path. If empty, return all objects under bucket_path.
 
         Returns:
-            list[str]: A list of S3 object keys that match the specified prefix. Botocore
+            list[str]: The matching object names, relative to bucket_path. Botocore
                 errors propagate to the caller, so an empty list always means "no matching
                 objects" and never "the listing failed".
         """
@@ -274,7 +285,7 @@ class AWSService:
         paginator = self.s3.get_paginator("list_objects_v2")
         pages = paginator.paginate(Bucket=self.bucket, Prefix=full_prefix)
         for page in pages:
-            object_keys.extend(obj["Key"] for obj in page.get("Contents", []))
+            object_keys.extend(self._relative_name(obj["Key"]) for obj in page.get("Contents", []))
 
         logger.trace(f"S3: Listed {len(object_keys)} objects with prefix '{full_prefix}'")
         return object_keys
@@ -287,7 +298,7 @@ class AWSService:
 
         Args:
             content (str): The object body, stored UTF-8 encoded.
-            name (str): The desired object key.
+            name (str): The object name to write, relative to bucket_path.
 
         Returns:
             bool: True if upload succeeds. Botocore errors from the upload propagate to the caller.
@@ -304,7 +315,7 @@ class AWSService:
 
         Args:
             file (Path): The local file path to upload to S3.
-            name (str): The desired name for the file in S3.
+            name (str): The object name to write, relative to bucket_path.
 
         Returns:
             bool: True if upload succeeds. Transfer errors from the upload (including

@@ -15,6 +15,7 @@ import time_machine
 
 from ezbak import ezbak
 from ezbak.backup import Backup, StorageLocation
+from ezbak.checksums import format_sidecar, sidecar_name
 from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome
 from ezbak.core import EZBak
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
@@ -97,6 +98,22 @@ def test_create_backup(filesystem, tmp_path):
 
     # Then: List backups returns every file across both storage paths
     assert len(backup_manager.list_backups()) == 14
+
+
+@time_machine.travel(frozen_time, tick=False)
+def test_create_backup_keeps_same_instant_backups_of_a_nested_set(filesystem):
+    """Verify a set name with "/" never overwrites a backup taken at the same instant."""
+    # Given a set whose name puts its backups in a subdirectory of the storage path
+    src_dir, dest, _ = filesystem
+    (dest / "team").mkdir()
+    app = ezbak(name="team/test", source_paths=[src_dir], storage_paths=[dest], tz="Etc/UTC")
+
+    # When creating two backups at the same instant
+    app.create_backup()
+    app.create_backup()
+
+    # Then both archives are kept
+    assert len(list((dest / "team").glob(f"test-{frozen_time_str}*.tgz"))) == 2
 
 
 @time_machine.travel(frozen_time, tick=False)
@@ -817,7 +834,9 @@ def test_restore_fails_cleanly_on_a_hardlink_to_a_missing_member(
         tar.addfile(link)
     if with_sidecar:
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        (storage / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
+        (storage / sidecar_name(archive.name)).write_text(
+            format_sidecar(digest=digest, archive_name=archive.name)
+        )
     app = ezbak(name="test", storage_paths=[storage])
 
     # When/Then the restore fails as a restore failure and leaves the destination untouched
