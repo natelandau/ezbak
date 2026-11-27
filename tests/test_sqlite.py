@@ -3,6 +3,7 @@
 import os
 import sqlite3
 import stat
+import struct
 import subprocess
 import sys
 import textwrap
@@ -28,6 +29,9 @@ from ezbak.sqlite import (
     unusable_pattern_component,
 )
 from tests.helpers import make_db, row_count
+
+# Header magic of a SQLite rollback journal, from the file format.
+ROLLBACK_JOURNAL_MAGIC = bytes.fromhex("d9d505f920a163d7")
 
 # root bypasses the permission bits these tests rely on, so a directory stripped of write
 # permission stays writable and the case under test cannot be reproduced.
@@ -158,23 +162,29 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
     """Verify a database abandoned mid-transaction snapshots to a recovered, clean file.
 
     This is the case a raw file copy gets wrong: copying the database alone discards the
-    rollback journal it needs to become consistent again, so the copy restores corrupt.
+    rollback journal it needs to become consistent again, so the copy restores corrupt. The
+    rollback happens on ezbak's own copy, so the live files stay as found for the service to
+    recover on its next start.
     """
-    # Given a DELETE-mode database whose writer was killed mid-transaction, leaving a hot
-    # journal on disk
-    source = tmp_path / "hot.db"
+    # Given a DELETE-mode database whose writer was killed mid-transaction, leaving its
+    # uncommitted pages in the database file and a hot journal on disk
+    source = tmp_path / "data" / "hot.db"
     make_db(source, rows=200, wal=False)
 
     script = textwrap.dedent(f"""
         import os, sqlite3
         conn = sqlite3.connect({str(source)!r})
+        # A tiny cache forces modified pages into the database file before any commit.
+        conn.execute("PRAGMA cache_size=1")
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("UPDATE t SET v = 'clobbered'")
+        conn.executemany("INSERT INTO t (v) VALUES (?)", [("clobbered",)] * 2000)
         # Abandon the process without commit or rollback, leaving the journal behind.
         os._exit(1)
     """)
     subprocess.run([sys.executable, "-c", script], check=False)
     assert source.with_name("hot.db-journal").exists(), "expected a hot journal on disk"
+    live_files = {path.name: path.read_bytes() for path in source.parent.iterdir()}
 
     dest = tmp_path / "snap" / "hot.db"
 
@@ -186,6 +196,9 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
     with closing(sqlite3.connect(dest)) as conn:
         assert conn.execute("SELECT count(*) FROM t WHERE v = 'clobbered'").fetchone()[0] == 0
 
+    # And the live database and its journal are untouched
+    assert {path.name: path.read_bytes() for path in source.parent.iterdir()} == live_files
+
 
 @skip_as_root
 def test_snapshot_database_reads_a_rollback_database_in_a_readonly_directory(
@@ -193,8 +206,7 @@ def test_snapshot_database_reads_a_rollback_database_in_a_readonly_directory(
 ):
     """Verify a DELETE-mode database snapshots from a directory that cannot be written.
 
-    A rollback-mode database needs no sidecar file to be read, so the ordinary read-write
-    open succeeds and the backup never has to fall back.
+    A rollback-mode database needs no sidecar file to be read.
     """
     # Given a DELETE-mode database in a directory with no write permission
     data = tmp_path / "data"
@@ -214,9 +226,9 @@ def test_snapshot_database_fails_for_a_wal_database_in_a_readonly_directory(tmp_
     """Verify a WAL database with no -shm on disk cannot be snapshotted read-only.
 
     SQLite cannot read a WAL database without a usable -shm, and it cannot create one in a
-    directory it may not write. The read-only retry runs and fails too, so the whole backup
-    fails rather than archiving a database the run could not copy consistently. This is why
-    a source holding WAL databases must be mounted read-write.
+    directory it may not write, so the whole backup fails rather than archiving a database
+    the run could not copy consistently. This is why a source holding WAL databases must be
+    mounted read-write.
     """
     # Given an idle WAL database whose -wal and -shm were checkpointed away on close,
     # in a directory with no write permission
@@ -227,18 +239,16 @@ def test_snapshot_database_fails_for_a_wal_database_in_a_readonly_directory(tmp_
     readonly_dir(data)
 
     # When snapshotting it
-    with pytest.raises(SqliteSnapshotError) as excinfo:
+    # Then the snapshot fails
+    with pytest.raises(SqliteSnapshotError):
         snapshot_database(source, dest=tmp_path / "snap" / "live.db")
-
-    # Then the read-only retry was attempted and reported as the failure
-    assert str(excinfo.value).startswith("Failed to snapshot read-only sqlite database")
 
 
 @skip_as_root
 def test_snapshot_database_copies_a_readonly_database_file(tmp_path):
     """Verify a database file with no write permission snapshots when its directory is writable.
 
-    SQLite can still create the -shm beside it, so this needs no fallback.
+    SQLite can still create the -shm beside it.
     """
     # Given a WAL database whose file is not writable, in a writable directory
     data = tmp_path / "data"
@@ -251,6 +261,116 @@ def test_snapshot_database_copies_a_readonly_database_file(tmp_path):
 
     # Then the snapshot holds the full contents
     assert row_count(tmp_path / "snap" / "live.db") == 4
+
+
+def _write_hot_journal(database: Path, *, super_journal: Path | None) -> None:
+    """Plant the rollback journal a writer killed mid-transaction leaves beside `database`.
+
+    The journal holds no page records, so replaying it changes nothing in the database. A
+    super-journal record makes rollback delete the file it names.
+
+    Args:
+        database (Path): The DELETE-mode database to plant the journal beside.
+        super_journal (Path | None): The file the journal names as its super-journal, if any.
+    """
+    page_size = 4096
+    header = ROLLBACK_JOURNAL_MAGIC + struct.pack(
+        ">5I", 0, 0, database.stat().st_size // page_size, page_size, page_size
+    )
+    journal = header.ljust(page_size, b"\x00")
+    if super_journal is not None:
+        name = str(super_journal).encode()
+        journal += (
+            struct.pack(">I", 0)
+            + name
+            + struct.pack(">2I", len(name), sum(name) & 0xFFFFFFFF)
+            + ROLLBACK_JOURNAL_MAGIC
+        )
+    database.with_name(database.name + "-journal").write_bytes(journal)
+
+
+def test_snapshot_database_refuses_a_journal_that_names_a_super_journal(tmp_path):
+    """Verify a planted journal cannot make the snapshot delete a file it names.
+
+    Rolling back a journal deletes the super-journal it names. The service owns the database
+    directory and so controls that name, while ezbak may run with more privilege than it.
+    """
+    # Given a DELETE-mode database whose hot journal names an unrelated file
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    _write_hot_journal(source, super_journal=victim)
+
+    # When snapshotting it
+    # Then the snapshot is refused and the named file survives
+    with pytest.raises(SqliteSnapshotError, match="super-journal"):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+    assert victim.read_text() == "keep"
+
+
+def test_snapshot_database_refuses_a_symlinked_hot_journal(tmp_path):
+    """Verify a hot journal that is a symlink is not followed out of the source directory."""
+    # Given a database whose hot journal is a symlink to a journal elsewhere
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=None)
+    elsewhere = tmp_path / "elsewhere-journal"
+    source.with_name("app.db-journal").rename(elsewhere)
+    source.with_name("app.db-journal").symlink_to(elsewhere)
+
+    # When snapshotting it
+    # Then the snapshot is refused
+    with pytest.raises(SqliteSnapshotError):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+
+def test_snapshot_database_refuses_a_hot_journal_pair_that_changes_mid_copy(tmp_path, monkeypatch):
+    """Verify a database written to while its hot journal is copied is not archived.
+
+    Nothing locks the live files during that copy, so a service that writes in the meantime
+    would pair a journal and a database from different moments.
+    """
+    # Given a database with a hot journal that the service writes to during the copy
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=None)
+    copy_regular_file = ezbak_sqlite._copy_regular_file
+
+    def copy_then_write(path: Path, *, dest: Path) -> None:
+        copy_regular_file(path, dest=dest)
+        with source.open("ab") as live:
+            live.write(b"\x00" * 4096)
+
+    monkeypatch.setattr(ezbak_sqlite, "_copy_regular_file", copy_then_write)
+
+    # When snapshotting it
+    # Then the snapshot is refused
+    with pytest.raises(SqliteSnapshotError, match="changed while ezbak copied"):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+
+def test_snapshot_database_copies_normally_when_the_hot_journal_is_recovered_first(
+    tmp_path, monkeypatch
+):
+    """Verify a hot journal the service recovers before ezbak copies it does not fail the run."""
+    # Given a database whose hot journal the service recovers right after ezbak finds it
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=None)
+    copy_regular_file = ezbak_sqlite._copy_regular_file
+
+    def recover_then_copy(path: Path, *, dest: Path) -> None:
+        source.with_name("app.db-journal").unlink(missing_ok=True)
+        copy_regular_file(path, dest=dest)
+
+    monkeypatch.setattr(ezbak_sqlite, "_copy_regular_file", recover_then_copy)
+
+    # When snapshotting it
+    snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+    # Then the snapshot holds the database
+    assert row_count(tmp_path / "snap" / "app.db") == 3
 
 
 def test_snapshot_database_preserves_the_source_permissions(tmp_path):
@@ -506,7 +626,7 @@ def test_is_sqlite_database_rejects_an_unreadable_file(tmp_path):
         pytest.param("-wal", b"\x37\x7f\x06\x83", True, id="wal-little-endian-checksums"),
         pytest.param("-wal", b"not a wal file", False, id="wal-lookalike"),
         pytest.param("-wal", b"", False, id="wal-zeroed"),
-        pytest.param("-journal", b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7", True, id="journal"),
+        pytest.param("-journal", ROLLBACK_JOURNAL_MAGIC, True, id="journal"),
         pytest.param("-journal", b"plain text file", False, id="journal-lookalike"),
         pytest.param("-shm", b"anything at all", True, id="shm-has-no-magic"),
     ],
@@ -716,7 +836,7 @@ def test_expand_sqlite_paths_drops_journal_siblings(tmp_path):
     make_db(source / "app.db")
     (source / "app.db-wal").write_bytes(b"\x37\x7f\x06\x82" + b"\x00" * 28)
     (source / "app.db-shm").write_bytes(b"\x00" * 32)
-    (source / "app.db-journal").write_bytes(b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7")
+    (source / "app.db-journal").write_bytes(ROLLBACK_JOURNAL_MAGIC)
 
     # When expanding a pattern broad enough to match them
     result = expand_sqlite_paths([source / "app.db*"], source_paths=[source])

@@ -7,12 +7,15 @@ API instead, which is safe against a concurrent writer and folds in any WAL or r
 
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
 import stat
 import time
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
 from loguru import logger
@@ -25,31 +28,19 @@ from ezbak.exceptions import SqliteSnapshotError
 SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS: float = 300.0
 
 
-def _is_readonly_error(error: sqlite3.Error) -> bool:
-    """Report whether a SQLite error was caused by a read-only file or filesystem.
-
-    Returns:
-        bool: True if the error message indicates a read-only file or filesystem.
-    """
-    return "readonly" in str(error).lower() or "read-only" in str(error).lower()
-
-
-def _copy(source: Path, *, dest: Path, read_only: bool) -> None:
-    """Copy `source` to `dest` through the online-backup API.
+def _copy_read_only(source: Path, *, dest: Path) -> None:
+    """Copy `source` to `dest` through the online-backup API over a read-only connection.
 
     Raises `TimeoutError` (an `OSError`, so callers already handle it) when another process
     holds a write lock past `SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS`.
 
     Args:
-        source (Path): The live database to copy.
+        source (Path): The database to copy.
         dest (Path): The destination file, overwritten if present.
-        read_only (bool): Open the source through a `mode=ro` URI rather than read-write.
     """
-    # The backup API must create and write the -shm file for a WAL database, so the source is
-    # opened read-write by default. A read-only mount cannot support that, but it also
-    # guarantees no writer, which makes the read-only URI safe there. The path is percent-encoded
-    # because SQLite parses a URI filename, so a bare '?', '#', or '%' in it would be structure.
-    dsn = f"file:{quote(str(source))}?mode=ro" if read_only else str(source)
+    # The path is percent-encoded because SQLite parses a URI filename, so a bare '?', '#', or
+    # '%' in it would be structure.
+    dsn = f"file:{quote(str(source))}?mode=ro"
     deadline = time.monotonic() + SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS
 
     def _abort_when_stuck(*_: int) -> None:
@@ -63,10 +54,113 @@ def _copy(source: Path, *, dest: Path, read_only: bool) -> None:
             raise TimeoutError(msg)
 
     with (
-        closing(sqlite3.connect(dsn, uri=read_only)) as src_conn,
+        closing(sqlite3.connect(dsn, uri=True)) as src_conn,
         closing(sqlite3.connect(dest)) as dest_conn,
     ):
         src_conn.backup(dest_conn, progress=_abort_when_stuck)
+
+
+def _copy_regular_file(source: Path, *, dest: Path) -> None:
+    """Copy a file the backed-up service controls into ezbak's staging.
+
+    Use this instead of `shutil.copyfile` for any file the service can replace. `O_NOFOLLOW`
+    refuses a planted symlink that would pull in a file from outside the source, and
+    `O_NONBLOCK` keeps a planted fifo from blocking the open forever.
+
+    Args:
+        source (Path): The file to copy.
+        dest (Path): The new file to create. It must not exist.
+
+    Raises:
+        SqliteSnapshotError: If `source` is not a regular file.
+    """
+    fd = os.open(source, flags=os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, mode="rb") as src_file:
+        if not stat.S_ISREG(os.fstat(src_file.fileno()).st_mode):
+            msg = f"Expected '{source}' to be a regular file"
+            raise SqliteSnapshotError(msg)
+        with dest.open("xb") as dest_file:
+            shutil.copyfileobj(fsrc=src_file, fdst=dest_file)
+
+
+def _file_identity(path: Path) -> tuple[int, int, int]:
+    """Fingerprint a file so a change between two reads of it can be detected.
+
+    Args:
+        path (Path): The file to fingerprint. A symlink is fingerprinted, not followed.
+
+    Returns:
+        tuple[int, int, int]: The inode, size, and modification time in nanoseconds.
+    """
+    file_stat = path.lstat()
+    return (file_stat.st_ino, file_stat.st_size, file_stat.st_mtime_ns)
+
+
+def _names_super_journal(journal: Path) -> bool:
+    """Report whether a rollback journal names a super-journal that its rollback would delete.
+
+    SQLite reads a super-journal name only from a journal that ends with the journal magic, so
+    this check is never narrower than SQLite's own.
+
+    Args:
+        journal (Path): A rollback journal in ezbak's private staging.
+
+    Returns:
+        bool: True if the journal ends with the journal magic.
+    """
+    with journal.open("rb") as f:
+        f.seek(max(journal.stat().st_size - len(_ROLLBACK_JOURNAL_MAGIC), 0))
+        return f.read() == _ROLLBACK_JOURNAL_MAGIC
+
+
+def _copy_rolling_back_hot_journal(source: Path, *, dest: Path) -> None:
+    """Copy a database whose hot rollback journal holds an unfinished transaction.
+
+    Use this when a read-only open reports a hot journal, which means a writer crashed mid
+    transaction. The database and journal are copied into ezbak's own staging so the rollback
+    writes nothing beside the live database.
+
+    A journal can name a super-journal, which rollback deletes. The service controls that name,
+    so honoring it would let the service make ezbak delete any file ezbak can reach. Such a
+    journal is refused rather than replayed. Stripping the name instead would roll back a
+    transaction that may have committed in another attached database.
+
+    Args:
+        source (Path): The live database.
+        dest (Path): The destination file, overwritten if present.
+
+    Raises:
+        SqliteSnapshotError: If the journal names a super-journal, either file is not a
+            regular file, or either file changed while it was copied.
+    """
+    journal = source.with_name(source.name + "-journal")
+    # No lock is held on the live files, so a service that recovers or writes during the copy
+    # would pair a database and journal from different moments. Refuse such a pair.
+    identity_before_copy = (_file_identity(source), _file_identity(journal))
+    with TemporaryDirectory(dir=dest.parent) as tmp:
+        staged = Path(tmp) / source.name
+        staged_journal = staged.with_name(staged.name + "-journal")
+        _copy_regular_file(journal, dest=staged_journal)
+        if _names_super_journal(staged_journal):
+            msg = (
+                f"Refusing to roll back the journal of '{source}': it names a super-journal "
+                "from a multi-database transaction, which ezbak does not recover. Start the "
+                "service once to recover it"
+            )
+            raise SqliteSnapshotError(msg)
+
+        _copy_regular_file(source, dest=staged)
+        if (_file_identity(source), _file_identity(journal)) != identity_before_copy:
+            msg = (
+                f"'{source}' or its hot journal changed while ezbak copied them; expected both "
+                "to stay unchanged until the copy finished"
+            )
+            raise SqliteSnapshotError(msg)
+        # Any read through a read-write connection replays the hot journal into the staged copy.
+        with closing(sqlite3.connect(staged)) as conn:
+            conn.execute("PRAGMA schema_version").fetchone()
+        # Staging shares dest's directory, so this is a rename rather than another full copy.
+        staged.replace(dest)
 
 
 # Journal files SQLite keeps beside a database. They belong to the live file, not to a
@@ -259,7 +353,7 @@ def expand_sqlite_paths(entries: list[Path], *, source_paths: list[Path]) -> lis
 # Header bytes SQLite writes at the front of each journal form. A WAL carries one of two
 # magic numbers, chosen by the checksum byte order it was written with.
 _WAL_MAGIC: tuple[bytes, ...] = (b"\x37\x7f\x06\x82", b"\x37\x7f\x06\x83")
-_ROLLBACK_JOURNAL_MAGIC: tuple[bytes, ...] = (b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7",)
+_ROLLBACK_JOURNAL_MAGIC = b"\xd9\xd5\x05\xf9\x20\xa1\x63\xd7"
 _DATABASE_MAGIC = b"SQLite format 3\x00"
 
 
@@ -300,7 +394,7 @@ def is_sqlite_sidecar(path: Path, *, suffix: str) -> bool:
     if suffix == "-shm":
         return True
 
-    magics = _WAL_MAGIC if suffix == "-wal" else _ROLLBACK_JOURNAL_MAGIC
+    magics = _WAL_MAGIC if suffix == "-wal" else (_ROLLBACK_JOURNAL_MAGIC,)
     try:
         with path.open("rb") as f:
             header = f.read(max(len(magic) for magic in magics))
@@ -407,6 +501,38 @@ def _verify(snapshot: Path, *, source: Path) -> None:
         raise SqliteSnapshotError(msg)
 
 
+def _copy_live_database(source: Path, *, dest: Path) -> None:
+    """Copy a live database without ever opening it read-write.
+
+    A read-write open replays a hot rollback journal in place, and the service that owns the
+    directory controls that journal. A read-only open refuses the replay instead, checked under
+    SQLite's own lock, so there is no window between a check and the open for the service to
+    plant a journal. A refused replay is redone on a private copy.
+
+    Args:
+        source (Path): The live database.
+        dest (Path): The destination file, overwritten if present.
+
+    Raises:
+        sqlite3.Error: If the database cannot be read for any reason other than a hot journal.
+        FileNotFoundError: If the database vanishes while its hot journal is still present.
+    """
+    try:
+        _copy_read_only(source, dest=dest)
+    except sqlite3.Error as e:
+        # Errors raised by the sqlite3 module itself, not by SQLite, carry no error code.
+        if getattr(e, "sqlite_errorcode", None) != sqlite3.SQLITE_READONLY_ROLLBACK:
+            raise
+        logger.info(f"'{source}' has an unfinished transaction; rolling it back on a private copy")
+        try:
+            _copy_rolling_back_hot_journal(source, dest=dest)
+        except FileNotFoundError:
+            if source.with_name(source.name + "-journal").exists():
+                raise
+            # The service recovered the journal after the read-only open refused it.
+            _copy_read_only(source, dest=dest)
+
+
 def snapshot_database(source: Path, *, dest: Path) -> None:
     """Write a consistent, verified copy of a live SQLite database.
 
@@ -424,19 +550,7 @@ def snapshot_database(source: Path, *, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        _copy(source, dest=dest, read_only=False)
-    except sqlite3.OperationalError as e:
-        if not _is_readonly_error(e):
-            msg = f"Failed to snapshot sqlite database '{source}': {e}"
-            raise SqliteSnapshotError(msg) from e
-
-        logger.debug(f"'{source}' is not writable; retrying snapshot read-only")
-        dest.unlink(missing_ok=True)
-        try:
-            _copy(source, dest=dest, read_only=True)
-        except (sqlite3.Error, OSError) as retry_error:
-            msg = f"Failed to snapshot read-only sqlite database '{source}': {retry_error}"
-            raise SqliteSnapshotError(msg) from retry_error
+        _copy_live_database(source, dest=dest)
     except (sqlite3.Error, OSError) as e:
         msg = f"Failed to snapshot sqlite database '{source}': {e}"
         raise SqliteSnapshotError(msg) from e

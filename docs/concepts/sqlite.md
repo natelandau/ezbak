@@ -108,12 +108,8 @@ close of the last connection deletes both files. The **post-stop backup** runs
 after that, finds neither file, cannot create them, and fails:
 
 ```text
-Failed to snapshot read-only sqlite database '/data/gitea.db': attempt to write a readonly database
+Failed to snapshot sqlite database '/data/gitea.db': attempt to write a readonly database
 ```
-
-ezbak does retry through a read-only connection first. Treat that as a narrow
-safety net rather than a supported configuration, because it cannot help a WAL
-database that has no `-shm`.
 
 ## Match databases with a pattern
 
@@ -319,6 +315,29 @@ cannot wedge a cron sidecar.
 
 ```text
 Failed to snapshot sqlite database '/data/app.db': Timed out after 300s waiting to copy '/data/app.db': another process is holding a write lock
+```
+
+### An interrupted write is rolled back in the snapshot only
+
+If a service stops during a write transaction in rollback-journal mode, the
+database keeps a hot `-journal` beside it. The journal holds the data that the
+unfinished transaction changed. ezbak copies the database and the journal to its
+temporary directory and rolls back the transaction in that copy. The snapshot
+holds the last committed data. The live database and its journal stay as they
+are, and the service recovers them when it starts again.
+
+```text
+INFO | '/data/app.db' has an unfinished transaction; rolling it back on a private copy
+```
+
+ezbak does not roll back a journal that names a super-journal. SQLite writes
+that type of journal only for a transaction across more than one attached
+database. The rollback deletes the super-journal file, and ezbak does not delete
+a file that the service names. The backup fails. Start the service once to
+recover the database, then run the backup again.
+
+```text
+Refusing to roll back the journal of '/data/app.db': it names a super-journal from a multi-database transaction, which ezbak does not recover. Start the service once to recover it
 ```
 
 ## Disk usage during a run
