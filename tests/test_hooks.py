@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess  # ruff:ignore[suspicious-subprocess-import]
 
 import pytest
+from loguru import logger
 
 from ezbak.hooks import run_hook
 
@@ -46,20 +47,30 @@ def test_run_hook_nonzero_exit_returns_false():
     assert result is False
 
 
-def test_run_hook_timeout_returns_false(mocker):
-    """Verify a hook that times out is killed and reported as a failure."""
-    # Given subprocess.run raising a timeout
+def test_run_hook_timeout_returns_false_and_logs_partial_output_as_text(mocker):
+    """Verify a timed-out hook fails and its partial output is logged as text, not bytes."""
+    # Given subprocess.run raising a timeout that carries raw-bytes partial output,
+    # as it does even with text=True
     mocker.patch(
         "ezbak.hooks.subprocess.run",
         autospec=True,
-        side_effect=subprocess.TimeoutExpired(cmd="sh", timeout=1),
+        side_effect=subprocess.TimeoutExpired(
+            cmd="sh", timeout=1, output=b"partial out", stderr=b"partial err"
+        ),
     )
+    messages: list[str] = []
+    handler_id = logger.add(messages.append, level="ERROR", format="{message}")
 
     # When running the hook
-    result = run_hook("sleep 5", phase="pre-backup", timeout=1)
+    try:
+        result = run_hook("sleep 5", phase="pre-backup", timeout=1)
+    finally:
+        logger.remove(handler_id)
 
-    # Then it is a failure
+    # Then it is a failure and the partial output is logged as decoded text
     assert result is False
+    assert "pre-backup hook stdout: partial out\n" in messages
+    assert "pre-backup hook stderr: partial err\n" in messages
 
 
 def test_run_hook_spawn_error_returns_false(mocker):
