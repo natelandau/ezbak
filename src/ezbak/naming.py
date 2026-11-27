@@ -3,6 +3,7 @@
 Single source of truth for how backup filenames are composed and disambiguated, so the naming convention does not drift across the code that creates them.
 """
 
+from loguru import logger
 from nclutils.utils import new_uid
 from whenever import PlainDateTime
 
@@ -19,13 +20,23 @@ def parse_backup_timestamp(name: str) -> PlainDateTime | None:
         PlainDateTime | None: The timestamp, or None when the name has none or it is not a real
             calendar date and time, such as a month of 13.
     """
-    match = TIMESTAMP_REGEX.search(name)
-    if match is None:
+    # The last run, because the set name comes first and may itself contain a timestamp-shaped run
+    matches = TIMESTAMP_REGEX.findall(name)
+    if not matches:
         return None
+    raw = matches[-1]
     try:
-        return PlainDateTime.parse(match.group(0), pattern=DEFAULT_DATE_PATTERN)
-    except ValueError:
+        parsed = PlainDateTime.parse(raw, pattern=DEFAULT_DATE_PATTERN)
+    except ValueError as e:
+        logger.debug(
+            f"Timestamp '{raw}' in '{name}' is not a real YYYYMMDDTHHMMSS date and time: {e}"
+        )
         return None
+    # whenever reads a leap second (60) as 59, so a round trip catches what parse lets through
+    if parsed.format(DEFAULT_DATE_PATTERN) != raw:
+        logger.debug(f"Timestamp '{raw}' in '{name}' is not a real YYYYMMDDTHHMMSS date and time")
+        return None
+    return parsed
 
 
 def is_backup_filename(name: str) -> bool:

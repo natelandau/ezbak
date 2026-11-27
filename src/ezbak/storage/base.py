@@ -80,7 +80,9 @@ class StorageBackend(ABC):
             if is_sidecar(name):
                 continue
             if not is_backup_filename(name):
-                logger.warning(f"Skipping '{name}': the name has no valid backup timestamp")
+                logger.warning(
+                    f"Skipping '{name}': the name has no valid YYYYMMDDTHHMMSS timestamp"
+                )
                 continue
             backups.append(name)
         return backups

@@ -38,7 +38,7 @@ class Backup:
 
         plain_dt = parse_backup_timestamp(name)
         if plain_dt is None:
-            msg = f"Could not parse a timestamp from backup name '{name}'"
+            msg = f"Backup name '{name}' has no valid YYYYMMDDTHHMMSS timestamp"
             logger.warning(msg)
             raise ValueError(msg)
         self.timestamp = plain_dt.format(DEFAULT_DATE_PATTERN)
