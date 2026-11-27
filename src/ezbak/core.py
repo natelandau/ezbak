@@ -873,16 +873,6 @@ class EZBak:
         """
         return self._backend_for_type(backup.storage_type)
 
-    def _delete_backup(self, backup: Backup) -> None:
-        """Delete a backup file from the storage locations.
-
-        Remove a specific backup file from its storage location, whether local filesystem or cloud storage. Use this to clean up individual backup files during pruning operations or manual cleanup.
-
-        Args:
-            backup (Backup): The backup object containing information about the file to delete.
-        """
-        self._backend_for(backup).delete(backup)
-
     def _do_restore(self, backup: Backup, destination: Path, *, clean: bool) -> bool:
         """Restore a backup archive into the destination directory.
 
