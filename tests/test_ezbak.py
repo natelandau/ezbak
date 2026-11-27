@@ -1,6 +1,8 @@
 """Test ezbak."""
 
 import hashlib
+import os
+import shutil
 import tarfile
 from collections.abc import Callable
 from datetime import datetime
@@ -12,6 +14,7 @@ import pytest
 import time_machine
 
 from ezbak import ezbak
+from ezbak.backup import Backup
 from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome
 from ezbak.core import EZBak
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
@@ -605,6 +608,198 @@ def test_delete_source_after_backup(tmp_path, filesystem):
     assert src_dir.is_dir()
     assert not any(src_dir.iterdir())
     assert not test_file.exists()
+
+
+def _swap_for_symlink(path: Path, target: Path) -> None:
+    """Replace the directory at `path` with a symlink to `target`, as a hostile app would."""
+    shutil.rmtree(path)
+    path.symlink_to(target)
+
+
+@pytest.mark.parametrize("swapped", ["source", "parent"])
+def test_create_backup_refuses_a_source_path_swapped_for_a_symlink(tmp_path, swapped):
+    """Verify a symlink planted at a source path or its parent is refused, not followed.
+
+    The application owns the directory around its source, so it can replace either one with a
+    link to a directory only ezbak can reach. Following it would archive that directory and,
+    with delete_source_after_backup, empty it.
+    """
+    # Given an app built while the source was a real directory
+    source = tmp_path / "volume" / "app" / "uploads"
+    source.mkdir(parents=True)
+    (source / "legit.txt").write_text("legit")
+    outside = tmp_path / "outside"
+    (outside / "uploads").mkdir(parents=True)
+    markers = [outside / "marker.txt", outside / "uploads" / "marker.txt"]
+    for marker in markers:
+        marker.write_text("secret")
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    app = ezbak(
+        name="test",
+        source_paths=[source],
+        storage_paths=[storage],
+        delete_source_after_backup=True,
+    )
+
+    # When the source, or its parent, is then swapped for a symlink to the outside directory
+    _swap_for_symlink(source if swapped == "source" else source.parent, outside)
+
+    # Then the backup is refused, nothing is archived, and nothing outside is deleted
+    with pytest.raises(ConfigurationError, match="symlink"):
+        app.create_backup()
+    assert not list(storage.iterdir())
+    assert all(marker.read_text() == "secret" for marker in markers)
+
+
+def test_create_backup_skips_a_file_swapped_for_a_symlink_mid_walk(
+    filesystem, tmp_path, monkeypatch
+):
+    """Verify a file replaced by a symlink after it is listed is skipped, not read through.
+
+    A path-based walk checks an entry's type and then reopens it by name, so an application
+    that swaps the file in between gets the link target's bytes archived under its own name.
+    """
+    # Given a source file that is swapped for a symlink to a secret just before it is opened
+    src_dir, dest1, _ = filesystem
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP-SECRET")
+    victim = src_dir / "foo.txt"
+    victim.write_text("plain")
+    real_open = os.open
+
+    def swap_then_open(
+        path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        if path == victim.name and dir_fd is not None and not victim.is_symlink():
+            victim.unlink()
+            victim.symlink_to(secret)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # When backing up
+    backups = app.create_backup()
+    monkeypatch.undo()
+
+    # Then the swapped file is left out and the secret never reaches the archive
+    assert victim.is_symlink()
+    assert backups[0].path is not None
+    with tarfile.open(backups[0].path) as tar:
+        assert "src/foo.txt" not in tar.getnames()
+        contents = [
+            extracted.read()
+            for member in tar.getmembers()
+            if (extracted := tar.extractfile(member)) is not None
+        ]
+    assert all(b"TOP-SECRET" not in content for content in contents)
+
+
+requires_permission_checks = pytest.mark.skipif(
+    os.geteuid() == 0, reason="root bypasses file permission checks"
+)
+
+
+@requires_permission_checks
+def test_create_backup_never_opens_a_file_the_filters_exclude(filesystem):
+    """Verify an unreadable file that exclude_regex leaves out does not fail the backup."""
+    # Given a source holding an unreadable file that the exclude regex matches
+    src_dir, dest1, _ = filesystem
+    unreadable = src_dir / "secret.key"
+    unreadable.write_text("key")
+    unreadable.chmod(0)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], exclude_regex=r"\.key$")
+
+    # When backing up
+    try:
+        backups = app.create_backup()
+    finally:
+        unreadable.chmod(0o600)
+
+    # Then the backup succeeds without the excluded file
+    assert backups[0].path is not None
+    with tarfile.open(backups[0].path) as tar:
+        assert "src/foo.txt" in tar.getnames()
+        assert "src/secret.key" not in tar.getnames()
+
+
+@requires_permission_checks
+def test_create_backup_reaches_a_source_through_a_search_only_parent(tmp_path):
+    """Verify a parent directory needs only execute permission, as a path lookup does."""
+    # Given a source whose parent directory grants search but not read permission
+    parent = tmp_path / "parent"
+    source = parent / "data"
+    source.mkdir(parents=True)
+    (source / "file.txt").write_text("data")
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    app = ezbak(name="test", source_paths=[source], storage_paths=[storage])
+    parent.chmod(0o311)
+
+    # When backing up
+    try:
+        backups = app.create_backup()
+    finally:
+        parent.chmod(0o755)
+
+    # Then the source is archived
+    assert backups[0].path is not None
+    with tarfile.open(backups[0].path) as tar:
+        assert "data/file.txt" in tar.getnames()
+
+
+def test_create_backup_keeps_fifos_and_hardlinks(filesystem):
+    """Verify the walk stores a FIFO as a FIFO and a second hard link as a link member."""
+    # Given a source holding a FIFO and two hard links to one file
+    src_dir, dest1, _ = filesystem
+    os.mkfifo(src_dir / "pipe")
+    (src_dir / "dir1" / "foo.txt").write_text("shared")
+    (src_dir / "zlink.txt").hardlink_to(src_dir / "dir1" / "foo.txt")
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # When backing up
+    backups = app.create_backup()
+
+    # Then each keeps its type, and the link restores the original content
+    assert backups[0].path is not None
+    with tarfile.open(backups[0].path) as tar:
+        assert tar.getmember("src/pipe").isfifo()
+        link = tar.getmember("src/zlink.txt")
+        assert link.islnk()
+        assert link.linkname == "src/dir1/foo.txt"
+
+
+def test_delete_source_after_backup_keeps_a_file_replaced_after_archiving(
+    tmp_path, filesystem, mocker
+):
+    """Verify a file source swapped for another file during the run is not deleted.
+
+    Deletion must remove only what was archived, so a replacement is left for the next run.
+    """
+    # Given a file source that is replaced while the archive is being written to storage
+    _, dest1, _ = filesystem
+    source = tmp_path / "data.txt"
+    source.write_text("archived")
+    app = ezbak(
+        name="test", source_paths=[source], storage_paths=[dest1], delete_source_after_backup=True
+    )
+    write_to_backends = app._write_to_backends
+
+    def replace_then_write(
+        tmp_backup: Path, checksum: str | None
+    ) -> tuple[list[Backup], list[str]]:
+        source.unlink()
+        source.write_text("replacement")
+        return write_to_backends(tmp_backup, checksum)
+
+    mocker.patch.object(app, "_write_to_backends", side_effect=replace_then_write)
+
+    # When backing up
+    app.create_backup()
+
+    # Then the replacement survives
+    assert source.read_text() == "replacement"
 
 
 def test_create_writes_local_sidecar(filesystem) -> None:

@@ -41,6 +41,12 @@ A few things to know before the tables:
 files and directories to archive. To pass multiple sources, repeat `--source` on
 the command line, or give a comma-separated string in the environment variable.
 
+A source path must not contain a symlink in any component, including the
+source itself. If it does, the backup fails with an error that names the
+symlink. Give the real path instead. ezbak refuses symlinks here because the
+application that owns the data can replace a directory with a link to files that
+only ezbak can read.
+
 `sqlite_paths` names the SQLite databases to snapshot through the online-backup
 API of SQLite instead of copying them as files. A database that a service holds
 open is then archived consistently. Each entry is a literal path or a glob

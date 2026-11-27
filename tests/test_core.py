@@ -491,21 +491,21 @@ def test_create_backup_does_not_snapshot_a_filtered_database(data_tree, make_sql
     assert _archive_file_members(dest) == ["keep.txt"]
 
 
-def test_tar_add_filter_excludes_a_live_database_under_a_root_source(tmp_path):
+def test_archive_name_filter_excludes_a_live_database_under_a_root_source(tmp_path):
     """Verify the exclusion set is built without a leading slash for a source at the root."""
     # Given a backup whose exclusion set names a database directly under a root source path
     dest = tmp_path / "dest"
     dest.mkdir()
     backup = ezbak(name="test", source_paths=[tmp_path], storage_paths=[dest])
 
-    # When building the add-filter for that source without stripping
-    add_filter = backup._tar_add_filter(
+    # When building the archive-name filter for that source without stripping
+    keep_file = backup._archive_name_filter(
         Path("/"), strip=False, excluded_paths=frozenset({Path("/app.db")})
     )
 
     # Then the live database is dropped under its bare name and other files are kept
-    assert add_filter(tarfile.TarInfo("app.db")) is None
-    assert add_filter(tarfile.TarInfo("notes.txt")) is not None
+    assert not keep_file("app.db")
+    assert keep_file("notes.txt")
 
 
 def test_restore_clears_a_stale_wal_at_the_destination(data_tree, make_sqlite_app, restore_dir):

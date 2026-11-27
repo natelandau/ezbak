@@ -438,23 +438,30 @@ def test_snapshot_databases_skips_a_symlinked_path(tmp_path):
     assert not (tmp_path / "snaps").exists()
 
 
-def test_snapshot_databases_skips_a_database_behind_a_symlinked_directory(tmp_path):
-    """Verify a symlinked parent is skipped too, since the walk never follows one.
+@pytest.mark.parametrize(
+    ("link", "database"),
+    [
+        ("data/current", "data/current/app.db"),
+        ("data", "data/app.db"),
+    ],
+    ids=["inside-source", "source-itself"],
+)
+def test_snapshot_databases_skips_a_database_behind_a_symlinked_directory(tmp_path, link, database):
+    """Verify a database reached through any symlinked directory is skipped.
 
-    Checking only the final component would archive the database at a position the live tree
-    never held, holding content from outside every source path.
+    The archive walk never follows a symlink and a source path containing one is refused, so
+    snapshotting through it would archive content from outside every source path.
     """
-    # Given a database reached through a symlinked directory inside the source
+    # Given a database reached through a symlinked directory
     outside = tmp_path / "releases" / "v2"
     make_db(outside / "app.db", rows=3)
-    source = tmp_path / "data"
-    source.mkdir()
-    (source / "current").symlink_to(outside)
+    (tmp_path / link).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / link).symlink_to(outside)
 
     # When snapshotting it
     result = snapshot_databases(
-        [source / "current" / "app.db"],
-        source_paths=[source],
+        [tmp_path / database],
+        source_paths=[tmp_path / "data"],
         strip=True,
         dest_dir=tmp_path / "snaps",
     )
@@ -462,27 +469,6 @@ def test_snapshot_databases_skips_a_database_behind_a_symlinked_directory(tmp_pa
     # Then nothing is copied out of the linked directory
     assert result == []
     assert not (tmp_path / "snaps").exists()
-
-
-def test_snapshot_databases_follows_a_symlinked_source_path(tmp_path):
-    """Verify a symlinked source path is still walked, matching how the archive treats it."""
-    # Given a source path that is itself a symlink to the directory holding the database
-    real = tmp_path / "real"
-    make_db(real / "app.db", rows=4)
-    source = tmp_path / "data"
-    source.symlink_to(real)
-
-    # When snapshotting a database directly inside it
-    result = snapshot_databases(
-        [source / "app.db"],
-        source_paths=[source],
-        strip=True,
-        dest_dir=tmp_path / "snaps",
-    )
-
-    # Then the database is snapshotted as usual
-    assert [s.arcname for s in result] == ["app.db"]
-    assert row_count(result[0].snapshot) == 4
 
 
 @pytest.mark.parametrize(
