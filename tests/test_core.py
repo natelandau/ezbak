@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
+from whenever import TimeZoneNotFoundError
 
 from ezbak.config import BackupConfig
 from ezbak.constants import RestoreOutcome, StorageType
@@ -94,8 +95,26 @@ def small_fsync_interval(mocker: MockerFixture) -> MagicMock:
 
 @pytest.mark.parametrize(
     "foreign_name",
-    ["giteasave-20260710T082850.tgz", "gitea-manual.tgz"],
-    ids=["shares-name-prefix", "no-timestamp"],
+    [
+        "giteasave-20260710T082850.tgz",
+        "gitea-manual.tgz",
+        "gitea-20251399T000000.tgz",
+        "gitea-20250230T120000.tgz",
+        "gitea-20250101T250000.tgz",
+        "gitea-00000000T000000.tgz",
+        "gitea-20250101T235960.tgz",
+        "gitea-\u0662\u0660\u0662\u0665\u0660\u0661\u0660\u0661T\u0661\u0662\u0660\u0660\u0660\u0660.tgz",
+    ],
+    ids=[
+        "shares-name-prefix",
+        "no-timestamp",
+        "month-13",
+        "february-30",
+        "hour-25",
+        "year-0",
+        "second-60",
+        "arabic-indic-digits",
+    ],
 )
 def test_index_skips_files_that_are_not_backups_of_the_set(tmp_path, foreign_name):
     """Verify a file that is not one of the set's backups never becomes a backup or breaks indexing."""
@@ -111,6 +130,37 @@ def test_index_skips_files_that_are_not_backups_of_the_set(tmp_path, foreign_nam
     latest = app.get_latest_backup()
     assert latest is not None
     assert latest.name == "gitea-20260709T131941.tgz"
+
+
+def test_index_reads_the_timestamp_after_a_timestamp_shaped_set_name(tmp_path):
+    """Verify a set name holding a timestamp-shaped run does not hide or misorder its backups."""
+    # Given a set whose name itself contains a timestamp-shaped run
+    set_name = "nightly-99999999T999999"
+    older = f"{set_name}-20250101T000000.tgz"
+    newer = f"{set_name}-20260101T000000.tgz"
+    seed_backups(tmp_path, [older, newer])
+    app = ezbak(name=set_name, source_paths=[tmp_path], storage_paths=[tmp_path])
+
+    # When listing backups and selecting the latest
+    names = {b.name for b in app.list_backups()}
+    latest = app.get_latest_backup()
+
+    # Then both backups are indexed and the newer one is selected
+    assert names == {older, newer}
+    assert latest is not None
+    assert latest.name == newer
+
+
+def test_index_raises_for_an_unknown_timezone(tmp_path):
+    """Verify a misconfigured tz fails loudly instead of hiding every backup as foreign."""
+    # Given a valid backup and a timezone name that does not exist
+    seed_backups(tmp_path, ["gitea-20260709T131941.tgz"])
+    app = ezbak(name="gitea", source_paths=[tmp_path], storage_paths=[tmp_path], tz="Not/AZone")
+
+    # When listing backups
+    # Then the timezone error surfaces
+    with pytest.raises(TimeZoneNotFoundError):
+        app.list_backups()
 
 
 def test_backends_local_only_from_storage_paths(filesystem):

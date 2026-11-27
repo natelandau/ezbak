@@ -3,24 +3,55 @@
 Single source of truth for how backup filenames are composed and disambiguated, so the naming convention does not drift across the code that creates them.
 """
 
+from loguru import logger
 from nclutils.utils import new_uid
+from whenever import PlainDateTime
 
-from ezbak.constants import BACKUP_EXTENSION, TIMESTAMP_REGEX
+from ezbak.constants import BACKUP_EXTENSION, DEFAULT_DATE_PATTERN, TIMESTAMP_REGEX
+
+
+def parse_backup_timestamp(name: str) -> PlainDateTime | None:
+    """Read the timestamp from a backup filename, so a backup can be ordered and bucketed by time.
+
+    Args:
+        name (str): The filename or object key to read.
+
+    Returns:
+        PlainDateTime | None: The timestamp, or None when the name has none or it is not a real
+            calendar date and time, such as a month of 13.
+    """
+    # The last run, because the set name comes first and may itself contain a timestamp-shaped run
+    matches = TIMESTAMP_REGEX.findall(name)
+    if not matches:
+        return None
+    raw = matches[-1]
+    try:
+        parsed = PlainDateTime.parse(raw, pattern=DEFAULT_DATE_PATTERN)
+    except ValueError as e:
+        logger.debug(
+            f"Timestamp '{raw}' in '{name}' is not a real YYYYMMDDTHHMMSS date and time: {e}"
+        )
+        return None
+    # whenever reads a leap second (60) as 59, so a round trip catches what parse lets through
+    if parsed.format(DEFAULT_DATE_PATTERN) != raw:
+        logger.debug(f"Timestamp '{raw}' in '{name}' is not a real YYYYMMDDTHHMMSS date and time")
+        return None
+    return parsed
 
 
 def is_backup_filename(name: str) -> bool:
     """Report whether a filename carries a backup timestamp, so indexing can skip foreign files.
 
     A storage location can hold files that match a set's glob or prefix but were not written by
-    ezbak, such as a hand-named copy. Those have no timestamp to order or restore by.
+    ezbak, such as a hand-named copy. Those have no valid timestamp to order or restore by.
 
     Args:
         name (str): The filename or object key to check.
 
     Returns:
-        bool: True if the name contains a backup timestamp.
+        bool: True if the name contains a valid backup timestamp.
     """
-    return TIMESTAMP_REGEX.search(name) is not None
+    return parse_backup_timestamp(name) is not None
 
 
 def new_staging_filename() -> str:

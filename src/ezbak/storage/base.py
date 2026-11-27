@@ -66,7 +66,7 @@ class StorageBackend(ABC):
         """Keep only the discovered names that are backups this set can order and restore.
 
         Drop checksum sidecars, so a `.sha256` is never counted against retention, and skip
-        names with no backup timestamp, so a foreign file in a storage location cannot stop
+        names with no valid backup timestamp, so a foreign file in a storage location cannot stop
         every list, prune, and restore.
 
         Args:
@@ -80,7 +80,9 @@ class StorageBackend(ABC):
             if is_sidecar(name):
                 continue
             if not is_backup_filename(name):
-                logger.warning(f"Skipping '{name}': the name has no backup timestamp")
+                logger.warning(
+                    f"Skipping '{name}': the name has no valid YYYYMMDDTHHMMSS timestamp"
+                )
                 continue
             backups.append(name)
         return backups

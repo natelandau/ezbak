@@ -3,15 +3,14 @@
 from pathlib import Path
 
 from loguru import logger
-from whenever import SYSTEM_TZ, Instant, PlainDateTime, TimeZoneNotFoundError
+from whenever import SYSTEM_TZ, Instant, TimeZoneNotFoundError
 
 from ezbak.constants import (
     DEFAULT_DATE_FORMAT,
     DEFAULT_DATE_PATTERN,
-    TIMESTAMP_REGEX,
     StorageType,
 )
-from ezbak.naming import add_uid_suffix, build_backup_name
+from ezbak.naming import add_uid_suffix, build_backup_name, parse_backup_timestamp
 
 
 class Backup:
@@ -37,14 +36,13 @@ class Backup:
         # Full path to the backup file, used for local backups
         self.path = path
 
-        timestamp_match = TIMESTAMP_REGEX.search(name)
-        if timestamp_match is None:
-            msg = f"Could not parse a timestamp from backup name '{name}'"
+        plain_dt = parse_backup_timestamp(name)
+        if plain_dt is None:
+            msg = f"Backup name '{name}' has no valid YYYYMMDDTHHMMSS timestamp"
             logger.warning(msg)
             raise ValueError(msg)
-        self.timestamp = timestamp_match.group(0)
+        self.timestamp = plain_dt.format(DEFAULT_DATE_PATTERN)
 
-        plain_dt = PlainDateTime.parse(self.timestamp, pattern=DEFAULT_DATE_PATTERN)
         try:
             self.zoned_datetime = plain_dt.assume_tz(self.tz or SYSTEM_TZ)
         except TimeZoneNotFoundError as e:
