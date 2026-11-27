@@ -1,5 +1,7 @@
 ---
-# https://pre-commit.com
+# https://prek.j178.dev
+# `repo: builtin` hooks are specific to prek and do not run under pre-commit.
+minimum_prek_version: "0.5.12"
 default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit, manual]
 fail_fast: true
@@ -12,53 +14,42 @@ repos:
         stages:
           - pre-push
 
+  # Ruff covers the Python checks this repo also ships (eval, mock methods, logger.warn)
   - repo: "https://github.com/pre-commit/pygrep-hooks"
     rev: v1.10.0
     hooks:
-      - id: python-check-mock-methods
-      - id: python-no-eval
-      - id: python-no-log-warn
       - id: python-use-type-annotations
-      - id: rst-backticks
-      - id: rst-directive-colons
-      - id: rst-inline-touching-normal
       - id: text-unicode-replacement-char
 
-  - repo: "https://github.com/pre-commit/pre-commit-hooks"
-    rev: v6.0.0
+  # Ruff covers check-ast, check-builtin-literals, check-docstring-first, and debug-statements
+  - repo: builtin
     hooks:
       - id: check-added-large-files
-      - id: check-ast
-      - id: check-builtin-literals
       - id: check-case-conflict
-      - id: check-docstring-first
       - id: check-executables-have-shebangs
       - id: check-json
-        exclude: .devcontainer/|.vscode/
       - id: check-merge-conflict
       - id: check-shebang-scripts-are-executable
       - id: check-symlinks
       - id: check-toml
       - id: check-vcs-permalinks
-      - id: check-xml
       - id: check-yaml
-      - id: debug-statements
       - id: destroyed-symlinks
       - id: detect-private-key
       - id: fix-byte-order-marker
       - id: mixed-line-ending
+      # The release tooling regenerates CHANGELOG.md, so hooks must not rewrite it
       - id: trailing-whitespace
-        types: [python]
         args: [--markdown-linebreak-ext=md]
+        exclude: ^CHANGELOG\.md$
       - id: end-of-file-fixer
-        types: [python]
+        exclude: ^CHANGELOG\.md$
 
   - repo: "https://github.com/adrienverge/yamllint.git"
     rev: v1.38.0
     hooks:
       - id: yamllint
-        files: ^.*\.(yaml|yml)$
-        entry: yamllint --strict --config-file .yamllint.yml
+        args: [--strict]
 
   # Checks the commit message only; the tree is checked by the local typos hook
   - repo: "https://github.com/adhtruong/mirrors-typos"
@@ -82,6 +73,7 @@ repos:
 
   # These hooks call duty recipes, which wrap the slower gates in gate-cache, so a
   # hook, `duty lint`, and an agent share markers and skip work that already passed.
+  # Each `files` pattern lists the tool's config too, so a settings change reruns it.
   - repo: local
     hooks:
       - id: ruff-check
@@ -89,14 +81,14 @@ repos:
         entry: uv run duty ruff
         language: system
         pass_filenames: false
-        types: [python]
+        files: \.py$|^pyproject\.toml$
 
       - id: ruff-format
         name: ruff format
         entry: uv run duty format
         language: system
         pass_filenames: false
-        types: [python]
+        files: \.py$|^pyproject\.toml$
 
       - id: typos
         name: typos
@@ -126,6 +118,7 @@ repos:
           (?x)^(
           src/|
           tests/|
+          duties\.py|
           uv\.lock|
           pyproject\.toml
           )
@@ -138,5 +131,6 @@ repos:
         files: |
           (?x)^(
           docs/|
-          zensical\.toml
+          zensical\.toml|
+          uv\.lock
           )
