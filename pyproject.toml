@@ -45,6 +45,7 @@
         "pytest-cov>=7.1.0",
         "pytest-devtools>=1.3.0",
         "pytest-mock>=3.17.0",
+        "pytest-randomly>=5.1.0",
         "pytest-sugar>=1.1.1",
         "pytest>=9.2.0",
         "rich>=15.0.0",
@@ -69,26 +70,17 @@
     version_provider           = "uv"
 
 [tool.coverage.report] # https://coverage.readthedocs.io/en/latest/config.html#report
-    exclude_lines = [
-        'Run\(\).running',
-        'assert_never',
-        'def __repr__',
-        'except [\w\s\._]+ as .*:',
-        'if TYPE_CHECKING:',
-        'pragma: no cover',
-        'time\.sleep',
-    ]
-    fail_under = 20
-    precision = 1
+    exclude_also = ["assert_never", "def __repr__", "if TYPE_CHECKING:"]
+    fail_under   = 90
+    precision    = 1
     show_missing = true
     skip_covered = true
-    skip_empty = true
+    skip_empty   = true
 
 [tool.coverage.run]
-    branch       = true
-    command_line = "--module pytest"
-    data_file    = ".cache/.coverage"
-    source       = ["src"]
+    branch    = true
+    data_file = ".cache/.coverage"
+    source    = ["src"]
 
 [tool.coverage.xml]
     output = ".cache/coverage.xml"
@@ -99,19 +91,27 @@
 [tool.ty.terminal]
     error-on-warning = true
 
-[tool.pytest.ini_options]
-    addopts               = "--color=yes --doctest-modules --exitfirst --failed-first --strict-config --strict-markers --junitxml=.cache/pytest.xml"
-    cache_dir             = ".cache/pytest"
-    capsys_strip_tmp_path = true
-    columns               = 180
-    doctest_optionflags   = ["IGNORE_EXCEPTION_DETAIL", "NORMALIZE_WHITESPACE"]
-    filterwarnings        = ["error", "ignore::DeprecationWarning", "ignore::ResourceWarning"]
-    set_columns           = true
-    testpaths             = ["src", "tests"]
-    xfail_strict          = true
+[tool.pytest] # https://docs.pytest.org/en/stable/reference/reference.html#ini-options-ref
+    # --doctest-modules imports every module under src/, so a module that fails to import
+    # fails the suite even when no test touches it
+    addopts             = ["-ra", "--doctest-modules"]
+    cache_dir           = ".cache/pytest"
+    doctest_optionflags = ["IGNORE_EXCEPTION_DETAIL", "NORMALIZE_WHITESPACE"]
+    # Dump every thread's stack if a test hangs, since the container tests drive the
+    # scheduler thread and signal handlers. This only reports and never fails a test.
+    faulthandler_timeout = 60
+    filterwarnings = [
+        "error",
+        # EZBak removes its staging directory through the TemporaryDirectory finalizer by design
+        "ignore:Implicitly cleaning up <TemporaryDirectory:ResourceWarning",
+    ]
+    required_plugins = ["pytest-cov", "pytest-devtools", "pytest-mock", "pytest-randomly", "time-machine"]
+    strict           = true
+    testpaths        = ["src", "tests"]
 
-[tool.hatch.metadata]
-    allow-direct-references = true
+    # pytest-devtools: a fixed terminal width keeps rich output stable for capsys assertions
+    capsys_strip_tmp_path = true
+    set_columns           = true
 
 [tool.ruff] # https://github.com/charliermarsh/ruff
     exclude        = [".cache", ".dev", ".git", ".venv", "_build", "build", "dist", "tmp"]

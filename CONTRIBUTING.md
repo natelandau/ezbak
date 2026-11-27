@@ -34,6 +34,8 @@ We use [Duty](https://pawamoy.github.io/duty/) as our task runner. Common tasks:
 
 The lint and test tasks run through [gate-cache](https://github.com/natelandau/gate-cache). When a task passes, gate-cache records the pass for the current content of the files. If the same task runs again on the same content, gate-cache skips it. The prek hooks call the same tasks, so a commit after `duty lint` and `duty test` does not run these checks again. `duty test` with arguments, such as `duty test -k unit`, always runs. To run every check without the cache, set `GATE_CACHE_DISABLE=1`. To delete all records, run `gate-cache clear`. In CI, gate-cache always runs the checks.
 
+The tests run in a random order with [pytest-randomly](https://github.com/pytest-dev/pytest-randomly). This order finds tests that depend on the state that other tests leave. Each run prints its seed in a line such as `Using --randomly-seed=1553614239`. If a test fails in only some orders, run `duty test --randomly-seed=N` with that seed to repeat the order.
+
 ## Local Development Environment
 
 To set up a local development environment, run `duty dev-setup`. This will create a development environment in the `.dev` directory.

@@ -72,34 +72,34 @@ def mock_run(mocker):
 
 
 @pytest.fixture
-def mock_os_environ(mocker):
+def mock_os_environ(monkeypatch):
     """Override items from .env file."""
-    os.environ["EZBAK_AWS_ACCESS_KEY"] = ""
-    os.environ["EZBAK_AWS_S3_BUCKET_NAME"] = ""
-    os.environ["EZBAK_AWS_SECRET_KEY"] = ""
-    os.environ["EZBAK_COMPRESSION_LEVEL"] = str(DEFAULT_COMPRESSION_LEVEL)
-    os.environ["EZBAK_CRON"] = ""
-    os.environ["EZBAK_EXCLUDE_REGEX"] = ""
-    os.environ["EZBAK_INCLUDE_REGEX"] = ""
-    os.environ["EZBAK_LOG_FILE"] = ""
-    os.environ["EZBAK_LOG_LEVEL"] = ""
-    os.environ["EZBAK_LOG_PREFIX"] = ""
-    os.environ["EZBAK_SKIP_IF_NO_BACKUP"] = "false"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
-    os.environ["EZBAK_TZ"] = "Etc/UTC"
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "")
+    monkeypatch.setenv("EZBAK_AWS_S3_BUCKET_NAME", "")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "")
+    monkeypatch.setenv("EZBAK_COMPRESSION_LEVEL", str(DEFAULT_COMPRESSION_LEVEL))
+    monkeypatch.setenv("EZBAK_CRON", "")
+    monkeypatch.setenv("EZBAK_EXCLUDE_REGEX", "")
+    monkeypatch.setenv("EZBAK_INCLUDE_REGEX", "")
+    monkeypatch.setenv("EZBAK_LOG_FILE", "")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "")
+    monkeypatch.setenv("EZBAK_LOG_PREFIX", "")
+    monkeypatch.setenv("EZBAK_SKIP_IF_NO_BACKUP", "false")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "false")
+    monkeypatch.setenv("EZBAK_TZ", "Etc/UTC")
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_entrypoint_create_backup(filesystem, debug, capsys):
+def test_entrypoint_create_backup(filesystem, debug, capsys, monkeypatch):
     """Verify that a backup is created correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1) + "," + str(dest2)
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1) + "," + str(dest2))
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     entrypoint()
 
@@ -119,12 +119,12 @@ def test_entrypoint_create_backup_with_cron(mocker, monkeypatch, filesystem, deb
     # Given: Source and destination directories from fixture
     src_dir, dest1, dest2 = filesystem
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1) + "," + str(dest2)
-    os.environ["EZBAK_CRON"] = "*/1 * * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1) + "," + str(dest2))
+    monkeypatch.setenv("EZBAK_CRON", "*/1 * * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     entrypoint()
 
@@ -191,17 +191,19 @@ def _run_entrypoint_with_sigterm(mocker):
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_entrypoint_cron_backup_on_shutdown_takes_final_backup(filesystem, capsys, mocker):
+def test_entrypoint_cron_backup_on_shutdown_takes_final_backup(
+    filesystem, capsys, mocker, monkeypatch
+):
     """Verify an opted-in cron backup container takes a final backup on SIGTERM."""
     # Given a cron backup container that opted into backup-on-shutdown
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "*/1 * * * *"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "*/1 * * * *")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When a SIGTERM arrives while the scheduler runs
     _run_entrypoint_with_sigterm(mocker)
@@ -213,17 +215,17 @@ def test_entrypoint_cron_backup_on_shutdown_takes_final_backup(filesystem, capsy
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_entrypoint_cron_no_shutdown_backup_when_flag_off(filesystem, capsys, mocker):
+def test_entrypoint_cron_no_shutdown_backup_when_flag_off(filesystem, capsys, mocker, monkeypatch):
     """Verify a cron backup container takes no final backup on SIGTERM by default."""
     # Given a cron backup container that did not opt in
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "*/1 * * * *"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "*/1 * * * *")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "false")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When a SIGTERM arrives while the scheduler runs
     _run_entrypoint_with_sigterm(mocker)
@@ -235,19 +237,19 @@ def test_entrypoint_cron_no_shutdown_backup_when_flag_off(filesystem, capsys, mo
 
 
 @time_machine.travel(frozen_time, tick=False)
-def test_entrypoint_cron_no_shutdown_backup_without_signal(filesystem, capsys):
+def test_entrypoint_cron_no_shutdown_backup_without_signal(filesystem, capsys, monkeypatch):
     """Verify no final backup runs when the loop ends without a shutdown signal."""
     # Given an opted-in cron backup container. The module-wide mock_run fixture leaves the
     # scheduler reporting not-running, so the loop exits on its own with no signal
     # delivered and the shutdown event never set.
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "*/1 * * * *"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "*/1 * * * *")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     entrypoint()
 
@@ -257,16 +259,16 @@ def test_entrypoint_cron_no_shutdown_backup_without_signal(filesystem, capsys):
     assert not Path(dest1 / f"test-{frozen_time_str}.tgz").exists()
 
 
-def test_entrypoint_cron_sigusr1_triggers_a_run(filesystem, mocker):
+def test_entrypoint_cron_sigusr1_triggers_a_run(filesystem, mocker, monkeypatch):
     """Verify SIGUSR1 forces an immediate run in a cron container."""
     # Given a cron backup container
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
 
@@ -277,18 +279,18 @@ def test_entrypoint_cron_sigusr1_triggers_a_run(filesystem, mocker):
     trigger_now.assert_called_once_with(scheduler, Action.BACKUP)
 
 
-def test_entrypoint_cron_no_run_without_sigusr1(filesystem, mocker):
+def test_entrypoint_cron_no_run_without_sigusr1(filesystem, mocker, monkeypatch):
     """Verify a cron container forces no run when SIGUSR1 never arrives."""
     # Given a cron backup container whose loop actually runs (scheduler.running stays
     # True, unlike the module-wide mock_run fixture, so the run_now_event check inside the
     # loop body genuinely executes) and only SIGTERM is ever delivered
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
 
@@ -299,16 +301,16 @@ def test_entrypoint_cron_no_run_without_sigusr1(filesystem, mocker):
     trigger_now.assert_not_called()
 
 
-def test_entrypoint_cron_sigusr1_triggers_one_run_per_signal(filesystem, mocker):
+def test_entrypoint_cron_sigusr1_triggers_one_run_per_signal(filesystem, mocker, monkeypatch):
     """Verify one SIGUSR1 forces exactly one run, not one on every later loop pass."""
     # Given a cron backup container
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
 
@@ -319,16 +321,18 @@ def test_entrypoint_cron_sigusr1_triggers_one_run_per_signal(filesystem, mocker)
     trigger_now.assert_called_once_with(scheduler, Action.BACKUP)
 
 
-def test_entrypoint_cron_sigusr1_lost_to_shutdown_is_reported(filesystem, mocker, capsys):
+def test_entrypoint_cron_sigusr1_lost_to_shutdown_is_reported(
+    filesystem, mocker, capsys, monkeypatch
+):
     """Verify a trigger dropped in favor of a simultaneous shutdown is logged."""
     # Given a cron backup container
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
 
@@ -340,16 +344,16 @@ def test_entrypoint_cron_sigusr1_lost_to_shutdown_is_reported(filesystem, mocker
     assert "pending trigger" in capsys.readouterr().err
 
 
-def test_entrypoint_one_shot_ignores_sigusr1(filesystem, capsys):
+def test_entrypoint_one_shot_ignores_sigusr1(filesystem, capsys, monkeypatch):
     """Verify a one-shot container ignores SIGUSR1 instead of being killed by it."""
     # Given a one-shot backup container whose pre-backup hook signals the container
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_PRE_BACKUP_HOOK"] = f"kill -USR1 {os.getpid()}"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_PRE_BACKUP_HOOK", f"kill -USR1 {os.getpid()}")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     previous_handler = signal.getsignal(signal.SIGUSR1)
     # Start from the POSIX default (terminate), which is what a container process has
@@ -368,20 +372,22 @@ def test_entrypoint_one_shot_ignores_sigusr1(filesystem, capsys):
     assert list(dest1.glob("*.tgz"))
 
 
-def test_entrypoint_cron_sigusr1_triggers_the_configured_action(filesystem, tmp_path, mocker):
+def test_entrypoint_cron_sigusr1_triggers_the_configured_action(
+    filesystem, tmp_path, mocker, monkeypatch
+):
     """Verify SIGUSR1 forces the container's own action, not always a backup."""
     # Given a cron restore container
     src_dir, dest1, _ = filesystem
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     trigger_now = mocker.patch("ezbak.container._trigger_now", autospec=True)
 
@@ -422,16 +428,16 @@ def test_log_skipped_run_reports_a_missed_run(capsys):
     assert "grace period" in output
 
 
-def test_entrypoint_cron_registers_the_skipped_run_listener(filesystem, mocker):
+def test_entrypoint_cron_registers_the_skipped_run_listener(filesystem, mocker, monkeypatch):
     """Verify the cron loop subscribes to the scheduler's skipped-run events."""
     # Given a cron backup container
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     scheduler = mocker.patch("ezbak.container.BackgroundScheduler").return_value
     scheduler.running = False
@@ -445,16 +451,16 @@ def test_entrypoint_cron_registers_the_skipped_run_listener(filesystem, mocker):
     )
 
 
-def test_entrypoint_cron_job_tolerates_a_late_start(filesystem, mocker):
+def test_entrypoint_cron_job_tolerates_a_late_start(filesystem, mocker, monkeypatch):
     """Verify the scheduled job is registered with a grace period for late starts."""
     # Given a cron backup container
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_CRON"] = "0 3 * * *"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_CRON", "0 3 * * *")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     scheduler = mocker.patch("ezbak.container.BackgroundScheduler").return_value
     scheduler.running = False
@@ -466,7 +472,7 @@ def test_entrypoint_cron_job_tolerates_a_late_start(filesystem, mocker):
     assert scheduler.add_job.call_args.kwargs["misfire_grace_time"] == MISFIRE_GRACE_PERIOD_SECONDS
 
 
-def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
+def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path, monkeypatch):
     """Verify that a backup is restored correctly."""
     # Given: Source and destination directories from fixture
     src_dir, dest1, _ = filesystem
@@ -477,12 +483,12 @@ def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     entrypoint()
 
@@ -494,18 +500,18 @@ def test_entrypoint_restore_backup(filesystem, debug, capsys, tmp_path):
     assert Path(restore_path / "src" / "baz.txt").exists()
 
 
-def test_entrypoint_backup_fails_when_destination_unusable(filesystem, capsys):
+def test_entrypoint_backup_fails_when_destination_unusable(filesystem, capsys, monkeypatch):
     """Verify the container exits non-zero and does not report success when a destination is unusable."""
     # Given an S3-only config with missing credentials
     src_dir, _, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = ""
-    os.environ["EZBAK_AWS_S3_BUCKET_NAME"] = "test-bucket"
-    os.environ["EZBAK_AWS_ACCESS_KEY"] = ""
-    os.environ["EZBAK_AWS_SECRET_KEY"] = ""
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "")
+    monkeypatch.setenv("EZBAK_AWS_S3_BUCKET_NAME", "test-bucket")
+    monkeypatch.setenv("EZBAK_AWS_ACCESS_KEY", "")
+    monkeypatch.setenv("EZBAK_AWS_SECRET_KEY", "")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When running the entrypoint, then it exits non-zero
     with pytest.raises(SystemExit) as exc_info:
@@ -517,15 +523,17 @@ def test_entrypoint_backup_fails_when_destination_unusable(filesystem, capsys):
     assert "Backup complete" not in output
 
 
-def test_entrypoint_backup_fails_when_archive_creation_fails(filesystem, capsys, mocker):
+def test_entrypoint_backup_fails_when_archive_creation_fails(
+    filesystem, capsys, mocker, monkeypatch
+):
     """Verify the container exits non-zero when the archive cannot be built."""
     # Given a valid local backup config
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # Given archive creation fails
     mocker.patch("ezbak.core.EZBak._create_tmp_backup_file", return_value=None)
@@ -538,12 +546,12 @@ def test_entrypoint_backup_fails_when_archive_creation_fails(filesystem, capsys,
     assert "Backup complete" not in output
 
 
-def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
+def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker, monkeypatch):
     """Verify retention still runs when a destination fails so backups don't accumulate."""
     # Given an app whose backup raises for a failed destination
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(name="test", source_paths=[src_dir], storage_paths=[dest1], _env_file=None)
     mocker.patch.object(app, "create_backup", side_effect=BackupFailedError(["dest1"]))
     prune_spy = mocker.patch.object(app, "prune_backups")
@@ -556,13 +564,13 @@ def test_do_backup_prunes_even_when_backup_fails(filesystem, mocker):
     prune_spy.assert_called_once()
 
 
-def test_entrypoint_invalid_config_exits_cleanly(capsys):
+def test_entrypoint_invalid_config_exits_cleanly(capsys, monkeypatch):
     """Verify the container exits non-zero with a logged message when the config is invalid."""
     # Given a logger bound to this test's stderr and no backup name configured
     instantiate_logger(LogLevel.INFO)
-    os.environ["EZBAK_NAME"] = ""
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When running the entrypoint, then it exits non-zero
     with pytest.raises(SystemExit) as exc_info:
@@ -573,87 +581,87 @@ def test_entrypoint_invalid_config_exits_cleanly(capsys):
     assert "No backup name provided" in capsys.readouterr().err
 
 
-def test_backup_on_shutdown_defaults_off(filesystem):
+def test_backup_on_shutdown_defaults_off(filesystem, monkeypatch):
     """Verify backup_on_shutdown is off when EZBAK_BACKUP_ON_SHUTDOWN is unset."""
     # Given no backup-on-shutdown env var
     src_dir, dest1, _ = filesystem
     os.environ.pop("EZBAK_BACKUP_ON_SHUTDOWN", None)
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then the flag defaults off
     config = EnvConfig(_env_file=None)
     assert config.backup_on_shutdown is False
 
 
-def test_backup_on_shutdown_parses_true(filesystem):
+def test_backup_on_shutdown_parses_true(filesystem, monkeypatch):
     """Verify EZBAK_BACKUP_ON_SHUTDOWN=true populates the bool field."""
     # Given the flag set to a truthy string
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then the flag is enabled
     config = EnvConfig(_env_file=None)
     assert config.backup_on_shutdown is True
 
 
-def test_cron_jitter_defaults_to_60(filesystem):
+def test_cron_jitter_defaults_to_60(filesystem, monkeypatch):
     """Verify cron_jitter defaults to 60 seconds when EZBAK_CRON_JITTER is unset."""
     # Given no jitter env var
     src_dir, dest1, _ = filesystem
     os.environ.pop("EZBAK_CRON_JITTER", None)
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then jitter defaults to 60
     config = EnvConfig(_env_file=None)
     assert config.cron_jitter == 60
 
 
-def test_cron_jitter_parses_override(filesystem):
+def test_cron_jitter_parses_override(filesystem, monkeypatch):
     """Verify EZBAK_CRON_JITTER overrides the default jitter."""
     # Given an explicit jitter value
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_CRON_JITTER"] = "120"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_CRON_JITTER", "120")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then the override is used
     config = EnvConfig(_env_file=None)
     assert config.cron_jitter == 120
 
 
-def test_cron_jitter_rejects_negative(filesystem):
+def test_cron_jitter_rejects_negative(filesystem, monkeypatch):
     """Verify a negative EZBAK_CRON_JITTER is rejected at load time."""
     # Given a mistyped negative jitter value
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_CRON_JITTER"] = "-1"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_CRON_JITTER", "-1")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then validation fails
     with pytest.raises(ValidationError):
         EnvConfig(_env_file=None)
 
 
-def test_hooks_default_to_none(filesystem):
+def test_hooks_default_to_none(filesystem, monkeypatch):
     """Verify the four hook fields default to None and hook_timeout to 300."""
     # Given no hook env vars
     src_dir, dest1, _ = filesystem
@@ -665,11 +673,11 @@ def test_hooks_default_to_none(filesystem):
         "EZBAK_HOOK_TIMEOUT",
     ):
         os.environ.pop(var, None)
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then hooks are unset and timeout defaults to 300
     config = EnvConfig(_env_file=None)
@@ -680,64 +688,64 @@ def test_hooks_default_to_none(filesystem):
     assert config.hook_timeout == 300
 
 
-def test_pre_backup_hook_parses(filesystem):
+def test_pre_backup_hook_parses(filesystem, monkeypatch):
     """Verify EZBAK_PRE_BACKUP_HOOK populates the hook field verbatim."""
     # Given a pre-backup hook command
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_PRE_BACKUP_HOOK"] = 'sqlite3 /data/db ".backup /data/db.bak"'
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_PRE_BACKUP_HOOK", 'sqlite3 /data/db ".backup /data/db.bak"')
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then the command is stored unchanged
     config = EnvConfig(_env_file=None)
     assert config.pre_backup_hook == 'sqlite3 /data/db ".backup /data/db.bak"'
 
 
-def test_hook_timeout_parses_override(filesystem):
+def test_hook_timeout_parses_override(filesystem, monkeypatch):
     """Verify EZBAK_HOOK_TIMEOUT overrides the default timeout."""
     # Given an explicit timeout
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_HOOK_TIMEOUT"] = "30"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_HOOK_TIMEOUT", "30")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then the override is used
     config = EnvConfig(_env_file=None)
     assert config.hook_timeout == 30
 
 
-def test_hook_timeout_rejects_negative(filesystem):
+def test_hook_timeout_rejects_negative(filesystem, monkeypatch):
     """Verify a negative EZBAK_HOOK_TIMEOUT is rejected at load time."""
     # Given a mistyped negative timeout
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_HOOK_TIMEOUT"] = "-1"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_HOOK_TIMEOUT", "-1")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
 
     # When loading the container config, then validation fails
     with pytest.raises(ValidationError):
         EnvConfig(_env_file=None)
 
 
-def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
+def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker, monkeypatch):
     """Verify a cron BACKUP container takes a final backup on shutdown when opted in."""
     # Given a backup container that opted into backup-on-shutdown
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
@@ -750,16 +758,16 @@ def test_run_shutdown_backup_runs_when_opted_in(filesystem, mocker):
     mock_report.assert_called_once_with(app, config, do_backup, scheduler)
 
 
-def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
+def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker, monkeypatch):
     """Verify no final backup runs on shutdown when the flag is not set."""
     # Given a backup container that did not opt in
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "false"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "false")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
@@ -769,16 +777,16 @@ def test_run_shutdown_backup_skips_when_flag_off(filesystem, mocker):
     mock_report.assert_not_called()
 
 
-def test_run_shutdown_backup_skips_for_restore_action(filesystem, mocker):
+def test_run_shutdown_backup_skips_for_restore_action(filesystem, mocker, monkeypatch):
     """Verify a restore container never takes a backup on shutdown, even if opted in."""
     # Given a restore container with the flag set (a final backup would be meaningless)
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
@@ -788,17 +796,19 @@ def test_run_shutdown_backup_skips_for_restore_action(filesystem, mocker):
     mock_report.assert_not_called()
 
 
-def test_run_shutdown_backup_skips_while_a_run_is_in_flight(filesystem, mocker, capsys):
+def test_run_shutdown_backup_skips_while_a_run_is_in_flight(
+    filesystem, mocker, capsys, monkeypatch
+):
     """Verify the final backup is skipped when a run is already in progress."""
     # Given an opted-in backup container whose run lock is held by an in-flight run
     instantiate_logger(LogLevel.INFO)
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_BACKUP_ON_SHUTDOWN"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_BACKUP_ON_SHUTDOWN", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(_env_file=None)
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
     mock_report = mocker.patch("ezbak.container._run_and_report", autospec=True)
@@ -816,12 +826,12 @@ def test_run_shutdown_backup_skips_while_a_run_is_in_flight(filesystem, mocker, 
     assert "already running; skipping the final backup" in capsys.readouterr().err
 
 
-def test_run_scheduled_holds_the_run_lock_for_the_whole_run(filesystem, mocker):
+def test_run_scheduled_holds_the_run_lock_for_the_whole_run(filesystem, mocker, monkeypatch):
     """Verify a scheduled run holds the run lock so a shutdown backup cannot overlap it."""
     # Given a scheduled run and the container's run lock
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(name="test", source_paths=[src_dir], storage_paths=[dest1], _env_file=None)
     run_lock = threading.Lock()
     held: list[bool] = []
@@ -837,13 +847,13 @@ def test_run_scheduled_holds_the_run_lock_for_the_whole_run(filesystem, mocker):
     assert not run_lock.locked()
 
 
-def test_run_scheduled_skips_when_the_run_lock_is_held(filesystem, mocker, capsys):
+def test_run_scheduled_skips_when_the_run_lock_is_held(filesystem, mocker, capsys, monkeypatch):
     """Verify a scheduled run is dropped, not queued, while the shutdown backup holds the lock."""
     # Given the container's run lock already held by the shutdown backup
     instantiate_logger(LogLevel.INFO)
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(name="test", source_paths=[src_dir], storage_paths=[dest1], _env_file=None)
     run = mocker.MagicMock()
     run_lock = threading.Lock()
@@ -921,12 +931,12 @@ def test_ping_healthcheck_swallows_errors(mocker):
     _ping_healthcheck("https://hc-ping.com/abc-123", failed=False)
 
 
-def test_run_scheduled_pings_success(filesystem, mocker):
+def test_run_scheduled_pings_success(filesystem, mocker, monkeypatch):
     """Verify a scheduled run pings the success URL after the run completes cleanly."""
     # Given a scheduled run that succeeds
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(
         name="test",
         source_paths=[src_dir],
@@ -946,12 +956,12 @@ def test_run_scheduled_pings_success(filesystem, mocker):
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
 
 
-def test_run_scheduled_pings_failure(filesystem, mocker):
+def test_run_scheduled_pings_failure(filesystem, mocker, monkeypatch):
     """Verify a scheduled run pings the failure URL when the run raises."""
     # Given a scheduled run that fails
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(
         name="test",
         source_paths=[src_dir],
@@ -970,16 +980,16 @@ def test_run_scheduled_pings_failure(filesystem, mocker):
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
 
 
-def test_entrypoint_one_shot_backup_pings_success(filesystem, mocker):
+def test_entrypoint_one_shot_backup_pings_success(filesystem, mocker, monkeypatch):
     """Verify a one-shot backup pings the success URL so a post-stop task is observable."""
     # Given a one-shot backup container with a healthcheck URL
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_HEALTHCHECK_URL", "https://hc-ping.com/abc-123")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
 
     # When running the entrypoint
@@ -989,17 +999,17 @@ def test_entrypoint_one_shot_backup_pings_success(filesystem, mocker):
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
 
 
-def test_entrypoint_one_shot_backup_pings_failure(filesystem, mocker):
+def test_entrypoint_one_shot_backup_pings_failure(filesystem, mocker, monkeypatch):
     """Verify a failed one-shot backup pings the failure URL and still exits non-zero."""
     # Given a one-shot backup container whose pre-backup hook aborts the run
     src_dir, dest1, _ = filesystem
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "backup"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
-    os.environ["EZBAK_PRE_BACKUP_HOOK"] = "exit 1"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_HEALTHCHECK_URL", "https://hc-ping.com/abc-123")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
+    monkeypatch.setenv("EZBAK_PRE_BACKUP_HOOK", "exit 1")
     mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
 
     # When running the entrypoint
@@ -1011,7 +1021,7 @@ def test_entrypoint_one_shot_backup_pings_failure(filesystem, mocker):
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
 
 
-def test_entrypoint_one_shot_restore_pings_success(filesystem, mocker, tmp_path):
+def test_entrypoint_one_shot_restore_pings_success(filesystem, mocker, tmp_path, monkeypatch):
     """Verify a one-shot restore pings the success URL so a pre-start task is observable."""
     # Given a restorable backup and a one-shot restore container with a healthcheck URL
     src_dir, dest1, _ = filesystem
@@ -1019,13 +1029,13 @@ def test_entrypoint_one_shot_restore_pings_success(filesystem, mocker, tmp_path)
     restore_path = tmp_path / "restore"
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_HEALTHCHECK_URL", "https://hc-ping.com/abc-123")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
 
     # When running the entrypoint
@@ -1035,7 +1045,7 @@ def test_entrypoint_one_shot_restore_pings_success(filesystem, mocker, tmp_path)
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=False)
 
 
-def test_entrypoint_one_shot_restore_pings_failure(filesystem, mocker, tmp_path):
+def test_entrypoint_one_shot_restore_pings_failure(filesystem, mocker, tmp_path, monkeypatch):
     """Verify a failed one-shot restore pings the failure URL and still exits non-zero."""
     # Given a corrupt archive, so the restore fails rather than finding no backup
     src_dir, dest1, _ = filesystem
@@ -1043,13 +1053,13 @@ def test_entrypoint_one_shot_restore_pings_failure(filesystem, mocker, tmp_path)
     restore_path = tmp_path / "restore"
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_HEALTHCHECK_URL"] = "https://hc-ping.com/abc-123"
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_HEALTHCHECK_URL", "https://hc-ping.com/abc-123")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     mock_ping = mocker.patch("ezbak.container._ping_healthcheck", autospec=True)
 
     # When running the entrypoint
@@ -1061,7 +1071,9 @@ def test_entrypoint_one_shot_restore_pings_failure(filesystem, mocker, tmp_path)
     mock_ping.assert_called_once_with("https://hc-ping.com/abc-123", failed=True)
 
 
-def test_entrypoint_restore_fails_when_no_backup_for_date(filesystem, capsys, tmp_path):
+def test_entrypoint_restore_fails_when_no_backup_for_date(
+    filesystem, capsys, tmp_path, monkeypatch
+):
     """Verify the container exits non-zero when EZBAK_RESTORE_DATE matches no backup."""
     # Given a backup archive dated 2025 at the configured storage path
     src_dir, dest1, _ = filesystem
@@ -1072,14 +1084,14 @@ def test_entrypoint_restore_fails_when_no_backup_for_date(filesystem, capsys, tm
     restore_path = Path(tmp_path / "restore")
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
     # A restore date before the only backup on disk resolves to no match.
-    os.environ["EZBAK_RESTORE_DATE"] = "2024"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_RESTORE_DATE", "2024")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When running the entrypoint, then it exits non-zero instead of a silent success
     with pytest.raises(SystemExit) as exc_info:
@@ -1090,7 +1102,7 @@ def test_entrypoint_restore_fails_when_no_backup_for_date(filesystem, capsys, tm
     assert "Restore complete" not in output
 
 
-def test_entrypoint_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
+def test_entrypoint_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path, monkeypatch):
     """Verify EZBAK_SKIP_IF_NO_BACKUP exits cleanly when no backup exists yet."""
     # Given an empty storage path, a fresh deployment with no backup to restore
     src_dir, dest1, _ = filesystem
@@ -1098,14 +1110,14 @@ def test_entrypoint_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
     restore_path = tmp_path / "restore"
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_RESTORE_DATE"] = ""
-    os.environ["EZBAK_SKIP_IF_NO_BACKUP"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_RESTORE_DATE", "")
+    monkeypatch.setenv("EZBAK_SKIP_IF_NO_BACKUP", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When running the entrypoint, then it completes without exiting non-zero
     entrypoint()
@@ -1116,7 +1128,9 @@ def test_entrypoint_skip_if_no_backup_is_noop(filesystem, capsys, tmp_path):
     assert "Backup restored" not in output
 
 
-def test_entrypoint_skip_if_no_backup_still_fails_on_corrupt_archive(filesystem, tmp_path):
+def test_entrypoint_skip_if_no_backup_still_fails_on_corrupt_archive(
+    filesystem, tmp_path, monkeypatch
+):
     """Verify EZBAK_SKIP_IF_NO_BACKUP still fails a restore when the archive is corrupt."""
     # Given a corrupt backup archive, a real error rather than a missing backup
     src_dir, dest1, _ = filesystem
@@ -1126,14 +1140,14 @@ def test_entrypoint_skip_if_no_backup_still_fails_on_corrupt_archive(filesystem,
     restore_path = tmp_path / "restore"
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_RESTORE_DATE"] = ""
-    os.environ["EZBAK_SKIP_IF_NO_BACKUP"] = "true"
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_RESTORE_DATE", "")
+    monkeypatch.setenv("EZBAK_SKIP_IF_NO_BACKUP", "true")
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When running the entrypoint, then a real failure still exits non-zero
     with pytest.raises(SystemExit) as exc_info:
@@ -1141,7 +1155,7 @@ def test_entrypoint_skip_if_no_backup_still_fails_on_corrupt_archive(filesystem,
     assert exc_info.value.code == 1
 
 
-def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_path):
+def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_path, monkeypatch):
     """Verify the container exits non-zero when a restore cannot extract the archive."""
     # Given a corrupt backup archive at the configured storage path
     src_dir, dest1, _ = filesystem
@@ -1151,12 +1165,12 @@ def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_p
     restore_path = tmp_path / "restore"
     restore_path.mkdir(exist_ok=True)
 
-    os.environ["EZBAK_NAME"] = "test"
-    os.environ["EZBAK_ACTION"] = "restore"
-    os.environ["EZBAK_SOURCE_PATHS"] = str(src_dir)
-    os.environ["EZBAK_STORAGE_PATHS"] = str(dest1)
-    os.environ["EZBAK_RESTORE_PATH"] = str(restore_path)
-    os.environ["EZBAK_LOG_LEVEL"] = "TRACE"
+    monkeypatch.setenv("EZBAK_NAME", "test")
+    monkeypatch.setenv("EZBAK_ACTION", "restore")
+    monkeypatch.setenv("EZBAK_SOURCE_PATHS", str(src_dir))
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", str(dest1))
+    monkeypatch.setenv("EZBAK_RESTORE_PATH", str(restore_path))
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "TRACE")
 
     # When running the entrypoint, then it exits non-zero instead of a silent success
     with pytest.raises(SystemExit) as exc_info:
@@ -1166,12 +1180,12 @@ def test_entrypoint_restore_fails_when_archive_corrupt(filesystem, capsys, tmp_p
     assert "Backup restored" not in output
 
 
-def test_do_backup_runs_hooks_around_backup(filesystem, tmp_path):
+def test_do_backup_runs_hooks_around_backup(filesystem, tmp_path, monkeypatch):
     """Verify pre- and post-backup hooks both run around a successful backup."""
     # Given pre/post hooks that drop marker files and a real backup target
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     pre = tmp_path / "pre"
     post = tmp_path / "post"
     config = EnvConfig(
@@ -1192,12 +1206,12 @@ def test_do_backup_runs_hooks_around_backup(filesystem, tmp_path):
     assert list(dest1.glob("*.tgz"))
 
 
-def test_do_backup_pre_hook_failure_skips_backup(filesystem, mocker):
+def test_do_backup_pre_hook_failure_skips_backup(filesystem, mocker, monkeypatch):
     """Verify a failing pre-backup hook aborts before create_backup runs."""
     # Given a pre-backup hook that exits non-zero
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(
         name="test",
         source_paths=[src_dir],
@@ -1213,12 +1227,12 @@ def test_do_backup_pre_hook_failure_skips_backup(filesystem, mocker):
     create_spy.assert_not_called()
 
 
-def test_do_backup_post_hook_failure_keeps_backup(filesystem):
+def test_do_backup_post_hook_failure_keeps_backup(filesystem, monkeypatch):
     """Verify a failing post-backup hook fails the run but keeps the stored backup."""
     # Given a post-backup hook that exits non-zero and a real backup target
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(
         name="test",
         source_paths=[src_dir],
@@ -1233,12 +1247,12 @@ def test_do_backup_post_hook_failure_keeps_backup(filesystem):
     assert list(dest1.glob("*.tgz"))
 
 
-def test_do_restore_pre_hook_failure_skips_restore(filesystem, mocker):
+def test_do_restore_pre_hook_failure_skips_restore(filesystem, mocker, monkeypatch):
     """Verify a failing pre-restore hook aborts before restore runs."""
     # Given a pre-restore hook that exits non-zero
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     config = EnvConfig(
         name="test",
         source_paths=[src_dir],
@@ -1254,12 +1268,12 @@ def test_do_restore_pre_hook_failure_skips_restore(filesystem, mocker):
     restore_spy.assert_not_called()
 
 
-def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, mocker):
+def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, mocker, monkeypatch):
     """Verify the post-restore hook runs after an actual restore."""
     # Given a restore that succeeds and a post-restore marker hook
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.RESTORED)
     marker = tmp_path / "post_restore"
     config = EnvConfig(
@@ -1275,12 +1289,12 @@ def test_do_restore_post_hook_runs_on_successful_restore(filesystem, tmp_path, m
     assert marker.exists()
 
 
-def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
+def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker, monkeypatch):
     """Verify the post-restore hook is skipped when no backup was restored."""
     # Given a skip_if_no_backup no-op (restore_backup returns NO_BACKUP)
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], skip_if_no_backup=True)
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.NO_BACKUP)
     marker = tmp_path / "post_restore"
     config = EnvConfig(
@@ -1297,12 +1311,12 @@ def test_do_restore_post_hook_skipped_on_noop(filesystem, tmp_path, mocker):
     assert not marker.exists()
 
 
-def test_do_restore_post_hook_skipped_on_populated(filesystem, tmp_path, mocker):
+def test_do_restore_post_hook_skipped_on_populated(filesystem, tmp_path, mocker, monkeypatch):
     """Verify the post-restore hook does not run when the target was already populated."""
     # Given a restore that skips because the target already holds data
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1], skip_if_no_backup=True)
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
     mocker.patch.object(app, "restore_backup", return_value=RestoreOutcome.SKIPPED_POPULATED)
     marker = tmp_path / "post_restore"
     config = EnvConfig(
@@ -1319,12 +1333,12 @@ def test_do_restore_post_hook_skipped_on_populated(filesystem, tmp_path, mocker)
     assert not marker.exists()
 
 
-def test_log_configured_hooks_logs_active_hook_at_info(filesystem, capsys):
+def test_log_configured_hooks_logs_active_hook_at_info(filesystem, capsys, monkeypatch):
     """Verify a configured hook matching the action is announced at INFO on boot."""
     # Given a backup container with a pre-backup hook configured
     instantiate_logger(LogLevel.INFO)
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
-    os.environ["EZBAK_ACTION"] = "backup"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
     src_dir, dest1, _ = filesystem
     config = EnvConfig(
         name="test",
@@ -1344,12 +1358,12 @@ def test_log_configured_hooks_logs_active_hook_at_info(filesystem, capsys):
     assert "pre-backup hook configured (30s timeout): echo hi" in output
 
 
-def test_log_configured_hooks_warns_on_action_mismatch(filesystem, capsys):
+def test_log_configured_hooks_warns_on_action_mismatch(filesystem, capsys, monkeypatch):
     """Verify a hook configured for the other action is flagged as never running."""
     # Given a backup container that mistakenly configured a restore hook
     instantiate_logger(LogLevel.INFO)
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
-    os.environ["EZBAK_ACTION"] = "backup"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
     src_dir, dest1, _ = filesystem
     config = EnvConfig(
         name="test",
@@ -1368,12 +1382,12 @@ def test_log_configured_hooks_warns_on_action_mismatch(filesystem, capsys):
     assert "pre-restore hook is configured but EZBAK_ACTION is 'backup'" in output
 
 
-def test_log_configured_hooks_silent_when_no_hooks(filesystem, capsys):
+def test_log_configured_hooks_silent_when_no_hooks(filesystem, capsys, monkeypatch):
     """Verify no hook lines are logged when no hooks are configured."""
     # Given a container with no hooks configured
     instantiate_logger(LogLevel.INFO)
-    os.environ["EZBAK_LOG_LEVEL"] = "INFO"
-    os.environ["EZBAK_ACTION"] = "backup"
+    monkeypatch.setenv("EZBAK_LOG_LEVEL", "INFO")
+    monkeypatch.setenv("EZBAK_ACTION", "backup")
     src_dir, dest1, _ = filesystem
     config = EnvConfig(
         name="test",
