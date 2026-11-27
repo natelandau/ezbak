@@ -113,7 +113,8 @@
         # EZBak removes its staging directory through the TemporaryDirectory finalizer by design
         "ignore:Implicitly cleaning up <TemporaryDirectory:ResourceWarning",
     ]
-    required_plugins = ["pytest-cov", "pytest-devtools", "pytest-mock", "pytest-randomly", "time-machine"]
+    # pytest-randomly is left out so `-p no:randomly` can turn off random order while debugging
+    required_plugins = ["pytest-cov", "pytest-devtools", "pytest-mock", "time-machine"]
     strict           = true
     testpaths        = ["src", "tests"]
 
