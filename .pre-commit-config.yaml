@@ -80,8 +80,8 @@ repos:
     hooks:
       - id: gitleaks
 
-  # These hooks call duty recipes, which wrap each gate in gate-cache, so a hook,
-  # `duty lint`, and an agent share markers and skip work that already passed.
+  # These hooks call duty recipes, which wrap the slower gates in gate-cache, so a
+  # hook, `duty lint`, and an agent share markers and skip work that already passed.
   - repo: local
     hooks:
       - id: ruff-check
@@ -131,7 +131,7 @@ repos:
 
       - id: zensical-build
         name: zensical-build
-        entry: uv run gate-cache -- zensical build --strict
+        entry: uv run gate-cache --name docs --path docs/ --path zensical.toml --path uv.lock -- zensical build --strict
         language: system
         pass_filenames: false
         files: |

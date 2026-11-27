@@ -28,11 +28,13 @@ Backends follow the destinations: `storage_paths` gives local, `aws_s3_bucket_na
 
 ## Commands
 
-uv only.
+uv only. Run checks through the duty recipes, not the bare tools (`pytest`, `mypy`, `typos`). The recipes wrap gates in gate-cache, which skips a check already passed on the same content and shares that result with the git hooks.
 
-- Test: `uv run pytest` (runs with `--doctest-modules`, so every module and docstring example must import/run cleanly)
-- Lint/format: `uv run ruff check src/ tests/` and `uv run ruff format src/ tests/`
-- Types: `uv run mypy --config-file=pyproject.toml src/`
+- All lint (ruff, format check, mypy, typos, prek hooks): `uv run duty lint`. Single check: `uv run duty ruff|format|mypy|typos`.
+- Test: `uv run duty test`. Extra args run uncached: `uv run duty test -k unit`. Pytest runs with `--doctest-modules`, so every module and docstring example must import and run cleanly.
+- Format files: `uv run ruff format src/ tests/`.
+- A gate printing `already passed on ... skipping` passed. Do not rerun the tool to confirm.
+- Before adding or changing a gate in `duties.py` or `.pre-commit-config.yaml`, run `uv run gate-cache --skill` and follow it. A gate scoped with `paths=` must list every tracked file it reads.
 
 Tool config (ruff, mypy, pytest, coverage) lives in `pyproject.toml`.
 
