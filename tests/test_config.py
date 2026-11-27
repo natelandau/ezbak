@@ -170,6 +170,16 @@ def test_negative_keep_rule_rejected(field):
         BackupConfig(name="x", storage_paths=["/tmp"], **{field: -1})  # ruff:ignore[hardcoded-temp-file]
 
 
+@pytest.mark.parametrize("log_level", [None, "loud"])
+def test_unusable_log_level_rejected(log_level):
+    """Verify a missing or unknown log level fails validation instead of crashing logger setup."""
+    # Given an otherwise valid config with an unusable log level
+    # When constructing it
+    # Then validation fails
+    with pytest.raises(ValidationError):
+        BackupConfig(name="x", storage_paths=["/tmp"], log_level=log_level)  # ruff:ignore[hardcoded-temp-file]
+
+
 def test_use_checksums_defaults_true():
     """Verify use_checksums defaults to True."""
     # Given a minimal config with no explicit use_checksums

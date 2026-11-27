@@ -216,7 +216,7 @@ class BackupConfig(BaseModel):
 
     cron: str | None = None
     tz: str | None = None
-    log_level: Annotated[LogLevel | None, BeforeValidator(coerce_log_level)] = LogLevel.INFO
+    log_level: Annotated[LogLevel, BeforeValidator(coerce_log_level)] = LogLevel.INFO
     log_file: str | Path | None = None
     log_prefix: str | None = None
 
