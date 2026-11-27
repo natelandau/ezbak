@@ -190,7 +190,7 @@ ezbak drops a match, and the backup continues, in five cases:
 | A journal sibling (`-wal`, `-shm`, `-journal`) | The database it belongs to carries the consistent snapshot. |
 | Not a SQLite database | The normal source walk archives it as an ordinary file. |
 | Outside exactly one configured source path | ezbak cannot place the snapshot at a single position in the archive. |
-| A symlink, or reached through one | The source walk treats every other symlink the same way. |
+| A symlink, or a symlink anywhere in its path | ezbak never follows a symlink. |
 
 The first three log at `DEBUG`, visible with `-v` or `-vv`. The last two log at
 `WARNING`. A pattern that matches nothing logs a `WARNING` and continues:
@@ -298,9 +298,11 @@ WARNING | Skip backup of symlink: /data/linked.db
 
 The two skips are deliberate. A service can create an optional database later,
 and a failure there breaks the first backup after a fresh deploy. A symlink
-points outside the source paths, and ezbak archives what is inside them. That
-applies to a directory on the way to the database too, so ezbak skips
-`/data/current/app.db` when `current` is a link.
+can point outside the source paths, and ezbak archives only what is inside
+them. A directory on the way to the database counts too, so ezbak skips
+`/data/current/app.db` when `current` is a link. A symlink in the source path
+itself fails the backup before any snapshot. See
+[Identity and sources](../reference/configuration.md#identity-and-sources).
 
 A database that is present is a different case. If ezbak cannot copy it
 consistently, the archive is not the archive you asked for. ezbak writes nothing

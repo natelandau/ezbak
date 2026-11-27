@@ -455,30 +455,20 @@ def snapshot_database(source: Path, *, dest: Path) -> None:
     logger.debug(f"Snapshotted sqlite database '{source}'")
 
 
-def _reached_through_symlink(path: Path, *, source_paths: list[Path]) -> bool:
-    """Report whether a database is a symlink or sits behind one inside its source path.
+def _reached_through_symlink(path: Path) -> bool:
+    """Report whether a database is a symlink or sits behind one anywhere in its path.
 
-    The source walk refuses to follow symlinks, so a database reached through one would be
-    archived at a position the live tree never held, holding content from outside every source.
-    A symlinked source path is the operator's own choice and is walked as usual, so only the
-    directories below a source count.
+    The backup refuses a source path that contains a symlink and never follows one inside a
+    source, so a database reached through one would be archived holding content from outside
+    every source.
 
     Args:
         path (Path): The configured database path.
-        source_paths (list[Path]): The configured backup source paths.
 
     Returns:
-        bool: True if the path itself or an intervening directory is a symlink.
+        bool: True if the path itself or any parent directory is a symlink.
     """
-    if path.is_symlink():
-        return True
-
-    return any(
-        parent.is_symlink()
-        for source in containing_source_paths(path, source_paths=source_paths)
-        for parent in path.parents
-        if parent != source and parent.is_relative_to(source)
-    )
+    return any(candidate.is_symlink() for candidate in (path, *path.parents))
 
 
 @dataclass(frozen=True)
@@ -504,8 +494,8 @@ def snapshot_databases(
 
     A path that does not exist is warned about and skipped: a service may not have created an
     optional database yet, and failing there would break the first backup after a fresh deploy. A
-    path that is a symlink, or that is reached through one below its source path, is warned about
-    and skipped too, matching how the source walk treats symlinks. A path that exists but cannot
+    path that is a symlink, or that is reached through one, is warned about and skipped too,
+    matching how the source walk treats symlinks. A path that exists but cannot
     be snapshotted aborts, because the resulting archive would not be the archive the operator
     asked for.
 
@@ -525,7 +515,7 @@ def snapshot_databases(
         # Checked before exists(), which follows the link: a symlinked database would
         # otherwise be copied into the archive as a regular file holding content from
         # outside every configured source, which the rest of the backup refuses to do.
-        if _reached_through_symlink(path, source_paths=source_paths):
+        if _reached_through_symlink(path):
             logger.warning(f"Skip backup of symlink: {path}")
             continue
 

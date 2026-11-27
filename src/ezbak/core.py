@@ -6,12 +6,12 @@ import hashlib
 import os
 import shutil
 import tarfile
+from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
 from typing import IO, TYPE_CHECKING, Any, Literal, NoReturn, assert_never, cast
 
 from loguru import logger
-from nclutils.fs import clean_directory
 from nclutils.utils import new_uid
 from pydantic import ValidationError
 from whenever import SYSTEM_TZ, PlainDateTime
@@ -42,11 +42,17 @@ from ezbak.filters import (
     chown_files,
     compile_filter_patterns,
     passes_filters,
-    validate_source_paths,
     validate_storage_paths,
 )
 from ezbak.logging import instantiate_logger, log_validation_errors
 from ezbak.naming import new_staging_filename
+from ezbak.sources import (
+    SourceHandle,
+    add_directory_contents,
+    add_regular_file,
+    delete_source_contents,
+    open_source,
+)
 from ezbak.sqlite import (
     SQLITE_SIDECAR_SUFFIXES,
     SqliteSnapshot,
@@ -594,7 +600,9 @@ class EZBak:
         # dict.fromkeys builds a fresh list, so a caller cannot edit the manager's record.
         return self._unreadable_locations()
 
-    def _create_tmp_backup_file(self) -> tuple[Path, str | None] | None:
+    def _create_tmp_backup_file(
+        self, sources: list[SourceHandle]
+    ) -> tuple[Path, str | None] | None:
         """Create a temporary backup file in the temporary directory.
 
         Compress all configured source files and directories into a single tar.gz archive in the temporary directory. Use this to prepare backup data before distributing it to storage locations.
@@ -602,32 +610,28 @@ class EZBak:
         Any configured SQLite database is snapshotted first and the snapshot is archived in
         the live file's place, so the archive matches one taken of a quiesced tree.
 
+        Args:
+            sources (list[SourceHandle]): The configured sources, opened for this run.
+
         Returns:
             tuple[Path, str | None] | None: The temporary backup path and its
             SHA-256 hex digest (None when checksums are disabled), or None if
             archive creation failed.
-
-        Raises:
-            ConfigurationError: If no source paths are configured or a source path is neither a file nor a directory.
         """
-        if not self.settings.source_paths:
-            msg = "No source paths provided"
-            logger.error(msg)
-            raise ConfigurationError(msg)
-
         temp_tarfile = self.tmp_dir / new_staging_filename()
         logger.trace(f"Attempting to create tmp tarfile: {temp_tarfile}")
 
         # Staged inside tmp_dir, which lives as long as this EZBak instance, so a large
         # snapshot must not survive the run that created it.
         snapshot_dir = self.tmp_dir / f"sqlite-{new_uid(bits=24)}"
+        source_paths = [source.path for source in sources]
         try:
             # Expanded per run, not at configuration time: a cron sidecar lives for weeks, and
             # a set frozen at startup would silently miss every database created afterwards.
             # Inside the try so a pattern that the filesystem or interpreter rejects fails the
             # run through the normal path instead of escaping into the caller's scheduler.
             sqlite_paths = expand_sqlite_paths(
-                self.settings.sqlite_paths or [], source_paths=self.settings.source_paths or []
+                self.settings.sqlite_paths or [], source_paths=source_paths
             )
             # Every configured database is kept out of the walk, snapshotted or not, along
             # with its journal siblings: a sidecar has no meaning without the live database
@@ -637,12 +641,12 @@ class EZBak:
             )
             snapshots = snapshot_databases(
                 self._sqlite_paths_to_snapshot(sqlite_paths),
-                source_paths=self.settings.source_paths,
+                source_paths=source_paths,
                 strip=self.settings.strip_source_paths,
                 dest_dir=snapshot_dir,
             )
             checksum = self._write_archive(
-                temp_tarfile, snapshots=snapshots, excluded_paths=excluded_paths
+                temp_tarfile, sources=sources, snapshots=snapshots, excluded_paths=excluded_paths
             )
         except (tarfile.TarError, OSError, SqliteSnapshotError, ValueError) as e:
             # Fail the whole backup loudly rather than write a partial archive: an
@@ -691,6 +695,7 @@ class EZBak:
         self,
         destination: Path,
         *,
+        sources: list[SourceHandle],
         snapshots: list[SqliteSnapshot],
         excluded_paths: frozenset[Path],
     ) -> str | None:
@@ -705,6 +710,7 @@ class EZBak:
 
         Args:
             destination (Path): The archive file to write.
+            sources (list[SourceHandle]): The configured sources, opened for this run.
             snapshots (list[SqliteSnapshot]): Snapshots to add in place of their live databases.
             excluded_paths (frozenset[Path]): Live files a snapshot replaces, skipped in the walk.
 
@@ -721,7 +727,7 @@ class EZBak:
                 mode="w:gz",
                 compresslevel=self.settings.compression_level,
             ) as tar:
-                for source in self.settings.source_paths or []:
+                for source in sources:
                     self._archive_source(tar, source, excluded_paths=excluded_paths)
                 for snapshot in snapshots:
                     logger.trace("Add sqlite snapshot to tar: {}", snapshot.arcname)
@@ -729,22 +735,22 @@ class EZBak:
 
         return hasher.hexdigest() if hasher is not None else None
 
-    def _tar_add_filter(
+    def _archive_name_filter(
         self, source: Path, *, strip: bool, excluded_paths: frozenset[Path]
-    ) -> Callable[[tarfile.TarInfo], tarfile.TarInfo | None]:
-        """Build a tarfile add-filter that applies the include/exclude rules per entry.
+    ) -> Callable[[str], bool]:
+        """Build the predicate the source walk asks before archiving a non-directory entry.
 
-        tarfile hands the filter a TarInfo whose name is the archive path, so map it back
-        to the real source path and reuse the shared filter rules, keeping the regex
-        filters matching the full filesystem path exactly as before. Directories are
-        always kept so a non-matching parent never prunes the matching files beneath it
-        (tarfile stops recursing when the filter drops a directory).
+        The walk calls it with the entry's archive name before opening the entry, so an
+        excluded file is never opened or read: an unreadable file that the filters leave
+        out cannot fail the backup. The name is mapped back to the real source path so the
+        regex filters match the full filesystem path. Directories never reach the
+        predicate: the walk always descends into them so a non-matching parent never
+        prunes the matching files beneath it.
 
-        The filter runs once per archived entry, so the per-file costs are kept off the
-        hot loop: the regexes are compiled once here, the full filesystem path is a
-        single f-string on a precomputed prefix rather than Path parsing per entry, the
-        symlink check reads the TarInfo instead of an extra lstat per file, and trace
-        messages use loguru's deferred formatting.
+        The predicate runs once per file, so the per-file costs are kept off the hot loop:
+        the regexes are compiled once here, the full filesystem path is a single f-string
+        on a precomputed prefix rather than Path parsing per entry, and trace messages use
+        loguru's deferred formatting.
 
         Args:
             source (Path): The source directory the entries are walked from.
@@ -753,7 +759,7 @@ class EZBak:
                 must not be archived from the walk.
 
         Returns:
-            Callable[[tarfile.TarInfo], tarfile.TarInfo | None]: The tarfile add-filter.
+            Callable[[str], bool]: True for an archive name the walk should archive.
         """
         include_pattern, exclude_pattern = compile_filter_patterns(
             self.settings.include_regex, self.settings.exclude_regex
@@ -761,8 +767,8 @@ class EZBak:
         # With strip, archive names are relative to the source itself; without, they
         # start with the source's own directory name, so anchor one level higher.
         prefix = str(source if strip else source.parent)
-        # Translate once to archive names so the per-entry check is a set lookup on
-        # tarinfo.name rather than another path reconstruction. Mirror _archive_source's
+        # Translate once to archive names so the per-entry check is a set lookup on the
+        # archive name rather than another path reconstruction. Mirror _archive_source's
         # arcname construction exactly, empty prefix included, so a source at the
         # filesystem root cannot make the two disagree.
         name_prefix = "" if strip else source.name
@@ -774,75 +780,60 @@ class EZBak:
             if path != source and path.is_relative_to(source)
         }
 
-        def _add_filter(tarinfo: tarfile.TarInfo) -> tarfile.TarInfo | None:
-            if tarinfo.isdir():
-                logger.trace("Add to tar: {}", tarinfo.name)
-                return tarinfo
-            # Checked before the exclusion set so the symlink policy is reported the same
-            # way everywhere, rather than a symlinked database being dropped silently.
-            if tarinfo.issym():
-                logger.warning(f"Skip backup of symlink: {prefix}/{tarinfo.name}")
-                return None
-            if tarinfo.name in excluded_names:
-                logger.trace("Skip live sqlite file: {}", tarinfo.name)
-                return None
-            if passes_filters(
-                path=f"{prefix}/{tarinfo.name}",
+        def _keep(arcname: str) -> bool:
+            if arcname in excluded_names:
+                logger.trace("Skip live sqlite file: {}", arcname)
+                return False
+            return passes_filters(
+                path=f"{prefix}/{arcname}",
                 include_pattern=include_pattern,
                 exclude_pattern=exclude_pattern,
-            ):
-                logger.trace("Add to tar: {}", tarinfo.name)
-                return tarinfo
-            return None
+            )
 
-        return _add_filter
+        return _keep
 
     def _archive_source(
-        self, tar: tarfile.TarFile, source: Path, *, excluded_paths: frozenset[Path]
+        self, tar: tarfile.TarFile, source: SourceHandle, *, excluded_paths: frozenset[Path]
     ) -> None:
         """Add one configured source (a file or a directory tree) to the open archive.
 
-        Delegate the recursive directory walk to tarfile so the complete subtree is always
-        archived. Building the file list with Path.rglob risked a silently truncated
-        backup: pathlib.glob swallows a traversal error (e.g. a transient NFS scandir
-        failure), and a non-recursive add then stored only the short list with no error.
+        Walk the tree from the descriptor opened at the start of the run, so the archive
+        holds only what lies beneath that directory even if the application swaps a path
+        for a symlink mid-walk. A walk error fails the backup rather than silently
+        truncating it.
 
         Args:
             tar (tarfile.TarFile): The open archive to add to.
-            source (Path): The configured source path.
+            source (SourceHandle): The configured source, opened for this run.
             excluded_paths (frozenset[Path]): Live files that a snapshot replaces, which
                 must not be archived from the walk.
-
-        Raises:
-            ConfigurationError: If source is neither a file nor a directory.
         """
-        if source.is_dir():
+        path = source.path
+        if source.is_dir:
             # Add each top-level child under its arcname prefix so the strip_source_paths
-            # layout is preserved while tarfile recurses through the rest of the tree.
+            # layout is preserved while the walk recurses through the rest of the tree.
             strip = self.settings.strip_source_paths
-            prefix = "" if strip else source.name
-            add_filter = self._tar_add_filter(source, strip=strip, excluded_paths=excluded_paths)
-            for child in sorted(source.iterdir()):
-                arcname = f"{prefix}/{child.name}" if prefix else child.name
-                tar.add(child, arcname=arcname, recursive=True, filter=add_filter)
-        elif source.is_file() and not source.is_symlink():
-            if source in excluded_paths:
-                logger.trace(f"Skip live sqlite file: {source}")
-                return
-            include_pattern, exclude_pattern = compile_filter_patterns(
-                self.settings.include_regex, self.settings.exclude_regex
+            add_directory_contents(
+                tar,
+                dir_fd=source.fd,
+                dir_path=path,
+                arcname_prefix="" if strip else path.name,
+                keep_file=self._archive_name_filter(
+                    path, strip=strip, excluded_paths=excluded_paths
+                ),
             )
-            if passes_filters(
-                path=source,
-                include_pattern=include_pattern,
-                exclude_pattern=exclude_pattern,
-            ):
-                logger.trace(f"Add to tar: {source.name}")
-                tar.add(source, arcname=source.name, recursive=False)
-        else:
-            msg = f"Not a file or directory: {source}"
-            logger.error(msg)
-            raise ConfigurationError(msg)
+            return
+
+        if path in excluded_paths:
+            logger.trace(f"Skip live sqlite file: {path}")
+            return
+        include_pattern, exclude_pattern = compile_filter_patterns(
+            self.settings.include_regex, self.settings.exclude_regex
+        )
+        if passes_filters(
+            path=path, include_pattern=include_pattern, exclude_pattern=exclude_pattern
+        ):
+            add_regular_file(tar, fd=source.fd, arcname=path.name)
 
     def _backend_for_type(self, storage_type: StorageType) -> StorageBackend:
         """Return the backend for a storage type, or fail with a clear message.
@@ -1041,52 +1032,63 @@ class EZBak:
 
         Raises:
             BackupFailedError: If the backup archive could not be created or any configured storage location could not be written.
+            ConfigurationError: If no source paths are configured, or a source is missing, contains a symlink, or is neither a file nor a directory.
         """
-        validate_source_paths(source_paths=self.settings.source_paths)
+        if not self.settings.source_paths:
+            msg = "No source paths provided"
+            raise ConfigurationError(msg)
 
-        # Index fresh: this run reports the recorded index failures as its own failures
-        # and names the new archive against the backups that exist now, so a pass cached
-        # from an earlier moment must not decide either.
-        self.rebuild_storage_locations = True
+        # Opened once and held for the whole run, so the archive and any source deletion
+        # act on the directories that existed at the start, whatever the application does
+        # to the paths meanwhile.
+        with ExitStack() as open_sources:
+            sources = [
+                open_sources.enter_context(open_source(path)) for path in self.settings.source_paths
+            ]
+            # Index fresh: this run reports the recorded index failures as its own failures
+            # and names the new archive against the backups that exist now, so a pass cached
+            # from an earlier moment must not decide either.
+            self.rebuild_storage_locations = True
 
-        logger.trace("Creating new backup")
-        result = self._create_tmp_backup_file()
-        if result is None:
-            logger.error("Backup creation aborted: temporary archive was not created")
-            raise BackupFailedError(["backup archive could not be created"])
+            logger.trace("Creating new backup")
+            result = self._create_tmp_backup_file(sources)
+            if result is None:
+                logger.error("Backup creation aborted: temporary archive was not created")
+                raise BackupFailedError(["backup archive could not be created"])
 
-        tmp_backup, checksum = result
-        if checksum is not None:
-            logger.trace(f"Computed checksum of staged archive: {checksum}")
-        created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)
+            tmp_backup, checksum = result
+            if checksum is not None:
+                logger.trace(f"Computed checksum of staged archive: {checksum}")
+            created_backups, write_failures = self._write_to_backends(tmp_backup, checksum)
 
-        try:
-            tmp_backup.unlink()
-        except FileNotFoundError:
-            logger.warning(f"FileNotFoundError attempting to unlink: {tmp_backup}")
-        else:
-            logger.debug(f"Deleted tmp backup: {tmp_backup}")
+            try:
+                tmp_backup.unlink()
+            except FileNotFoundError:
+                logger.warning(f"FileNotFoundError attempting to unlink: {tmp_backup}")
+            else:
+                logger.debug(f"Deleted tmp backup: {tmp_backup}")
 
-        logger.trace("Require storage location re-index on next call")
-        self.rebuild_storage_locations = True
+            logger.trace("Require storage location re-index on next call")
+            self.rebuild_storage_locations = True
 
-        # A storage location that was requested but unusable (bad creds) or that failed
-        # mid-write must fail the run loudly. Raise only after writing to healthy
-        # storage locations so their backups are preserved.
-        failed_storage_locations = (
-            self._failed_storage_locations + self._index_failures + write_failures
-        )
-        if failed_storage_locations:
-            # Attach the backups that did land so a library caller can observe the
-            # copies that succeeded even though the run as a whole failed.
-            raise BackupFailedError(failed_storage_locations, created_backups=created_backups)
+            # A storage location that was requested but unusable (bad creds) or that failed
+            # mid-write must fail the run loudly. Raise only after writing to healthy
+            # storage locations so their backups are preserved.
+            failed_storage_locations = (
+                self._failed_storage_locations + self._index_failures + write_failures
+            )
+            if failed_storage_locations:
+                # Attach the backups that did land so a library caller can observe the
+                # copies that succeeded even though the run as a whole failed.
+                raise BackupFailedError(failed_storage_locations, created_backups=created_backups)
 
-        # Clean sources only on a fully successful run: for an S3-only run with bad
-        # credentials this guard prevents deleting the only copy of the data.
-        if self.settings.delete_source_after_backup:
-            self._clean_source_paths()
+            # Clean sources only on a fully successful run: for an S3-only run with bad
+            # credentials this guard prevents deleting the only copy of the data.
+            if self.settings.delete_source_after_backup:
+                for source in sources:
+                    delete_source_contents(source)
 
-        return created_backups
+            return created_backups
 
     def _write_to_backends(
         self, tmp_backup: Path, checksum: str | None
@@ -1143,25 +1145,6 @@ class EZBak:
                         )
 
         return created_backups, write_failures
-
-    def _clean_source_paths(self) -> None:
-        """Remove source files and directories after a fully successful backup.
-
-        Use this once every configured destination has confirmed a successful write,
-        so source data is never deleted before it is safely backed up.
-        """
-        logger.debug("Clean source paths after backup")
-
-        if not self.settings.source_paths:
-            return
-
-        for source in self.settings.source_paths:
-            if source.is_dir():
-                clean_directory(source)
-                logger.info(f"Cleaned source: {source}")
-            else:
-                source.unlink()
-                logger.info(f"Deleted source: {source}")
 
     def get_latest_backup(self) -> Backup | None:
         """Get the latest backup from the storage locations.

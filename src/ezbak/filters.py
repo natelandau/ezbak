@@ -109,25 +109,6 @@ def passes_filters(
     return True
 
 
-def validate_source_paths(source_paths: list[Path] | None) -> None:
-    """Validate that at least one source path is configured and every one exists.
-
-    Args:
-        source_paths (list[Path] | None): The source paths to validate.
-
-    Raises:
-        ConfigurationError: If no source paths are provided or a source path does not exist.
-    """
-    if not source_paths:
-        msg = "No source paths provided"
-        raise ConfigurationError(msg)
-
-    for source in source_paths:
-        if not source.exists():
-            msg = f"Source does not exist: {source}"
-            raise ConfigurationError(msg)
-
-
 def validate_storage_paths(
     storage_paths: list[Path] | None, *, create_if_missing: bool = False
 ) -> None:
