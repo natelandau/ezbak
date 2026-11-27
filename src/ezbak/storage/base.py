@@ -11,7 +11,7 @@ from ezbak.checksums import format_sidecar, is_sidecar, parse_sidecar
 from ezbak.config import BackupConfig
 from ezbak.constants import StorageType
 from ezbak.exceptions import ConfigurationError
-from ezbak.naming import is_backup_filename
+from ezbak.naming import build_backup_name, parse_backup_filename
 
 
 class StorageBackend(ABC):
@@ -32,8 +32,16 @@ class StorageBackend(ABC):
 
         Args:
             settings (BackupConfig): The validated backup configuration.
+
+        Raises:
+            ConfigurationError: If no backup name is configured.
         """
+        if not settings.name:
+            msg = "A storage backend needs a backup name, got none"
+            raise ConfigurationError(msg)
         self.settings = settings
+        # Every storage operation is scoped to this one set
+        self._set_name: str = settings.name
 
     def _build_storage_location(
         self, *, storage_path: str | Path | None, backups: list[Backup]
@@ -46,45 +54,44 @@ class StorageBackend(ABC):
 
         Returns:
             StorageLocation: The populated, sorted storage location.
-
-        Raises:
-            ConfigurationError: If no backup name is configured.
         """
-        if not self.settings.name:
-            msg = "A storage location needs a backup name, got none"
-            raise ConfigurationError(msg)
         return StorageLocation(
-            name=self.settings.name,
+            name=self._set_name,
             tz=self.settings.tz,
             storage_path=storage_path,
             storage_type=self.storage_type,
             backups=sorted(backups, key=lambda x: x.zoned_datetime),
         )
 
-    @staticmethod
-    def _backup_names(names: list[str]) -> list[str]:
-        """Keep only the discovered names that are backups this set can order and restore.
+    def _backup_names(self, names: list[str]) -> list[str]:
+        """Keep only the discovered names that are backups of this set.
 
-        Drop checksum sidecars, so a `.sha256` is never counted against retention, and skip
-        names with no valid backup timestamp, so a foreign file in a storage location cannot stop
-        every list, prune, and restore.
+        Drop checksum sidecars, so a `.sha256` is never counted against retention. Skip another
+        set's backups, so a set never lists, restores, or prunes a set whose name it prefixes.
+        Skip names with no valid backup timestamp, so a foreign file in a storage location
+        cannot stop every list, prune, and restore.
 
         Args:
-            names (list[str]): The discovered filenames or object keys.
+            names (list[str]): The discovered names, relative to the storage location.
 
         Returns:
-            list[str]: The names that are backups.
+            list[str]: The names that are backups of this set.
         """
         backups: list[str] = []
         for name in names:
             if is_sidecar(name):
                 continue
-            if not is_backup_filename(name):
+            parsed = parse_backup_filename(name)
+            if parsed is None:
+                expected = build_backup_name(name="{name}", timestamp="YYYYMMDDTHHMMSS")
                 logger.warning(
-                    f"Skipping '{name}': the name has no valid YYYYMMDDTHHMMSS timestamp"
+                    f"Skipping '{name}': not a backup filename, expected '{expected}' "
+                    "with a real date and time"
                 )
-                continue
-            backups.append(name)
+            elif parsed.set_name == self._set_name:
+                backups.append(name)
+            else:
+                logger.trace(f"Skipping '{name}': it belongs to backup set '{parsed.set_name}'")
         return backups
 
     def get_checksum(self, backup: Backup) -> str | None:

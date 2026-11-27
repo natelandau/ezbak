@@ -234,14 +234,14 @@ def test_service_malformed_endpoint_raises_storage_init_error() -> None:
 
 
 def test_build_full_key_with_and_without_prefix(s3_bucket: str) -> None:
-    """Verify build_full_key prepends the bucket path only when configured and avoids double-prefixing."""
+    """Verify build_full_key prepends the bucket path to every name, so each name has one key."""
     # Given: a service with no prefix and one with a prefix
-    # When: building keys for a plain name and an already-prefixed name
-    # Then: the prefix is applied once, or not at all when unset
+    # When: building keys for a plain name and a name that starts with the prefix
+    # Then: the prefix is applied to both, or not at all when unset
     assert _service(s3_bucket).build_full_key("a.tgz") == "a.tgz"
     svc = _service(s3_bucket, prefix="team/")
     assert svc.build_full_key("a.tgz") == "team/a.tgz"
-    assert svc.build_full_key("team/a.tgz") == "team/a.tgz"  # already-prefixed is not doubled
+    assert svc.build_full_key("team/a.tgz") == "team/team/a.tgz"
 
 
 def test_upload_object_round_trips_via_get(s3_bucket: str, tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 """Shared test helpers."""
 
+import hashlib
 import io
 import os
 import sqlite3
@@ -14,6 +15,7 @@ from pathlib import Path
 import pytest
 from botocore.exceptions import ClientError
 
+from ezbak.checksums import format_sidecar, sidecar_name
 from ezbak.core import EZBak
 from ezbak.storage.s3 import S3Backend
 
@@ -161,7 +163,7 @@ def relative_tree(root: Path) -> set[Path]:
 SEEDED_MARKER = "seeded-backup.txt"
 
 
-def seed_backups(directory: Path, names: Iterable[str]) -> None:
+def seed_backups(directory: Path, names: Iterable[str], *, with_sidecars: bool = False) -> None:
     """Write a restorable backup archive under each name, so a test can tell which one restored.
 
     Each archive holds the `FIXTURE_ARCHIVE` tree plus a `SEEDED_MARKER` file at its root whose
@@ -169,13 +171,22 @@ def seed_backups(directory: Path, names: Iterable[str]) -> None:
 
     Args:
         directory (Path): Where to write the archives.
-        names (Iterable[str]): Archive filenames, such as "test-20250102T090000.tgz".
+        names (Iterable[str]): Archive paths relative to `directory`, such as
+            "test-20250102T090000.tgz". Missing parent directories are created.
+        with_sidecars (bool): Also write a valid checksum sidecar beside each archive.
     """
     for name in names:
+        archive = directory / name
+        archive.parent.mkdir(parents=True, exist_ok=True)
         marker = name.encode()
         marker_info = tarfile.TarInfo(SEEDED_MARKER)
         marker_info.size = len(marker)
-        with tarfile.open(FIXTURE_ARCHIVE) as source, tarfile.open(directory / name, "w:gz") as tar:
+        with tarfile.open(FIXTURE_ARCHIVE) as source, tarfile.open(archive, "w:gz") as tar:
             for member in source.getmembers():
                 tar.addfile(member, source.extractfile(member) if member.isfile() else None)
             tar.addfile(marker_info, io.BytesIO(marker))
+        if with_sidecars:
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            archive.with_name(sidecar_name(archive.name)).write_text(
+                format_sidecar(digest=digest, archive_name=archive.name)
+            )

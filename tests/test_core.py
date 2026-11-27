@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from pytest_mock import MockerFixture
 from whenever import TimeZoneNotFoundError
 
+from ezbak.checksums import sidecar_name
 from ezbak.config import BackupConfig
 from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.core import EZBak, _FsyncTarFile, ezbak
@@ -149,6 +150,42 @@ def test_index_reads_the_timestamp_after_a_timestamp_shaped_set_name(tmp_path):
     assert names == {older, newer}
     assert latest is not None
     assert latest.name == newer
+
+
+@pytest.mark.parametrize(
+    ("set_name", "other_set_name"),
+    [
+        ("app", "app-db"),
+        ("app-db", "app"),
+        ("app[1]", "app1"),
+        ("team/app", "team/app-db"),
+        ("./app", "app-db"),
+    ],
+    ids=["shorter-name", "longer-name", "glob-characters", "nested-name", "unnormalized-name"],
+)
+def test_sets_sharing_a_storage_directory_never_touch_each_other(
+    tmp_path, restore_dir, set_name, other_set_name
+):
+    """Verify list, restore, and prune for one set leave another set's archives and sidecars alone."""
+    # Given two backups of the set, older than two backups of another set, all with sidecars
+    storage = tmp_path / "storage"
+    own = [f"{set_name}-20250101T000000.tgz", f"{set_name}-20250102T000000.tgz"]
+    other = [f"{other_set_name}-20250103T000000.tgz", f"{other_set_name}-20250104T000000.tgz"]
+    seed_backups(directory=storage, names=own + other, with_sidecars=True)
+    app = ezbak(name=set_name, source_paths=[tmp_path], storage_paths=[storage], keep_last=1)
+
+    # When listing, then only the set's own backups appear
+    assert sorted(b.name for b in app.list_backups()) == [Path(name).name for name in own]
+
+    # When restoring, then the set's newest backup restores, not the other set's newer one
+    assert app.restore_backup(restore_dir) is RestoreOutcome.RESTORED
+    assert (restore_dir / SEEDED_MARKER).read_text() == own[-1]
+
+    # When pruning to one backup, then only the set's older archive and its sidecar go
+    app.prune_backups()
+    remaining = {p.relative_to(storage).as_posix() for p in storage.rglob("*") if p.is_file()}
+    kept = [own[-1], *other]
+    assert remaining == {Path(n).as_posix() for name in kept for n in (name, sidecar_name(name))}
 
 
 def test_index_raises_for_an_unknown_timezone(tmp_path):

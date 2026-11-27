@@ -1,5 +1,6 @@
 """Local-filesystem storage backend for backup operations."""
 
+import glob
 import os
 import stat
 from collections.abc import Callable
@@ -194,17 +195,26 @@ class LocalBackend(StorageBackend):
         """
         validate_storage_paths(storage_paths=self._storage_paths, create_if_missing=True)
 
+        # A set name containing "/" lives in a subdirectory, so filter on the name as the set
+        # spells it, not the bare filename. Take the directory from the set name rather than the
+        # found path, which the glob normalizes ("./app" matches as "app").
+        set_directory = self._set_name.rpartition("/")[0]
+        name_prefix = f"{set_directory}/" if set_directory else ""
         locations: list[StorageLocation] = []
         for storage_path in self._storage_paths:
             logger.trace(f"Indexing: {storage_path}")
-            # Anchor on "{name}-" so a set does not swallow siblings that merely
-            # share its prefix (name "gitea" must not match "giteasave-*"). The
-            # naming grammar always joins name and timestamp with "-".
-            # A plain glob, not a filter that follows links, so every symlink at a
-            # backup name, dangling or not, reaches the warning in `_is_regular_file`.
-            found_files = list(storage_path.glob(f"{self.settings.name}-*.{BACKUP_EXTENSION}"))
-            backup_names = set(self._backup_names([f.name for f in found_files]))
-            found_files = [f for f in found_files if f.name in backup_names and _is_regular_file(f)]
+            # The glob only narrows the scan; `_backup_names` decides which files belong to the
+            # set. A plain glob, not a filter that follows links, so every symlink at a backup
+            # name, dangling or not, reaches the warning in `_is_regular_file`.
+            found_files = list(
+                storage_path.glob(f"{glob.escape(self._set_name)}-*.{BACKUP_EXTENSION}")
+            )
+            files_by_name = {f"{name_prefix}{f.name}": f for f in found_files}
+            found_files = [
+                files_by_name[n]
+                for n in self._backup_names(list(files_by_name))
+                if _is_regular_file(files_by_name[n])
+            ]
             location = self._build_storage_location(
                 storage_path=storage_path,
                 backups=[

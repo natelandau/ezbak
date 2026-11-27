@@ -52,23 +52,17 @@ class S3Backend(StorageBackend):
             StorageReadError: If the bucket listing fails.
         """
         logger.trace("Indexing S3 storage location")
-        # Anchor on "{name}-" so a set does not swallow keys that merely share its
-        # prefix (name "gitea" must not match "giteasave-*"). The naming grammar
-        # always joins name and timestamp with "-".
+        # The listing prefix only narrows the scan; `_backup_names` decides which keys
+        # belong to the set.
         try:
-            found_backups = self.aws_service.list_objects(prefix=f"{self.settings.name}-")
+            found_names = self.aws_service.list_objects(prefix=f"{self._set_name}-")
         except _S3_ERRORS as e:
             # The caller logs the failure with its own destination context, so logging
             # here would print the same text twice.
             msg = f"S3 index failed for bucket '{self.settings.aws_s3_bucket_name}': {e}"
             raise StorageReadError(msg) from e
 
-        if self.settings.aws_s3_bucket_prefix:
-            found_backups = [
-                x.replace(f"{self.settings.aws_s3_bucket_prefix.rstrip('/')}/", "")
-                for x in found_backups
-            ]
-        found_backups = self._backup_names(found_backups)
+        found_backups = self._backup_names(found_names)
 
         location = self._build_storage_location(
             storage_path=self.settings.aws_s3_bucket_prefix,
@@ -205,26 +199,24 @@ class S3Backend(StorageBackend):
         if not backups:
             return []
 
-        # Map each object's full S3 key back to its Backup so the confirmed-deleted
-        # keys the API returns (which carry the bucket prefix) can be reported as the
-        # Backup objects that were actually removed, not just the ones targeted.
-        backup_by_key = {self.aws_service.build_full_key(x.name): x for x in backups}
+        # Map each name back to its Backup so the confirmed-deleted names can be reported as
+        # the Backup objects that were actually removed, not just the ones targeted.
+        backup_by_name = {x.name: x for x in backups}
         # Delete each archive's sidecar in the same batches. DeleteObjects is
         # idempotent for absent keys, so pre-feature backups are unaffected. Sidecar
         # keys are not mapped back to Backups: only archives count as confirmed deleted.
-        sidecar_keys = [self.aws_service.build_full_key(sidecar_name(x.name)) for x in backups]
-        keys = list(backup_by_key) + sidecar_keys
-        logger.debug(f"Deleting {len(keys)} S3 backups")
+        names = list(backup_by_name) + [sidecar_name(x.name) for x in backups]
+        logger.debug(f"Deleting {len(names)} S3 backups")
         deleted: list[Backup] = []
         try:
             # Chunk into requests of at most 1000 keys so a large prune does not exceed
             # the S3 DeleteObjects limit and abort the whole run.
-            for start in range(0, len(keys), _S3_DELETE_BATCH_LIMIT):
-                confirmed_keys = self.aws_service.delete_objects(
-                    keys=keys[start : start + _S3_DELETE_BATCH_LIMIT]
+            for start in range(0, len(names), _S3_DELETE_BATCH_LIMIT):
+                confirmed_names = self.aws_service.delete_objects(
+                    keys=names[start : start + _S3_DELETE_BATCH_LIMIT]
                 )
-                for key in confirmed_keys:
-                    backup = backup_by_key.get(key)
+                for name in confirmed_names:
+                    backup = backup_by_name.get(name)
                     if backup is not None:
                         logger.info(f"Deleted from S3: {backup.name}")
                         deleted.append(backup)

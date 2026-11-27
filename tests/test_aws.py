@@ -14,6 +14,7 @@ from botocore.exceptions import EndpointConnectionError
 from pytest_mock import MockerFixture
 
 from ezbak.backup import Backup
+from ezbak.checksums import sidecar_name
 from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.core import EZBak
 from ezbak.exceptions import (
@@ -25,7 +26,7 @@ from ezbak.exceptions import (
     StorageWriteError,
 )
 from ezbak.storage.aws import AWSService
-from tests.helpers import access_denied, relative_tree, s3_backend
+from tests.helpers import SEEDED_MARKER, access_denied, relative_tree, s3_backend, seed_backups
 
 UTC = ZoneInfo("UTC")
 
@@ -351,6 +352,114 @@ def test_s3_prefix_round_trip_scopes_list_restore_and_prune(
         "team/test-20250103T000000.tgz.sha256",
         "test-20200101T000000.tgz",
     }
+
+
+def _full_key(*, bucket_prefix: str | None, name: str) -> str:
+    """Return the object key a name is stored under below an optional bucket prefix."""
+    return f"{bucket_prefix}/{name}" if bucket_prefix else name
+
+
+def _seed_bucket(
+    *, bucket: str, staging: Path, names: list[str], bucket_prefix: str | None
+) -> None:
+    """Upload a seeded backup and its checksum sidecar under each name, below the bucket prefix."""
+    seed_backups(directory=staging, names=names, with_sidecars=True)
+    client = boto3.client("s3", region_name="us-east-1")
+    for name in names:
+        for object_name in (name, sidecar_name(name)):
+            client.put_object(
+                Bucket=bucket,
+                Key=_full_key(bucket_prefix=bucket_prefix, name=object_name),
+                Body=(staging / object_name).read_bytes(),
+            )
+
+
+@pytest.mark.parametrize(
+    ("set_name", "other_set_name", "bucket_prefix"),
+    [
+        ("app", "app-db", None),
+        ("app-db", "app", None),
+        ("app", "app-db", "pfx"),
+        ("team/app", "team/app-db", None),
+        ("pfx/app", "app", "pfx"),
+        ("app", "pfx/app", "pfx"),
+    ],
+    ids=[
+        "shorter-name",
+        "longer-name",
+        "under-bucket-prefix",
+        "nested-name",
+        "name-repeats-bucket-prefix",
+        "other-name-repeats-bucket-prefix",
+    ],
+)
+def test_s3_sets_sharing_a_bucket_never_touch_each_other(
+    s3_bucket: str,
+    make_s3_app: Callable[..., EZBak],
+    tmp_path: Path,
+    restore_dir: Path,
+    set_name: str,
+    other_set_name: str,
+    bucket_prefix: str | None,
+) -> None:
+    """Verify list, restore, and prune for one set leave another set's objects and sidecars alone."""
+    # Given two backups of the set, older than two backups of another set, all with sidecars
+    own = [f"{set_name}-20250101T000000.tgz", f"{set_name}-20250102T000000.tgz"]
+    other = [f"{other_set_name}-20250103T000000.tgz", f"{other_set_name}-20250104T000000.tgz"]
+    _seed_bucket(
+        bucket=s3_bucket, staging=tmp_path / "seed", names=own + other, bucket_prefix=bucket_prefix
+    )
+    app = make_s3_app(name=set_name, aws_s3_bucket_prefix=bucket_prefix, keep_last=1)
+
+    # When listing, then only the set's own backups appear
+    assert sorted(backup.name for backup in app.list_backups()) == own
+
+    # When restoring, then the set's newest backup restores, not the other set's newer one
+    assert app.restore_backup(restore_dir) is RestoreOutcome.RESTORED
+    assert (restore_dir / SEEDED_MARKER).read_text() == own[-1]
+
+    # When pruning to one backup, then only the set's older archive and its sidecar go
+    app.prune_backups()
+    kept = [own[-1], *other]
+    assert _bucket_keys(s3_bucket) == {
+        _full_key(bucket_prefix=bucket_prefix, name=object_name)
+        for name in kept
+        for object_name in (name, sidecar_name(name))
+    }
+
+
+@pytest.mark.parametrize(
+    ("bucket_prefix", "nested_key"),
+    [(None, "app-x/20250101T000000.tgz"), ("pfx", "pfx/app-pfx/20250101T000000.tgz")],
+    ids=["under-another-set-name", "repeats-bucket-prefix"],
+)
+def test_s3_index_skips_keys_nested_below_the_set_name(
+    s3_bucket: str,
+    make_s3_app: Callable[..., EZBak],
+    tmp_path: Path,
+    bucket_prefix: str | None,
+    nested_key: str,
+) -> None:
+    """Verify a nested key is never indexed as, or pruned in place of, one of the set's backups."""
+    # Given one backup of the set and a nested key that starts with the set's name and prefix
+    _seed_bucket(
+        bucket=s3_bucket,
+        staging=tmp_path / "seed",
+        names=["app-20250101T000000.tgz"],
+        bucket_prefix=bucket_prefix,
+    )
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=s3_bucket, Key=nested_key, Body=b"foreign"
+    )
+    keys_before = _bucket_keys(s3_bucket)
+    app = make_s3_app(name="app", aws_s3_bucket_prefix=bucket_prefix, keep_last=1)
+
+    # When listing, then only the set's backup appears
+    assert [backup.name for backup in app.list_backups()] == ["app-20250101T000000.tgz"]
+
+    # When pruning to one backup, then nothing is deleted
+    app.prune_backups()
+    assert _bucket_keys(s3_bucket) == keys_before
 
 
 def test_s3_restore_proceeds_when_sidecar_read_fails(
