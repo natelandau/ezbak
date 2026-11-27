@@ -91,7 +91,8 @@ def _require_published_file(*, dst: Path, written: os.stat_result) -> None:
         OSError: If `dst` is a different file than the one ezbak wrote.
     """
     published = dst.lstat()
-    if os.path.samestat(s1=published, s2=written):
+    # Positional: Python 3.15 makes samestat's parameters positional-only.
+    if os.path.samestat(published, written):
         return
     # A regular file here is a concurrent writer's complete copy under the same
     # name, so leave it published; only a link or special file is removed.
