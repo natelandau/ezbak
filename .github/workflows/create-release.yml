@@ -152,4 +152,4 @@ jobs:
                   push: true
                   tags: ${{ steps.meta.outputs.tags }}
                   labels: ${{ steps.meta.outputs.labels }}
-                  outputs: type=image,name=target,annotation-index.org.opencontainers.image.description=A simple backup management tool.
+                  outputs: type=image,name=target,annotation-index.org.opencontainers.image.description=Back up and restore files and directories as tar.gz archives on local disks and S3.
