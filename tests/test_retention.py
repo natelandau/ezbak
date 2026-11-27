@@ -20,49 +20,74 @@ def _backup(tmp_path: Path, stamp: str) -> Backup:
     return Backup(path=p, name=p.name, storage_type=StorageType.LOCAL)
 
 
-def test_is_active_false_when_all_unset():
-    """Verify a manager with no rules is inactive."""
-    assert RetentionPolicyManager().is_active is False
+@pytest.mark.parametrize(
+    ("manager", "expected"),
+    [
+        pytest.param(RetentionPolicyManager(), False, id="no-rules"),
+        pytest.param(RetentionPolicyManager(keep_last=0), True, id="zero-rule"),
+    ],
+)
+def test_is_active_when_any_rule_is_set(manager: RetentionPolicyManager, *, expected: bool) -> None:
+    """Verify a policy is active once any rule is set, even to zero."""
+    assert manager.is_active is expected
 
 
-def test_is_active_true_when_a_rule_is_zero():
-    """Verify an explicit zero rule still marks the policy active."""
-    assert RetentionPolicyManager(keep_last=0).is_active is True
-
-
-def test_keep_last_marks_n_newest(tmp_path):
-    """Verify keep_last keeps exactly the N most recent backups."""
-    # Given five backups across five minutes
-    backups = [_backup(tmp_path, f"20250101T0900{i:02d}") for i in range(5)]
-    mgr = RetentionPolicyManager(keep_last=2)
+@pytest.mark.parametrize(
+    ("keep_last", "expected_kept"),
+    [
+        pytest.param(2, {"20250103T090000", "20250104T090000"}, id="fewer-than-backups"),
+        pytest.param(
+            10,
+            {"20250101T090000", "20250102T090000", "20250103T090000", "20250104T090000"},
+            id="more-than-backups",
+        ),
+    ],
+)
+def test_keep_last_keeps_the_newest_backups(
+    tmp_path: Path, keep_last: int, expected_kept: set[str]
+) -> None:
+    """Verify keep_last keeps the N newest backups, or every backup when N exceeds the count."""
+    # Given four backups on four days
+    backups = [_backup(tmp_path, f"2025010{d}T090000") for d in (1, 2, 3, 4)]
+    mgr = RetentionPolicyManager(keep_last=keep_last)
 
     # When computing the keep-set
     keep = mgr.backups_to_keep(backups)
 
-    # Then only the two newest survive
-    newest_two = sorted(backups, key=lambda b: b.timestamp, reverse=True)[:2]
-    assert keep == set(newest_two)
+    # Then only the newest N survive
+    assert {b.timestamp for b in keep} == expected_kept
 
 
-def test_unset_period_marks_nothing(tmp_path):
-    """Verify an unset calendar rule keeps zero of that period."""
-    # Given daily backups over three days, only keep_daily set
-    backups = [_backup(tmp_path, f"2025010{d}T090000") for d in (1, 2, 3)]
-    mgr = RetentionPolicyManager(calendar={BackupType.DAILY: 1})
-
-    # When computing the keep-set
-    keep = mgr.backups_to_keep(backups)
-
-    # Then exactly one daily representative survives (the newest day)
-    assert len(keep) == 1
-    assert next(iter(keep)).timestamp.startswith("20250103")
-
-
-def test_zero_rule_marks_nothing(tmp_path):
-    """Verify a rule set to zero keeps nothing for that rule."""
+@pytest.mark.parametrize(
+    "manager",
+    [
+        pytest.param(RetentionPolicyManager(keep_last=0), id="keep-last-zero"),
+        pytest.param(
+            RetentionPolicyManager(keep_last=0, calendar={BackupType.DAILY: 0}), id="all-zero"
+        ),
+    ],
+)
+def test_zero_rules_keep_nothing(tmp_path: Path, manager: RetentionPolicyManager) -> None:
+    """Verify an active policy whose rules are all zero keeps no backups."""
+    # Given backups on two days
     backups = [_backup(tmp_path, f"2025010{d}T090000") for d in (1, 2)]
-    mgr = RetentionPolicyManager(keep_last=0)
-    assert mgr.backups_to_keep(backups) == set()
+
+    # When computing the keep-set
+    # Then nothing survives
+    assert manager.backups_to_keep(backups) == set()
+
+
+def test_zero_calendar_rule_beside_a_set_rule_is_ignored(tmp_path: Path) -> None:
+    """Verify a calendar rule set to zero neither keeps nor blocks backups when another rule is set."""
+    # Given backups on three days and a policy with daily turned off but yearly set
+    backups = [_backup(tmp_path, f"2025010{d}T090000") for d in (1, 2, 3)]
+    mgr = RetentionPolicyManager(calendar={BackupType.DAILY: 0, BackupType.YEARLY: 1})
+
+    # When computing the keep-set
+    keep = mgr.backups_to_keep(backups)
+
+    # Then only the yearly rule applies, keeping the newest backup of the year
+    assert {b.timestamp for b in keep} == {"20250103T090000"}
 
 
 def test_union_overlap(tmp_path):
@@ -79,14 +104,6 @@ def test_union_overlap(tmp_path):
 
     # Then the day-1 daily pick is already in the recent 3, so union is 5 not 6
     assert len(keep) == 5
-
-
-def test_all_zero_policy_keeps_nothing(tmp_path):
-    """Verify an all-zero active policy produces an empty keep-set."""
-    backups = [_backup(tmp_path, "20250101T090000")]
-    mgr = RetentionPolicyManager(keep_last=0, calendar={BackupType.DAILY: 0})
-    assert mgr.is_active is True
-    assert mgr.backups_to_keep(backups) == set()
 
 
 @pytest.mark.parametrize(
@@ -166,31 +183,26 @@ def test_calendar_rule_keeps_one_representative_per_period(tmp_path):
     assert {b.timestamp for b in keep} == {"20250101T110000", "20250102T100000"}
 
 
-def test_calendar_rule_counts_only_periods_with_backups(tmp_path):
+@pytest.mark.parametrize(
+    ("keep_daily", "expected_kept"),
+    [
+        (3, {"20250110T090000", "20250215T090000", "20250620T090000"}),
+        (10, {"20250101T090000", "20250110T090000", "20250215T090000", "20250620T090000"}),
+    ],
+    ids=["gaps-do-not-use-slots", "more-slots-than-days"],
+)
+def test_calendar_rule_counts_only_periods_with_backups(tmp_path, keep_daily, expected_kept):
     """Verify keep_daily counts days that have a backup, not calendar days, so gaps do not consume slots."""
     # Given backups on four widely separated days
     stamps = ("20250101T090000", "20250110T090000", "20250215T090000", "20250620T090000")
     backups = [_backup(tmp_path, s) for s in stamps]
-    mgr = RetentionPolicyManager(calendar={BackupType.DAILY: 3})
+    mgr = RetentionPolicyManager(calendar={BackupType.DAILY: keep_daily})
 
-    # When keeping three daily periods
+    # When keeping that many daily periods
     keep = mgr.backups_to_keep(backups)
 
-    # Then the three most-recent days-with-a-backup survive regardless of the calendar gaps
-    assert {b.timestamp for b in keep} == {"20250110T090000", "20250215T090000", "20250620T090000"}
-
-
-def test_keep_last_exceeding_backup_count_keeps_all(tmp_path):
-    """Verify keep_last larger than the backup count keeps every backup without over-reaching."""
-    # Given three backups and keep_last greater than three
-    backups = [_backup(tmp_path, f"2025010{d}T090000") for d in (1, 2, 3)]
-    mgr = RetentionPolicyManager(keep_last=10)
-
-    # When computing the keep-set
-    keep = mgr.backups_to_keep(backups)
-
-    # Then all three survive
-    assert len(keep) == 3
+    # Then the newest days-with-a-backup survive, up to the count, regardless of calendar gaps
+    assert {b.timestamp for b in keep} == expected_kept
 
 
 def test_summary_lists_set_rules_only():
@@ -199,3 +211,25 @@ def test_summary_lists_set_rules_only():
         keep_last=5, calendar={BackupType.DAILY: 7, BackupType.YEARLY: None}
     )
     assert mgr.summary() == {"keep_last": 5, "daily": 7}
+
+
+@pytest.mark.parametrize(
+    ("older_stamp", "newer_stamp", "differing_keys"),
+    [
+        ("20250609T090000", "20260609T090000", ("year", "month", "week", "day", "hour", "minute")),
+        ("20250508T090000", "20250608T090000", ("month", "day", "hour", "minute")),
+    ],
+    ids=["same-month-different-year", "same-day-different-month"],
+)
+def test_period_keys_include_the_enclosing_periods(
+    tmp_path, older_stamp, newer_stamp, differing_keys
+):
+    """Verify a period key includes its enclosing periods, so June 2025 and June 2026 never merge."""
+    # Given two backups whose shorter periods match but whose enclosing periods differ
+    older = _backup(tmp_path, older_stamp)
+    newer = _backup(tmp_path, newer_stamp)
+
+    # When comparing their period keys
+    # Then every key that spans the differing period is distinct
+    for key in differing_keys:
+        assert getattr(older, key) != getattr(newer, key), key

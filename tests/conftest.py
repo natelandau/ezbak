@@ -3,16 +3,20 @@
 import os
 from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import boto3
 import pytest
-from botocore.exceptions import ClientError
 from loguru import logger
 from moto import mock_aws
 from pytest_mock import MockerFixture
 
+from ezbak import ezbak
+from ezbak.core import EZBak
+from ezbak.env import EnvConfig
 from ezbak.storage.aws import AWSService
+from tests.helpers import LEGACY_BACKUP_NAMES, access_denied
 
 
 @pytest.fixture
@@ -80,6 +84,10 @@ def mock_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-aws-credentials"))
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
 
+    # EnvConfig reads .env and .env.secrets from the working directory, and a developer's
+    # copies hold real settings and credentials
+    monkeypatch.setattr(EnvConfig, "model_config", {**EnvConfig.model_config, "env_file": None})
+
 
 @pytest.fixture
 def break_s3_listing(mocker: MockerFixture) -> Callable[[], MagicMock]:
@@ -98,10 +106,7 @@ def break_s3_listing(mocker: MockerFixture) -> Callable[[], MagicMock]:
             AWSService,
             "list_objects",
             autospec=True,
-            side_effect=ClientError(
-                error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
-                operation_name="ListObjectsV2",
-            ),
+            side_effect=access_denied("ListObjectsV2"),
         )
 
     return _break
@@ -109,12 +114,88 @@ def break_s3_listing(mocker: MockerFixture) -> Callable[[], MagicMock]:
 
 @pytest.fixture(autouse=True)  # ruff:ignore[pytest-fixture-autouse]
 def reset_logger() -> Generator[None, None, None]:
-    """Reset logger handlers between tests to prevent closed file handle issues.
+    """Start and end every test with no loguru handlers.
 
-    The logger from loguru persists across test runs as a singleton. When tests
-    configure logging with file handlers, these handlers can point to closed files
-    in subsequent test runs, causing ValueError: I/O operation on closed file.
-    This fixture removes all handlers after each test to ensure clean state.
+    loguru's logger is a process-wide singleton. Without this, a file handler from one test
+    points at a closed file in the next, and whether stderr output appears depends on which
+    tests ran first.
     """
+    logger.remove()
     yield
     logger.remove()
+
+
+@pytest.fixture
+def log_messages() -> Generator[list[str], None, None]:
+    """Collect formatted log messages at WARNING and above, for tests that check a warning fires.
+
+    Yields:
+        list[str]: Each logged message, without level or timestamp.
+    """
+    messages: list[str] = []
+    handler_id = logger.add(messages.append, level="WARNING", format="{message}")
+    yield messages
+    logger.remove(handler_id)
+
+
+@pytest.fixture
+def restore_dir(tmp_path: Path) -> Path:
+    """Provide an empty directory to restore backups into.
+
+    Returns:
+        Path: The created `restore` directory under `tmp_path`.
+    """
+    path = tmp_path / "restore"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+def legacy_backups(tmp_path: Path) -> Path:
+    """Fill a directory with empty files named like legacy-format backups of the set "test".
+
+    Returns:
+        Path: The directory holding the files.
+    """
+    for name in LEGACY_BACKUP_NAMES:
+        (tmp_path / name).touch()
+    return tmp_path
+
+
+@pytest.fixture
+def make_s3_app(s3_bucket: str, filesystem: tuple[Path, Path, Path]) -> Callable[..., EZBak]:
+    """Provide a factory for an app that backs up the `filesystem` source to the moto bucket.
+
+    moto supplies credentials, so the app needs no keys. Keyword arguments override or add
+    config options, such as `storage_paths` for a local copy too.
+
+    Returns:
+        Callable[..., EZBak]: Build an app from config overrides.
+    """
+
+    def _make(**overrides: Any) -> EZBak:  # ruff:ignore[any-type]
+        options: dict[str, Any] = {
+            "name": "test",
+            "source_paths": [filesystem[0]],
+            "aws_s3_bucket_name": s3_bucket,
+            "tz": "Etc/UTC",
+        }
+        return ezbak(**{**options, **overrides})
+
+    return _make
+
+
+@pytest.fixture
+def patched_boto3_session(mocker: MockerFixture) -> tuple[MagicMock, MagicMock]:
+    """Replace boto3.Session with an autospecced mock, for tests that only construct AWSService.
+
+    autospec catches a misspelled or misplaced argument to Session() or session.client() that a
+    bare MagicMock would accept. Set behavior on `session.client.return_value`.
+
+    Returns:
+        tuple[MagicMock, MagicMock]: The patched Session class and the session it returns.
+    """
+    session_cls = mocker.patch("ezbak.storage.aws.boto3.Session", autospec=True)
+    session = session_cls.return_value
+    session.get_credentials.return_value = mocker.MagicMock(method="explicit")
+    return session_cls, session

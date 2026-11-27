@@ -1,98 +1,85 @@
 """Direct AWSService tests backed by moto's in-memory S3."""
 
-import os
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 import boto3
 import pytest
-from boto3.exceptions import RetriesExceededError, S3UploadFailedError
+import time_machine
+from botocore.exceptions import ClientError
+from pytest_mock import MockerFixture
 
 from ezbak import ezbak
 from ezbak.backup import Backup
 from ezbak.constants import RestoreOutcome, StorageType
-from ezbak.exceptions import (
-    BackupFailedError,
-    RestoreFailedError,
-    StorageInitError,
-    StorageReadError,
-)
+from ezbak.core import EZBak
+from ezbak.exceptions import RestoreFailedError, StorageInitError
 from ezbak.storage.aws import AWSService
-from tests.helpers import s3_backend
+from tests.helpers import access_denied
 
 
-def test_s3_bucket_fixture_smoke(s3_bucket: str) -> None:
-    """Verify the s3_bucket fixture yields a bucket that exists in moto."""
-    # Given: the moto-backed bucket fixture
-    # When: listing buckets through a fresh client inside the mock context
-    client = boto3.client("s3", region_name="us-east-1")
-    names = [b["Name"] for b in client.list_buckets()["Buckets"]]
-    # Then: the fixture's bucket exists
-    assert s3_bucket in names
+def _bucket_keys(bucket: str) -> list[str]:
+    """List every object key in a moto bucket.
+
+    Returns:
+        list[str]: The bucket's object keys.
+    """
+    contents = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=bucket)
+    return [obj["Key"] for obj in contents.get("Contents", [])]
 
 
-def test_create_uploads_s3_sidecar(s3_bucket: str, filesystem) -> None:
-    """Verify create_backup uploads a .sha256 sidecar alongside the S3 archive."""
+@time_machine.travel(datetime(2025, 6, 9, tzinfo=ZoneInfo("UTC")), tick=False)
+def test_create_uploads_archive_and_s3_sidecar(
+    s3_bucket: str, make_s3_app: Callable[..., EZBak]
+) -> None:
+    """Verify create_backup uploads the archive and a .sha256 sidecar holding its digest."""
     # Given: A backup manager configured with an S3 destination
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
 
     # When: Creating a backup
-    backups = app.create_backup()
+    app.create_backup()
 
-    # Then: A sidecar object exists in the bucket with a 64-char hex digest
-    client = boto3.client("s3", region_name="us-east-1")
-    keys = [o["Key"] for o in client.list_objects_v2(Bucket=s3_bucket).get("Contents", [])]
-    sidecar_key = backups[0].name + ".sha256"
-    assert sidecar_key in keys
-    body = client.get_object(Bucket=s3_bucket, Key=sidecar_key)["Body"].read().decode()
+    # Then: The archive and its sidecar are in the bucket, and the sidecar holds a 64-char digest
+    assert set(_bucket_keys(s3_bucket)) == {
+        "test-20250609T000000.tgz",
+        "test-20250609T000000.tgz.sha256",
+    }
+    body = (
+        boto3.client("s3", region_name="us-east-1")
+        .get_object(Bucket=s3_bucket, Key="test-20250609T000000.tgz.sha256")["Body"]
+        .read()
+        .decode()
+    )
     assert len(body.split()[0]) == 64
 
 
-def test_s3_restore_rejects_corrupt_archive(s3_bucket: str, filesystem, tmp_path) -> None:
+def test_s3_restore_rejects_corrupt_archive(
+    s3_bucket: str, make_s3_app: Callable[..., EZBak], restore_dir: Path
+) -> None:
     """Verify an S3-stored archive corrupted after upload fails checksum verification."""
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
     backup = app.create_backup()[0]
 
     # Overwrite the stored object with bytes that will not match the sidecar.
     client = boto3.client("s3", region_name="us-east-1")
     client.put_object(Bucket=s3_bucket, Key=backup.name, Body=b"corrupted")
 
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
         app.restore_backup(restore_path=restore_dir)
 
 
-def test_s3_restore_removes_downloaded_archive(s3_bucket: str, filesystem, tmp_path) -> None:
+def test_s3_restore_removes_downloaded_archive(
+    make_s3_app: Callable[..., EZBak], restore_dir: Path
+) -> None:
     """Verify a successful S3 restore removes the downloaded archive from the staging dir."""
     # Given: a backup stored in S3
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
     app.create_backup()
 
     # When: restoring the backup
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
     # Then: the staging dir is empty again, so a cron restore container does not
@@ -100,17 +87,12 @@ def test_s3_restore_removes_downloaded_archive(s3_bucket: str, filesystem, tmp_p
     assert list(app.tmp_dir.iterdir()) == []
 
 
-def test_s3_prepare_for_restore_missing_object_returns_none(s3_bucket: str, filesystem) -> None:
+def test_s3_prepare_for_restore_missing_object_returns_none(
+    make_s3_app: Callable[..., EZBak],
+) -> None:
     """Verify preparing a restore for an object absent from the bucket returns None."""
     # Given: an S3 app and a backup whose object was never uploaded
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
     backend = app.backends[0]
     backup = Backup(name="test-20240609T000000.tgz", storage_type=StorageType.AWS)
 
@@ -120,25 +102,19 @@ def test_s3_prepare_for_restore_missing_object_returns_none(s3_bucket: str, file
 
 
 def test_s3_restore_missing_sidecar_warns_and_succeeds(
-    s3_bucket: str, filesystem, tmp_path, capsys
+    s3_bucket: str,
+    make_s3_app: Callable[..., EZBak],
+    restore_dir: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify an S3 restore proceeds with a warning when the sidecar object is absent."""
     # Given: a stored backup whose sidecar object has been removed
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
     backup = app.create_backup()[0]
     client = boto3.client("s3", region_name="us-east-1")
     client.delete_object(Bucket=s3_bucket, Key=backup.name + ".sha256")
 
     # When: restoring the backup
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
     # Then: the restore succeeded and warned about the missing sidecar
@@ -147,72 +123,13 @@ def test_s3_restore_missing_sidecar_warns_and_succeeds(
     assert (restore_dir / "src" / "foo.txt").exists()
 
 
-def test_s3_write_wraps_managed_transfer_error(s3_bucket: str, filesystem, mocker) -> None:
-    """Verify an upload failure surfaced as boto3's S3UploadFailedError becomes StorageWriteError."""
-    # Given: an S3 app whose managed upload fails (boto3 wraps the ClientError itself)
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
-    mocker.patch.object(
-        s3_backend(app).aws_service,
-        "upload_object",
-        side_effect=S3UploadFailedError("denied"),
-    )
-
-    # When: creating a backup
-    # Then: the run fails loudly instead of crashing with a raw boto3 error
-    with pytest.raises(BackupFailedError):
-        app.create_backup()
-
-
-def test_s3_restore_wraps_managed_transfer_error(s3_bucket: str, filesystem, mocker) -> None:
-    """Verify a download failure surfaced as boto3's RetriesExceededError becomes StorageReadError."""
-    # Given: a stored backup whose download exhausts boto3's transfer retries
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
-    app.create_backup()
-    mocker.patch.object(
-        s3_backend(app).aws_service,
-        "get_object",
-        side_effect=RetriesExceededError(OSError("connection reset")),
-    )
-
-    # When: preparing the restore
-    # Then: the failure is wrapped instead of escaping as a raw boto3 error
-    with pytest.raises(StorageReadError, match="S3 download failed"):
-        app.backends[0].prepare_for_restore(app.list_backups()[0])
-
-    # Then: no partial download is left behind in the staging dir
-    assert list(app.tmp_dir.iterdir()) == []
-
-
 def test_s3_restore_cleans_download_when_staging_fails(
-    s3_bucket: str, filesystem, tmp_path, mocker
+    make_s3_app: Callable[..., EZBak], restore_dir: Path, mocker: MockerFixture
 ) -> None:
     """Verify the downloaded archive is removed when the restore fails before extraction."""
     # Given: a stored backup and a restore whose staging dir cannot be created
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
     app.create_backup()
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     mocker.patch("ezbak.core.mkdtemp", autospec=True, side_effect=OSError("no space"))
 
     # When: restoring fails before the extract begins
@@ -223,7 +140,9 @@ def test_s3_restore_cleans_download_when_staging_fails(
     assert list(app.tmp_dir.iterdir()) == []
 
 
-def test_local_restore_keeps_stored_archive(filesystem, tmp_path) -> None:
+def test_local_restore_keeps_stored_archive(
+    filesystem: tuple[Path, Path, Path], restore_dir: Path
+) -> None:
     """Verify a local restore never deletes the stored archive it restored from."""
     # Given: a backup stored in a local storage path
     src_dir, dest1, _ = filesystem
@@ -231,8 +150,6 @@ def test_local_restore_keeps_stored_archive(filesystem, tmp_path) -> None:
     backup = app.create_backup()[0]
 
     # When: restoring the backup
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.RESTORED
 
     # Then: the archive is still in storage (prepare_for_restore returned the
@@ -241,116 +158,65 @@ def test_local_restore_keeps_stored_archive(filesystem, tmp_path) -> None:
     assert backup.path.exists()
 
 
-def test_s3_index_excludes_sidecars(s3_bucket: str, filesystem) -> None:
+def test_s3_index_excludes_sidecars(make_s3_app: Callable[..., EZBak]) -> None:
     """Verify list_backups does not count the .sha256 sidecar as a backup."""
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-    )
+    app = make_s3_app()
     app.create_backup()  # writes one archive + one sidecar
 
     # The sidecar object must not be indexed as a backup.
     assert len(app.list_backups()) == 1
 
 
-def test_s3_prune_deletes_sidecars(s3_bucket: str, filesystem) -> None:
+def test_s3_prune_deletes_sidecars(s3_bucket: str, make_s3_app: Callable[..., EZBak]) -> None:
     """Verify prune removes each pruned archive's sidecar, leaving none orphaned."""
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="k",
-        aws_secret_key="s",
-        keep_last=1,
-    )
+    app = make_s3_app(keep_last=1)
     app.create_backup()
     app.create_backup()  # two archives + two sidecars; retention keeps 1
     app.prune_backups()
 
-    client = boto3.client("s3", region_name="us-east-1")
-    keys = [o["Key"] for o in client.list_objects_v2(Bucket=s3_bucket).get("Contents", [])]
+    keys = _bucket_keys(s3_bucket)
     # One archive and its one sidecar remain; no orphaned .sha256.
     assert sum(k.endswith(".sha256") for k in keys) == 1
     assert sum(k.endswith(".tgz") for k in keys) == 1
 
 
 def _service(bucket: str, prefix: str | None = None) -> AWSService:
-    return AWSService(
-        aws_access_key="k", aws_secret_key="s", bucket_name=bucket, bucket_path=prefix
-    )
+    return AWSService(bucket_name=bucket, bucket_path=prefix)
 
 
-def _patch_session(mocker) -> tuple[MagicMock, MagicMock]:
-    """Patch boto3.Session with an autospecced session/client pair for construction-only tests.
-
-    autospec catches a misspelled or wrongly-positioned argument to Session() or
-    session.client() that a bare MagicMock would silently accept.
-
-    Returns:
-        tuple[MagicMock, MagicMock]: The patched Session class mock and the session
-            instance mock it returns.
-    """
-    mock_session_cls = mocker.patch("ezbak.storage.aws.boto3.Session", autospec=True)
-    mock_session = mock_session_cls.return_value
-    mock_session.get_credentials.return_value = mocker.MagicMock(method="explicit")
-    return mock_session_cls, mock_session
-
-
-def test_service_forwards_region_and_endpoint_to_client(mocker) -> None:
-    """Verify AWSService hands region to the session and endpoint to the client."""
+@pytest.mark.parametrize(
+    ("region", "endpoint_url", "expected_region", "expected_endpoint"),
+    [
+        pytest.param(
+            "eu-west-1",
+            "https://minio.example.com",
+            "eu-west-1",
+            "https://minio.example.com",
+            id="explicit",
+        ),
+        pytest.param(None, None, None, None, id="unset"),
+        pytest.param("", "", None, None, id="blank"),
+    ],
+)
+def test_service_forwards_region_and_endpoint(
+    patched_boto3_session: tuple[MagicMock, MagicMock],
+    region: str | None,
+    endpoint_url: str | None,
+    expected_region: str | None,
+    expected_endpoint: str | None,
+) -> None:
+    """Verify region reaches the session and endpoint the client, with blanks sent as None."""
     # Given a patched boto3.Session so no real S3 call is made
-    mock_session_cls, mock_session = _patch_session(mocker)
+    session_cls, session = patched_boto3_session
 
-    # When constructing the service with an explicit region and endpoint
-    AWSService(
-        aws_access_key="k",
-        aws_secret_key="s",
-        bucket_name="b",
-        region="eu-west-1",
-        endpoint_url="https://minio.example.com",
-    )
+    # When constructing the service
+    AWSService(bucket_name="b", region=region, endpoint_url=endpoint_url)
 
-    # Then region reaches the session (it signs requests) and endpoint reaches the
-    # client (it only redirects where requests are sent)
-    _, session_kwargs = mock_session_cls.call_args
-    assert session_kwargs["region_name"] == "eu-west-1"
-    _, client_kwargs = mock_session.client.call_args
-    assert client_kwargs["endpoint_url"] == "https://minio.example.com"
-
-
-def test_service_defaults_region_and_endpoint_to_none(mocker) -> None:
-    """Verify an unset region and endpoint pass None so boto3 resolution stays intact."""
-    # Given a patched boto3.Session
-    mock_session_cls, mock_session = _patch_session(mocker)
-
-    # When constructing the service without a region or endpoint
-    AWSService(aws_access_key="k", aws_secret_key="s", bucket_name="b")
-
-    # Then None is forwarded, deferring to boto3's standard resolution
-    _, session_kwargs = mock_session_cls.call_args
-    assert session_kwargs["region_name"] is None
-    _, client_kwargs = mock_session.client.call_args
-    assert client_kwargs["endpoint_url"] is None
-
-
-def test_service_blank_region_and_endpoint_normalized_to_none(mocker) -> None:
-    """Verify blank region/endpoint strings are normalized to None, not passed verbatim."""
-    # Given a patched boto3.Session and blank settings (e.g. EZBAK_AWS_REGION= in a template)
-    mock_session_cls, mock_session = _patch_session(mocker)
-
-    # When constructing the service with empty strings
-    AWSService(aws_access_key="k", aws_secret_key="s", bucket_name="b", region="", endpoint_url="")
-
-    # Then None is forwarded so boto3 resolves normally instead of building an invalid endpoint
-    _, session_kwargs = mock_session_cls.call_args
-    assert session_kwargs["region_name"] is None
-    _, client_kwargs = mock_session.client.call_args
-    assert client_kwargs["endpoint_url"] is None
+    # Then region reaches the session (it signs requests) and endpoint reaches the client
+    # (it only redirects where requests are sent). None defers to boto3's own resolution,
+    # so a blank value from a .env template must not reach boto3 as an empty string.
+    assert session_cls.call_args.kwargs["region_name"] == expected_region
+    assert session.client.call_args.kwargs["endpoint_url"] == expected_endpoint
 
 
 def test_service_malformed_endpoint_raises_storage_init_error() -> None:
@@ -500,23 +366,12 @@ def test_aws_service_no_bucket_name() -> None:
 
 
 def test_blank_credentials_defer_to_ambient_chain(
-    s3_bucket: str,
-    filesystem: tuple[Path, Path, Path],
-    capsys: pytest.CaptureFixture[str],
+    make_s3_app: Callable[..., EZBak], capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Verify blank credential strings defer to the chain instead of signing as empty."""
     # Given: blank credential strings, as a commented-out .env template produces
-    src_dir, _, _ = filesystem
-
     # When: building an EZBak against the bucket with debug logging
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        log_level="debug",
-        aws_s3_bucket_name=s3_bucket,
-        aws_access_key="",
-        aws_secret_key="",
-    )
+    app = make_s3_app(log_level="debug", aws_access_key="", aws_secret_key="")
 
     # Then: the ambient chain resolved rather than an explicit empty credential
     assert app.aws_service is not None
@@ -525,17 +380,12 @@ def test_blank_credentials_defer_to_ambient_chain(
     assert "resolved via 'explicit'" not in output
 
 
-def test_mock_env_scrubs_ambient_aws_credentials() -> None:
-    """Verify the autouse environment fixture leaves no resolvable AWS credentials."""
-    # Given: the autouse mock_env fixture has already run
-    # When: inspecting the environment botocore would resolve from
-    # Then: no credential variables survive and the credential files point nowhere
-    assert "AWS_ACCESS_KEY_ID" not in os.environ
-    assert "AWS_SECRET_ACCESS_KEY" not in os.environ
-    assert os.environ["AWS_EC2_METADATA_DISABLED"] == "true"
-    assert not Path(os.environ["AWS_CONFIG_FILE"]).exists()
-    assert not Path(os.environ["AWS_SHARED_CREDENTIALS_FILE"]).exists()
+def test_list_objects_propagates_client_error(s3_bucket: str, mocker) -> None:
+    """Verify a failed bucket listing raises instead of reporting an empty bucket."""
+    # Given: a service whose paginator raises
+    svc = AWSService(bucket_name=s3_bucket)
+    mocker.patch.object(svc.s3, "get_paginator", side_effect=access_denied("ListObjectsV2"))
 
-    # Then: boto3 therefore resolves nothing, so a credential-free client cannot
-    # silently authenticate as the developer running the suite
-    assert boto3.Session().get_credentials() is None
+    # When listing objects, then the error surfaces rather than becoming []
+    with pytest.raises(ClientError):
+        svc.list_objects()

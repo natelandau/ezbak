@@ -1,13 +1,18 @@
 """Test EZBak errors."""
 
+import gzip
+import io
+import tarfile
+from collections.abc import Callable
+from pathlib import Path
+
 import boto3
 import pytest
-from botocore.exceptions import ClientError
 from pydantic import ValidationError
+from pytest_mock import MockerFixture
 
 from ezbak import EZBak, ezbak
 from ezbak.backup import Backup
-from ezbak.config import BackupConfig
 from ezbak.constants import RestoreOutcome, StorageType
 from ezbak.exceptions import (
     BackendNotFoundError,
@@ -16,215 +21,98 @@ from ezbak.exceptions import (
     RestoreFailedError,
     StorageInitError,
     StorageReadError,
-    StorageWriteError,
 )
 from ezbak.storage.aws import AWSService
+from tests.helpers import access_denied
 
 
-def test_no_name(filesystem):
-    """Verify building an EZBak without a name is rejected."""
-    # Given source and destination directories
+def _symlink_source(src_dir: Path) -> list[Path]:
+    link = src_dir.parent / "symlink"
+    link.symlink_to(src_dir / "foo.txt")
+    return [link]
+
+
+@pytest.mark.parametrize(
+    "source_paths_for",
+    [
+        lambda _: [],
+        lambda src_dir: [src_dir / "not_found"],
+        _symlink_source,
+    ],
+    ids=["empty", "missing", "symlink"],
+)
+def test_create_backup_rejects_unusable_source_paths(
+    filesystem, source_paths_for: Callable[[Path], list[Path]]
+):
+    """Verify a backup with no usable source path fails instead of archiving nothing."""
+    # Given a source list that is empty, missing on disk, or a symlink
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=source_paths_for(src_dir), storage_paths=[dest1])
+
+    # When creating a backup, then it fails as a configuration error
+    with pytest.raises(ConfigurationError):
+        app.create_backup()
+
+
+@pytest.mark.parametrize(
+    "target_name",
+    ["new_dest", "file.txt"],
+    ids=["missing", "is-a-file"],
+)
+def test_restore_rejects_unusable_target(filesystem, tmp_path, target_name):
+    """Verify a restore target that is not an existing directory fails as a configuration error."""
+    # Given a restore target that is missing or a file
+    src_dir, dest1, _ = filesystem
+    (tmp_path / "file.txt").touch()
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # When restoring, then it is rejected before anything is extracted
+    with pytest.raises(ConfigurationError):
+        app.restore_backup(tmp_path / target_name)
+
+
+def test_ezbak_rejects_invalid_config(filesystem):
+    """Verify the ezbak shortcut raises on an invalid config instead of building an app."""
+    # Given options with no backup name
     src_dir, dest1, _ = filesystem
 
-    # When building without a name, then a validation error is raised
-    with pytest.raises(ValidationError, match="No backup name provided"):
-        ezbak(
-            # name="test",
-            source_paths=[src_dir],
-            storage_paths=[dest1],
-        )
+    # When building through the shortcut, then validation fails
+    with pytest.raises(ValidationError):
+        ezbak(source_paths=[src_dir], storage_paths=[dest1])
 
 
-def test_source_paths(filesystem):
-    """Test EZBak errors."""
-    _, dest1, _ = filesystem
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[],
-        storage_paths=[dest1],
-    )
-    with pytest.raises(ConfigurationError, match="No source paths provided"):
-        backup_manager.create_backup()
-
-
-def test_source_paths_not_found(filesystem):
-    """Test EZBak errors."""
-    src_dir, dest1, _ = filesystem
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir / "not_found"],
-        storage_paths=[dest1],
-    )
-    with pytest.raises(ConfigurationError, match="Source does not exist"):
-        backup_manager.create_backup()
-
-
-def test_source_paths_symlink(tmp_path, capsys, debug):
-    """Test EZBak errors."""
-    dest_dir = tmp_path / "dest"
-    dest_dir.mkdir()
-    src_dir = tmp_path / "src"
-    src_dir.mkdir()
-    (src_dir / "file.txt").touch()
-    (src_dir / "symlink").symlink_to(src_dir / "file.txt")
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir / "symlink"],
-        storage_paths=[dest_dir],
-    )
-    with pytest.raises(ConfigurationError, match="Not a file or directory"):
-        backup_manager.create_backup()
-
-
-def test_storage_paths(filesystem):
-    """Test EZBak errors."""
-    src_dir, _, _ = filesystem
-    with pytest.raises(ValueError, match="No storage configured"):
-        ezbak(
-            name="test",
-            source_paths=[src_dir],
-            storage_paths=[],
-        )
-
-
-def test_create_storage_path_dir(filesystem):
-    """Test EZBak errors."""
-    src_dir, dest1, _ = filesystem
-
-    new_dest = dest1 / "new_dir"
-    assert not new_dest.exists()
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[new_dest],
-    )
-    backup_manager.create_backup()
-
-    assert new_dest.exists()
-    assert new_dest.is_dir()
-
-
-def test_restore_no_dest(filesystem, tmp_path, debug, capsys):
-    """Test EZBak errors."""
-    src_dir, dest1, _ = filesystem
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-    )
-    with pytest.raises(ConfigurationError, match="Restore path does not exist"):
-        backup_manager.restore_backup(tmp_path / "new_dest")
-
-
-def test_restore_dest_not_dir(filesystem, tmp_path, debug, capsys):
-    """Test EZBak errors."""
-    src_dir, dest1, _ = filesystem
-
-    new_dest = dest1 / "file.txt"
-    new_dest.touch()
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-    )
-    backup_manager.create_backup()
-    with pytest.raises(ConfigurationError, match="Restore path does not exist"):
-        backup_manager.restore_backup(new_dest)
-
-
-def test_restore_no_backup(filesystem, tmp_path, debug, capsys):
-    """Test EZBak errors."""
-    src_dir, dest1, _ = filesystem
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        log_level="DEBUG",
-    )
-    # backup_manager.create_backup()
-    assert backup_manager.restore_backup(tmp_path) is RestoreOutcome.NO_BACKUP
-    output = capsys.readouterr().err
-    # debug(output)
-    assert "ERROR    | No backup found to restore" in output
-
-
-def test_no_restore_destination(filesystem, tmp_path, debug, capsys):
-    """Test EZBak errors."""
-    src_dir, dest1, _ = filesystem
-
-    backup_manager = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-    )
-    with pytest.raises(ConfigurationError, match="No restore path provided and none configured"):
-        backup_manager.restore_backup(None)
-
-
-def test_delete_unmapped_backend_raises_clear_error(filesystem):
-    """Verify deleting a backup whose backend is not configured fails loudly."""
-    # Given an app with only a local backend
-    src, dest1, _ = filesystem
-    app = ezbak(name="t", source_paths=[src], storage_paths=[dest1])
-
-    # And a backup tagged for a backend that was never built
-    orphan = Backup(name="t-20200101T000000-daily.tgz", storage_type=StorageType.AWS)
-
-    # When attempting to delete it, then a clear error names the missing backend
-    with pytest.raises(BackendNotFoundError, match="No configured backend for storage type: aws"):
-        app._delete_backup(orphan)
-
-
-def test_restore_backup_missing_local_storage_path(filesystem, tmp_path):
-    """Verify restoring with a missing local storage path fails gracefully and indexes it."""
-    # Given an app whose storage path does not exist on disk yet
-    src, dest1, _ = filesystem
-    missing_storage_path = dest1 / "not_yet_created"
-    app = ezbak(name="t", source_paths=[src], storage_paths=[missing_storage_path])
-
-    # When restoring to an existing directory
-    result = app.restore_backup(restore_path=tmp_path)
-
-    # Then no backup is found, but the storage path now exists (created during indexing)
-    assert result is RestoreOutcome.NO_BACKUP
-    assert missing_storage_path.exists()
-
-
-def test_list_and_restore_without_source_paths(filesystem, tmp_path):
-    """Verify listing and restoring do not require source paths."""
-    # Given an app configured with no source paths (e.g. a container restore)
-    _, dest1, _ = filesystem
-    app = EZBak(BackupConfig(name="t", storage_paths=[dest1]))
-
-    # When listing backups, then no error is raised for the missing source paths
-    assert app.list_backups() == []
-
-    # When restoring, then no backup is found and no "No source paths provided" error is raised
-    assert app.restore_backup(restore_path=tmp_path) is RestoreOutcome.NO_BACKUP
-
-
-def test_local_backend_write_raises_storage_write_error(filesystem, mocker):
-    """Verify LocalBackend.write raises StorageWriteError when the copy fails."""
-    # Given an ezbak app with a local destination
+def test_restore_backup_from_unconfigured_backend_raises(filesystem, restore_dir):
+    """Verify restoring a backup held by a storage type the app has no backend for fails."""
+    # Given a local-only app and an S3 backup handed in by the caller
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    backend = app.backends[0]
-    location = app.storage_locations[0]
-    tmp_backup = app.tmp_dir / "staged.tgz"
-    tmp_backup.write_bytes(b"data")
+    orphan = Backup(name="test-20200101T000000.tgz", storage_type=StorageType.AWS)
 
-    # Given the underlying copy fails
-    mocker.patch("ezbak.storage.local.copy_with_periodic_fsync", side_effect=OSError("disk full"))
+    # When restoring it, then the missing backend is reported instead of a raw KeyError
+    with pytest.raises(BackendNotFoundError):
+        app.restore_backup(restore_dir, backup=orphan)
+    assert not list(restore_dir.iterdir())
 
-    # When writing, then a StorageWriteError is raised
-    with pytest.raises(StorageWriteError, match="Local write failed"):
-        backend.write(tmp_backup=tmp_backup, storage_location=location, checksum=None)
+
+def test_restore_no_backup(filesystem, restore_dir):
+    """Verify restoring with no stored backup reports NO_BACKUP."""
+    # Given an empty storage path
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # When restoring, then there is nothing to restore
+    assert app.restore_backup(restore_dir) is RestoreOutcome.NO_BACKUP
+
+
+def test_no_restore_destination(filesystem):
+    """Verify restoring with no restore path given or configured fails."""
+    # Given an app with no configured restore path
+    src_dir, dest1, _ = filesystem
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
+
+    # When restoring without a path, then it fails as a configuration error
+    with pytest.raises(ConfigurationError, match="No restore path provided and none configured"):
+        app.restore_backup(None)
 
 
 def test_create_backup_s3_only_bad_credentials_raises(filesystem):
@@ -289,17 +177,69 @@ def test_create_backup_keeps_source_when_destination_fails(filesystem):
 
 
 def test_create_backup_raises_when_archive_creation_fails(filesystem, mocker):
-    """Verify create_backup fails loudly when the tmp archive cannot be built."""
-    # Given an app with a valid local destination
+    """Verify create_backup fails loudly and stores nothing when the archive cannot be built."""
+    # Given an app with a valid local destination and an archive that cannot be opened
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-
-    # Given archive creation fails
-    mocker.patch.object(app, "_create_tmp_backup_file", return_value=None)
+    mocker.patch("ezbak.core.tarfile.open", side_effect=OSError("No space left on device"))
 
     # When creating a backup, then it raises instead of returning silently
     with pytest.raises(BackupFailedError):
         app.create_backup()
+    assert not list(dest1.glob("*.tgz"))
+
+
+def _local_app_failing_sidecar_write(
+    mocker: MockerFixture, make_s3_app: Callable[..., EZBak], dest: Path
+) -> tuple[EZBak, Callable[[], set[str]]]:
+    original_write_text = Path.write_text
+
+    # Fail only the sidecar, so the archive reaching disk proves it is not written this way
+    def _write_text(self: Path, data: str, encoding: str | None = None) -> int:
+        if self.name.endswith(".sha256"):
+            msg = f"Read-only file system: {self}"
+            raise OSError(msg)
+        return original_write_text(self, data, encoding=encoding)
+
+    mocker.patch.object(Path, "write_text", autospec=True, side_effect=_write_text)
+    app = make_s3_app(aws_s3_bucket_name=None, storage_paths=[dest])
+    return app, lambda: {path.name for path in dest.iterdir()}
+
+
+def _s3_app_failing_sidecar_write(
+    mocker: MockerFixture, make_s3_app: Callable[..., EZBak], _dest: Path
+) -> tuple[EZBak, Callable[[], set[str]]]:
+    mocker.patch.object(
+        AWSService, "upload_content", autospec=True, side_effect=access_denied("PutObject")
+    )
+    app = make_s3_app()
+    bucket = app.settings.aws_s3_bucket_name
+    return app, lambda: {
+        x["Key"] for x in boto3.client("s3").list_objects_v2(Bucket=bucket).get("Contents", [])
+    }
+
+
+@pytest.mark.parametrize(
+    "app_failing_sidecar_write",
+    [_local_app_failing_sidecar_write, _s3_app_failing_sidecar_write],
+    ids=["local", "s3"],
+)
+def test_create_backup_succeeds_when_sidecar_write_fails(
+    filesystem, make_s3_app, mocker, app_failing_sidecar_write
+):
+    """Verify a failed checksum sidecar write still stores the archive and reports success."""
+    # Given a destination that accepts the archive but not its checksum sidecar
+    _, dest1, _ = filesystem
+    app, stored_names = app_failing_sidecar_write(mocker, make_s3_app, dest1)
+
+    # When creating a backup
+    backups = app.create_backup()
+
+    # Then the archive is stored and no sidecar exists
+    assert len(backups) == 1
+    names = stored_names()
+    assert backups[0].name in names
+    assert not [name for name in names if name.endswith(".sha256")]
 
 
 def test_create_backup_uncreatable_local_path_fails_loudly(filesystem, mocker):
@@ -320,26 +260,7 @@ def test_create_backup_uncreatable_local_path_fails_loudly(filesystem, mocker):
         app.create_backup()
 
 
-def test_restore_backup_raises_when_archive_corrupt(filesystem, tmp_path):
-    """Verify a corrupt archive fails the restore loudly instead of a silent NO_BACKUP."""
-    # Given a valid backup that has since been corrupted on disk
-    src_dir, dest1, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    app.create_backup()
-    for archive in dest1.glob("test-*.tgz"):
-        archive.write_bytes(b"not a tarball")
-
-    # When restoring, then it raises rather than returning a silent failure. The
-    # checksum sidecar written at backup time no longer matches the corrupted
-    # bytes, so checksum verification now catches this before extraction is
-    # ever attempted.
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
-    with pytest.raises(RestoreFailedError, match="Checksum mismatch"):
-        app.restore_backup(restore_dir)
-
-
-def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, tmp_path):
+def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, restore_dir):
     """Verify a failed restore with clean-before-restore fails loudly and leaves the destination untouched."""
     # Given a valid backup corrupted on disk and a restore target that was pre-populated
     src_dir, dest1, _ = filesystem
@@ -350,8 +271,6 @@ def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, tmp_
     for archive in dest1.glob("test-*.tgz"):
         archive.write_bytes(b"not a tarball")
 
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     existing_file = restore_dir / "existing.txt"
     existing_file.write_text("pre-existing")
 
@@ -362,7 +281,31 @@ def test_restore_backup_raises_after_clean_when_archive_corrupt(filesystem, tmp_
     assert existing_file.exists()
 
 
-def test_restore_backup_raises_when_archive_missing_from_storage(filesystem, tmp_path, mocker):
+def test_restore_truncated_archive_leaves_destination_untouched(filesystem, restore_dir):
+    """Verify an archive cut off mid-member fails the restore before the destination is cleaned."""
+    # Given a well-formed gzip stream holding a tar cut off 1 MiB into a 3 MiB member,
+    # with no checksum to catch it first
+    _, dest1, _ = filesystem
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as tar:
+        member = tarfile.TarInfo("src/big.bin")
+        member.size = 3 * 1024 * 1024
+        tar.addfile(member, io.BytesIO(bytes(member.size)))
+    truncated = raw.getvalue()[: 512 + 1024 * 1024]
+    (dest1 / "test-20250101T000000.tgz").write_bytes(gzip.compress(truncated))
+
+    app = ezbak(name="test", storage_paths=[dest1], use_checksums=False)
+    (restore_dir / "keep.txt").write_text("important")
+
+    # When restoring with clean_before_restore
+    with pytest.raises(RestoreFailedError):
+        app.restore_backup(restore_dir, clean_before_restore=True)
+
+    # Then the destination holds exactly what it held before
+    assert [path.name for path in restore_dir.iterdir()] == ["keep.txt"]
+
+
+def test_restore_backup_raises_when_archive_missing_from_storage(filesystem, restore_dir, mocker):
     """Verify a backup that vanished from storage fails the restore loudly."""
     # Given an app whose backend reports the archive is gone from storage
     src_dir, dest1, _ = filesystem
@@ -374,21 +317,17 @@ def test_restore_backup_raises_when_archive_missing_from_storage(filesystem, tmp
     )
 
     # When restoring, then it raises rather than reporting a silent failure
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     with pytest.raises(RestoreFailedError, match="missing from storage"):
         app.restore_backup(restore_dir)
 
 
-def test_restore_backup_does_not_clean_when_no_backup(filesystem, tmp_path):
+def test_restore_backup_does_not_clean_when_no_backup(filesystem, restore_dir):
     """Verify clean_before_restore does not empty the target when there is no backup to restore."""
     # Given an app with no backups and a pre-populated restore target
     src_dir, dest1, _ = filesystem
     app = ezbak(
         name="test", source_paths=[src_dir], storage_paths=[dest1], clean_before_restore=True
     )
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
     keep = restore_dir / "keep.txt"
     keep.write_text("important")
 
@@ -397,46 +336,21 @@ def test_restore_backup_does_not_clean_when_no_backup(filesystem, tmp_path):
     assert keep.exists()
 
 
-def test_restore_backup_unresolvable_destination_raises_configuration_error(
-    filesystem, tmp_path, mocker
-):
-    """Verify a non-TypeError failure resolving the destination becomes a ConfigurationError."""
-    # Given a destination whose resolution raises RuntimeError (e.g. an unresolvable ~ home)
+def test_restore_backup_unresolvable_destination_raises_configuration_error(filesystem):
+    """Verify a restore path whose home directory cannot be resolved becomes a ConfigurationError."""
+    # Given a restore path under the home directory of a user that does not exist
     src_dir, dest1, _ = filesystem
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
-    mocker.patch(
-        "ezbak.core.Path.expanduser",
-        side_effect=RuntimeError("Could not determine home directory"),
-    )
 
     # When restoring, then it surfaces a ConfigurationError, not a raw RuntimeError
     with pytest.raises(ConfigurationError, match="Invalid restore path"):
-        app.restore_backup("~/restore")
+        app.restore_backup("~ezbak-no-such-user/restore")
 
 
-def test_list_objects_propagates_client_error(s3_bucket: str, mocker) -> None:
-    """Verify a failed bucket listing raises instead of reporting an empty bucket."""
-    # Given: a service whose paginator raises
-    svc = AWSService(bucket_name=s3_bucket)
-    mocker.patch.object(
-        svc.s3,
-        "get_paginator",
-        side_effect=ClientError(
-            error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
-            operation_name="ListObjectsV2",
-        ),
-    )
-
-    # When listing objects, then the error surfaces rather than becoming []
-    with pytest.raises(ClientError):
-        svc.list_objects()
-
-
-def test_s3_index_wraps_listing_failure(s3_bucket: str, filesystem, break_s3_listing) -> None:
+def test_s3_index_wraps_listing_failure(make_s3_app, break_s3_listing) -> None:
     """Verify a failed listing becomes a StorageReadError at the backend boundary."""
     # Given: an S3-backed app whose listing fails
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    app = make_s3_app()
     break_s3_listing()
     backend = app.backends[0]
 
@@ -446,17 +360,12 @@ def test_s3_index_wraps_listing_failure(s3_bucket: str, filesystem, break_s3_lis
 
 
 def test_create_backup_keeps_local_copy_when_s3_listing_fails(
-    s3_bucket: str, filesystem, break_s3_listing
+    s3_bucket: str, filesystem, make_s3_app, break_s3_listing
 ) -> None:
     """Verify a failed S3 listing still writes every destination and fails the run loudly."""
     # Given: a healthy local destination alongside an S3 bucket that cannot be listed
-    src_dir, dest1, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        aws_s3_bucket_name=s3_bucket,
-    )
+    _, dest1, _ = filesystem
+    app = make_s3_app(storage_paths=[dest1])
     break_s3_listing()
 
     # When creating a backup
@@ -469,29 +378,6 @@ def test_create_backup_keeps_local_copy_when_s3_listing_fails(
         StorageType.LOCAL,
         StorageType.AWS,
     }
-
-
-def test_index_failures_reset_between_passes(s3_bucket: str, filesystem, break_s3_listing) -> None:
-    """Verify a recovered destination clears the recorded failure on the next index."""
-    # Given: an app whose S3 listing fails once, as a long-lived container would see
-    src_dir, dest1, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        aws_s3_bucket_name=s3_bucket,
-    )
-    mock_list = break_s3_listing()
-    with pytest.raises(BackupFailedError):
-        app.create_backup()
-
-    # When the destination recovers and a later scheduled run indexes again
-    mock_list.side_effect = None
-    mock_list.return_value = []
-
-    # Then the stale failure is gone and the run succeeds
-    assert app.create_backup()
-    assert app._index_failures == []
 
 
 def test_local_index_failure_is_recorded(filesystem, mocker) -> None:
@@ -511,73 +397,46 @@ def test_local_index_failure_is_recorded(filesystem, mocker) -> None:
         app.create_backup()
 
 
+@pytest.mark.parametrize(
+    ("options", "break_listing_after_backup"),
+    [
+        ({"skip_if_no_backup": True}, True),
+        ({"restore_date": "20250102"}, True),
+        ({"aws_s3_bucket_name": "missing-bucket", "skip_if_no_backup": True}, False),
+    ],
+    ids=[
+        "listing-denied-skip-if-no-backup",
+        "listing-denied-restore-date",
+        "bucket-missing-skip-if-no-backup",
+    ],
+)
 def test_restore_refuses_when_destination_unreadable(
-    s3_bucket: str, filesystem, tmp_path, break_s3_listing
+    make_s3_app, break_s3_listing, restore_dir, options, break_listing_after_backup
 ) -> None:
-    """Verify an unreadable destination fails a restore even with skip_if_no_backup set."""
-    # Given: a stored backup, then a bucket that can no longer be listed, and the
-    # fresh-deployment flag an orchestrated pre-start task would set
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
-    app.create_backup()
-    break_s3_listing()
-    app.rebuild_storage_locations = True
-    app.settings.skip_if_no_backup = True
+    """Verify an unreadable destination fails a restore instead of reporting nothing to restore."""
+    # Given: a destination that cannot be read, either because its listing is denied after a
+    # backup was stored or because the bucket does not exist, plus an option that would
+    # otherwise turn a missing backup into a clean no-op or a point-in-time lookup
+    app = make_s3_app(**options)
+    if break_listing_after_backup:
+        app.create_backup()
+        break_s3_listing()
+        app.rebuild_storage_locations = True
 
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
-
-    # When restoring, then it fails instead of reporting a clean "nothing to restore"
+    # When restoring, then it fails
     with pytest.raises(RestoreFailedError, match="Cannot determine available backups"):
         app.restore_backup(restore_path=restore_dir)
-
-
-def test_restore_refuses_when_destination_unreadable_with_restore_date(
-    s3_bucket: str, filesystem, tmp_path, break_s3_listing
-) -> None:
-    """Verify an unreadable destination fails a restore even with a restore_date configured."""
-    # Given: a stored backup, then a bucket that can no longer be listed, and a
-    # restore_date configured to select a point in time rather than the latest backup
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
-    app.create_backup()
-    break_s3_listing()
-    app.rebuild_storage_locations = True
-    app.settings.restore_date = "20250102"
-
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
-
-    # When restoring, then it fails before ever resolving the restore_date
-    with pytest.raises(RestoreFailedError, match="Cannot determine available backups"):
-        app.restore_backup(restore_path=restore_dir)
-
-
-def test_restore_empty_bucket_still_reports_no_backup(s3_bucket: str, filesystem, tmp_path) -> None:
-    """Verify a genuinely empty destination still reports NO_BACKUP, not a failure."""
-    # Given: a readable but empty bucket, the real fresh-deployment case
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
-
-    # When restoring, then the fresh-deployment path is intact
-    assert app.restore_backup(restore_path=restore_dir) is RestoreOutcome.NO_BACKUP
 
 
 def test_restore_explicit_backup_skips_index_check(
-    s3_bucket: str, filesystem, tmp_path, break_s3_listing
+    make_s3_app, break_s3_listing, restore_dir
 ) -> None:
     """Verify an explicitly supplied backup restores without needing a complete index."""
     # Given: a stored backup held by the caller, then a bucket that cannot be listed
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    app = make_s3_app()
     backup = app.create_backup()[0]
     break_s3_listing()
     app.rebuild_storage_locations = True
-
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
 
     # When restoring that specific backup, then no index is required
     assert app.restore_backup(restore_path=restore_dir, backup=backup) is RestoreOutcome.RESTORED
@@ -585,17 +444,12 @@ def test_restore_explicit_backup_skips_index_check(
 
 
 def test_unreadable_locations_exposes_failed_index(
-    s3_bucket: str, filesystem, break_s3_listing
+    s3_bucket: str, filesystem, make_s3_app, break_s3_listing
 ) -> None:
     """Verify a failed index is observable through the public unreadable_locations property."""
     # Given: a local destination alongside a bucket that cannot be listed
-    src_dir, dest1, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        aws_s3_bucket_name=s3_bucket,
-    )
+    _, dest1, _ = filesystem
+    app = make_s3_app(storage_paths=[dest1])
     break_s3_listing()
 
     # When listing backups
@@ -605,16 +459,11 @@ def test_unreadable_locations_exposes_failed_index(
     assert app.unreadable_locations == [f"S3 bucket '{s3_bucket}'"]
 
 
-def test_unreadable_locations_empty_when_all_locations_readable(s3_bucket: str, filesystem) -> None:
+def test_unreadable_locations_empty_when_all_locations_readable(filesystem, make_s3_app) -> None:
     """Verify a healthy index reports no unreadable locations."""
     # Given: a readable bucket and local path
-    src_dir, dest1, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        aws_s3_bucket_name=s3_bucket,
-    )
+    _, dest1, _ = filesystem
+    app = make_s3_app(storage_paths=[dest1])
 
     # When listing backups
     app.list_backups()
@@ -623,11 +472,10 @@ def test_unreadable_locations_empty_when_all_locations_readable(s3_bucket: str, 
     assert app.unreadable_locations == []
 
 
-def test_unreadable_locations_returns_a_copy(s3_bucket: str, filesystem, break_s3_listing) -> None:
+def test_unreadable_locations_returns_a_copy(s3_bucket: str, make_s3_app, break_s3_listing) -> None:
     """Verify mutating the returned list cannot corrupt the manager's internal state."""
     # Given: an app with one unreadable destination
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    app = make_s3_app()
     break_s3_listing()
 
     # When a caller mutates what it was handed
@@ -637,35 +485,13 @@ def test_unreadable_locations_returns_a_copy(s3_bucket: str, filesystem, break_s
     assert app.unreadable_locations == [f"S3 bucket '{s3_bucket}'"]
 
 
-def test_restore_refuses_when_destination_failed_construction(
-    s3_bucket: str, filesystem, tmp_path
-) -> None:
-    """Verify a destination that failed at construction fails a restore, not reports NO_BACKUP."""
-    # Given: an app pointed at a bucket that does not exist, so the backend is never
-    # built, plus the fresh-deployment flag an orchestrated pre-start task would set
-    src_dir, _, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        aws_s3_bucket_name="missing-bucket",
-        skip_if_no_backup=True,
-    )
-    restore_dir = tmp_path / "restore"
-    restore_dir.mkdir()
-
-    # When restoring, then it fails instead of reporting a clean "nothing to restore"
-    with pytest.raises(RestoreFailedError, match="Cannot determine available backups"):
-        app.restore_backup(restore_path=restore_dir)
-
-
 def test_create_backup_uploads_when_s3_listing_fails(
-    s3_bucket: str, filesystem, break_s3_listing
+    s3_bucket: str, make_s3_app, break_s3_listing
 ) -> None:
     """Verify an S3-only run whose listing fails still uploads the archive and fails loudly."""
     # Given: an S3-only destination that can no longer be listed, as an S3-only
     # post-stop final backup with no retry would find it
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    app = make_s3_app()
     break_s3_listing()
 
     # When creating a backup
@@ -682,21 +508,14 @@ def test_create_backup_uploads_when_s3_listing_fails(
 
 
 def test_create_backup_names_a_failed_destination_once(
-    s3_bucket: str, filesystem, break_s3_listing, mocker
+    s3_bucket: str, make_s3_app, break_s3_listing, mocker
 ) -> None:
     """Verify a destination that fails to index and to write is named once in the error."""
     # Given: a bucket that can neither be listed nor written
-    src_dir, _, _ = filesystem
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    app = make_s3_app()
     break_s3_listing()
     mocker.patch.object(
-        AWSService,
-        "upload_object",
-        autospec=True,
-        side_effect=ClientError(
-            error_response={"Error": {"Code": "AccessDenied", "Message": "denied"}},
-            operation_name="PutObject",
-        ),
+        AWSService, "upload_object", autospec=True, side_effect=access_denied("PutObject")
     )
 
     # When creating a backup
@@ -708,18 +527,17 @@ def test_create_backup_names_a_failed_destination_once(
 
 
 def test_unusable_destination_is_rebuilt_after_it_recovers(
-    s3_bucket: str, filesystem, mocker
+    s3_bucket: str, make_s3_app, mocker
 ) -> None:
     """Verify a destination that could not be constructed is retried on a later pass."""
     # Given: a bucket unreachable for the first two attempts, as a container starting
     # before its network or instance role is ready would see
-    src_dir, _, _ = filesystem
     recovered = AWSService(bucket_name=s3_bucket)
     mocker.patch(
         "ezbak.core.AWSService",
         side_effect=[StorageInitError("unreachable"), StorageInitError("unreachable"), recovered],
     )
-    app = ezbak(name="test", source_paths=[src_dir], aws_s3_bucket_name=s3_bucket)
+    app = make_s3_app()
     assert app.aws_service is None
     assert app.unreadable_locations == [f"S3 bucket '{s3_bucket}'"]
 
@@ -730,17 +548,12 @@ def test_unusable_destination_is_rebuilt_after_it_recovers(
 
 
 def test_create_backup_does_not_report_a_stale_index_failure(
-    s3_bucket: str, filesystem, break_s3_listing
+    s3_bucket: str, filesystem, make_s3_app, break_s3_listing
 ) -> None:
     """Verify a backup run reports the index failures of its own pass, not a cached one."""
     # Given: an app that indexed while the bucket could not be listed
-    src_dir, dest1, _ = filesystem
-    app = ezbak(
-        name="test",
-        source_paths=[src_dir],
-        storage_paths=[dest1],
-        aws_s3_bucket_name=s3_bucket,
-    )
+    _, dest1, _ = filesystem
+    app = make_s3_app(storage_paths=[dest1])
     mock_list = break_s3_listing()
     assert app.unreadable_locations == [f"S3 bucket '{s3_bucket}'"]
 

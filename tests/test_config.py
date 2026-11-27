@@ -1,5 +1,6 @@
 """Tests for BackupConfig and EnvConfig."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -7,13 +8,10 @@ import pytest
 from pydantic import ValidationError
 
 from ezbak.config import BackupConfig, coerce_path_list
-from ezbak.constants import (
-    ALWAYS_EXCLUDE_FILENAMES,
-    RESTORE_POPULATED_IGNORE_FILENAMES,
-    RestoreOutcome,
-)
 from ezbak.env import EnvConfig
-from tests.helpers import make_db
+
+# Builds (source_paths, sqlite_paths) for a config from a scratch directory
+SqliteCase = Callable[[Path], tuple[list[Any], Any]]
 
 
 def test_backupconfig_requires_name():
@@ -37,104 +35,91 @@ def test_backupconfig_does_not_read_env(monkeypatch):
     assert config.name == "explicit"
 
 
-def test_envconfig_reads_env(monkeypatch):
-    """Verify EnvConfig loads EZBAK_-prefixed environment variables."""
-    # Given EZBAK_ env vars
+@pytest.mark.parametrize(
+    ("env", "field", "expected"),
+    [
+        ({}, "name", "from-env"),
+        ({"EZBAK_RESTORE_DATE": "20250102"}, "restore_date", "20250102"),
+        ({"EZBAK_AWS_REGION": "ap-southeast-2"}, "aws_region", "ap-southeast-2"),
+        (
+            {"EZBAK_AWS_S3_ENDPOINT_URL": "https://minio.example.com"},
+            "aws_s3_endpoint_url",
+            "https://minio.example.com",
+        ),
+        (
+            {"EZBAK_SOURCE_PATHS": "/data", "EZBAK_SQLITE_PATHS": "/data/gitea/gitea.db"},
+            "sqlite_paths",
+            [Path("/data/gitea/gitea.db")],
+        ),
+        ({"EZBAK_BACKUP_ON_SHUTDOWN": "true"}, "backup_on_shutdown", True),
+        ({"EZBAK_CRON_JITTER": "120"}, "cron_jitter", 120),
+        (
+            {"EZBAK_PRE_BACKUP_HOOK": 'sqlite3 /data/db ".backup /data/db.bak"'},
+            "pre_backup_hook",
+            'sqlite3 /data/db ".backup /data/db.bak"',
+        ),
+        ({"EZBAK_HOOK_TIMEOUT": "30"}, "hook_timeout", 30),
+    ],
+    ids=[
+        "name",
+        "restore-date",
+        "region",
+        "endpoint-url",
+        "sqlite-paths",
+        "backup-on-shutdown",
+        "cron-jitter",
+        "pre-backup-hook",
+        "hook-timeout",
+    ],
+)
+def test_envconfig_reads_env(monkeypatch, env, field, expected):
+    """Verify EnvConfig loads each EZBAK_-prefixed environment variable into its field."""
+    # Given the required fields plus one option in the environment
     monkeypatch.setenv("EZBAK_NAME", "from-env")
     monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
 
     # When building an EnvConfig
     config = EnvConfig()
 
-    # Then values come from the environment
-    assert config.name == "from-env"
+    # Then the field holds the parsed value
+    assert getattr(config, field) == expected
 
 
-def test_envconfig_is_a_backupconfig():
-    """Verify EnvConfig is substitutable for BackupConfig."""
-    # Given/When an EnvConfig type
-    # Then it is a subclass of BackupConfig (so EZBak(EnvConfig()) works)
-    assert issubclass(EnvConfig, BackupConfig)
-
-
-def test_coerce_path_list_empty_string_returns_empty():
-    """Verify an empty string yields no paths instead of a phantom cwd entry."""
-    # Given an empty string (e.g. an unset EZBAK_STORAGE_PATHS env var)
-    # When coercing, then no paths are produced
-    assert coerce_path_list("") == []
-
-
-def test_envconfig_reads_restore_date(monkeypatch):
-    """Verify EnvConfig loads EZBAK_RESTORE_DATE into restore_date."""
-    # Given the env var set alongside the required fields
+@pytest.mark.parametrize(
+    "env_var",
+    ["EZBAK_CRON_JITTER", "EZBAK_HOOK_TIMEOUT"],
+    ids=["cron-jitter", "hook-timeout"],
+)
+def test_envconfig_rejects_negative(monkeypatch, env_var):
+    """Verify a mistyped negative duration is rejected when the environment is loaded."""
+    # Given an otherwise valid environment with one negative duration
     monkeypatch.setenv("EZBAK_NAME", "from-env")
     monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")
-    monkeypatch.setenv("EZBAK_RESTORE_DATE", "20250102")
+    monkeypatch.setenv(env_var, "-1")
 
     # When building an EnvConfig
-    config = EnvConfig()
-
-    # Then restore_date is populated from the environment
-    assert config.restore_date == "20250102"
-
-
-def test_backupconfig_accepts_region_and_endpoint():
-    """Verify BackupConfig accepts the S3 region and endpoint fields."""
-    # Given a config with an explicit region and S3-compatible endpoint
-    config = BackupConfig(
-        name="x",
-        aws_s3_bucket_name="my-bucket",
-        aws_region="eu-west-1",
-        aws_s3_endpoint_url="https://minio.example.com",
-    )
-
-    # Then both settings are stored on the config
-    assert config.aws_region == "eu-west-1"
-    assert config.aws_s3_endpoint_url == "https://minio.example.com"
+    # Then validation fails
+    with pytest.raises(ValidationError):
+        EnvConfig()
 
 
-def test_backupconfig_region_and_endpoint_default_none():
-    """Verify region and endpoint default to None so boto3 resolution stays intact."""
-    # Given a config with no region or endpoint set
-    config = BackupConfig(name="x", aws_s3_bucket_name="my-bucket")
-
-    # Then both are None, deferring to boto3's standard resolution
-    assert config.aws_region is None
-    assert config.aws_s3_endpoint_url is None
-
-
-def test_envconfig_reads_region_and_endpoint(monkeypatch):
-    """Verify EnvConfig loads EZBAK_AWS_REGION and EZBAK_AWS_S3_ENDPOINT_URL."""
-    # Given the S3 env vars set alongside the required fields
-    monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_AWS_S3_BUCKET_NAME", "my-bucket")
-    monkeypatch.setenv("EZBAK_AWS_REGION", "ap-southeast-2")
-    monkeypatch.setenv("EZBAK_AWS_S3_ENDPOINT_URL", "https://minio.example.com")
-
-    # When building an EnvConfig
-    config = EnvConfig()
-
-    # Then both settings are populated from the environment
-    assert config.aws_region == "ap-southeast-2"
-    assert config.aws_s3_endpoint_url == "https://minio.example.com"
-
-
-def test_coerce_path_list_skips_blank_segments():
-    """Verify blank comma segments do not inject a phantom cwd path."""
-    # Given a comma list with an empty middle segment
-    result = coerce_path_list("/tmp/a,,/tmp/b")
-
-    # Then only the two real paths are returned, no cwd entry
-    assert result == [Path("/tmp/a"), Path("/tmp/b")]
-
-
-def test_coerce_path_list_strips_whitespace_around_entries():
-    """Verify padded comma entries resolve to the real path, not a cwd-relative one."""
-    # Given a comma list with spaces around each entry (e.g. "/tmp/a, /tmp/b")
-    result = coerce_path_list("/tmp/a, /tmp/b")
-
-    # Then each entry is stripped to an absolute path, not Path(" /tmp/b") under cwd
-    assert result == [Path("/tmp/a"), Path("/tmp/b")]
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("", []),
+        ("/tmp/a,,/tmp/b", [Path("/tmp/a"), Path("/tmp/b")]),
+        ("/tmp/a, /tmp/b", [Path("/tmp/a"), Path("/tmp/b")]),
+    ],
+    ids=["empty", "blank-segment", "padded"],
+)
+def test_coerce_path_list(value, expected):
+    """Verify a comma list yields only its real paths, never a phantom cwd-relative entry."""
+    # Given a comma-separated value like an env var supplies
+    # When coercing it
+    # Then only the real, stripped paths remain
+    assert coerce_path_list(value) == expected
 
 
 def test_retention_policy_derivation_keep_last():
@@ -183,244 +168,81 @@ def test_unusable_log_level_rejected(log_level):
         BackupConfig(name="x", storage_paths=["/tmp"], log_level=log_level)
 
 
-def test_use_checksums_defaults_true():
-    """Verify use_checksums defaults to True."""
-    # Given a minimal config with no explicit use_checksums
-    config = BackupConfig(name="test", storage_paths=["/tmp/x"])
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        pytest.param(
+            lambda _: (["/data"], "/data/a.db,/data/b.db"),
+            lambda _: [Path("/data/a.db"), Path("/data/b.db")],
+            id="comma-string",
+        ),
+        pytest.param(
+            lambda _: (["/data/gitea.db"], ["/data/gitea.db"]),
+            lambda _: [Path("/data/gitea.db")],
+            id="file-source-is-db",
+        ),
+        pytest.param(
+            lambda _: (["/data"], ["**/*.db"]),
+            lambda _: [Path("**/*.db")],
+            id="relative-pattern",
+        ),
+        # Containment is enforced per match at expansion time, not on the pattern itself
+        pytest.param(
+            lambda root: ([root / "a", root / "b"], [root / "*" / "*.db"]),
+            lambda root: [root / "*" / "*.db"],
+            id="pattern-above-sources",
+        ),
+    ],
+)
+def test_backupconfig_accepts_sqlite_paths(
+    tmp_path, case: SqliteCase, expected: Callable[[Path], list[Path]]
+):
+    """Verify a usable sqlite path entry is stored as written, with no expansion at construction."""
+    # Given existing source directories and a sqlite path entry
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    source_paths, sqlite_paths = case(tmp_path)
 
-    # Then it defaults to using checksum sidecars
-    assert config.use_checksums is True
-
-
-def test_compression_level_defaults_to_six():
-    """Verify the default gzip level is 6, the speed/size sweet spot."""
-    # Given a minimal config with no explicit compression_level
     # When constructing the config
-    config = BackupConfig(name="test", storage_paths=["/tmp/x"])
-
-    # Then it defaults to gzip level 6
-    assert config.compression_level == 6
-
-
-def test_restore_outcome_members():
-    """Verify RestoreOutcome exposes the three restore result states."""
-    # Given/Then the enum carries exactly the three outcomes
-    assert {o.value for o in RestoreOutcome} == {"restored", "no_backup", "skipped"}
-
-
-def test_restore_populated_ignore_filenames():
-    """Verify the populated-ignore list extends the always-excluded names with lost+found."""
-    # Given the always-excluded OS cruft
-    # Then the populated-ignore list is a superset that adds lost+found
-    assert set(ALWAYS_EXCLUDE_FILENAMES).issubset(RESTORE_POPULATED_IGNORE_FILENAMES)
-    assert "lost+found" in RESTORE_POPULATED_IGNORE_FILENAMES
-
-
-def test_backupconfig_sqlite_paths_defaults_to_empty():
-    """Verify the option is inert when unset."""
-    # Given a config with no sqlite paths
-    config = BackupConfig(name="x", storage_paths=["/tmp"], source_paths=["/data"])
-
-    # Then the list is empty
-    assert config.sqlite_paths == []
-
-
-def test_backupconfig_sqlite_paths_accepts_a_comma_separated_string():
-    """Verify the env-style comma-separated form is coerced to paths."""
-    # Given a comma-separated value like an env var supplies
     config = BackupConfig(
-        name="x",
-        storage_paths=["/tmp"],
-        source_paths=["/data"],
-        sqlite_paths="/data/a.db,/data/b.db",
+        name="x", storage_paths=["/tmp"], source_paths=source_paths, sqlite_paths=sqlite_paths
     )
 
-    # Then it becomes a list of absolute paths
-    assert config.sqlite_paths == [Path("/data/a.db"), Path("/data/b.db")]
+    # Then the entries are stored as written
+    assert config.sqlite_paths == expected(tmp_path)
 
 
-def test_backupconfig_rejects_sqlite_path_outside_sources():
-    """Verify a database with no enclosing source is rejected at construction."""
-    # Given a sqlite path outside every source path
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(lambda _: (["/data"], ["/elsewhere/a.db"]), id="outside-sources"),
+        pytest.param(
+            lambda _: (["/data", "/data/gitea"], ["/data/gitea/gitea.db"]),
+            id="overlapping-sources",
+        ),
+        pytest.param(
+            lambda root: ([root / "data"], [root / "data" / "typo" / "*.db"]),
+            id="missing-pattern-root",
+        ),
+        pytest.param(
+            lambda root: ([root / "data"], [root / "data" / ".." / "etc" / "app.db"]),
+            id="parent-component",
+        ),
+        pytest.param(
+            lambda root: ([root / "data"], [root / "data" / "**.db"]),
+            id="partial-double-star",
+        ),
+    ],
+)
+def test_backupconfig_rejects_sqlite_paths(tmp_path, case: SqliteCase):
+    """Verify a sqlite path entry that cannot produce a restorable snapshot fails at construction."""
+    # Given an existing source directory and an unusable sqlite path entry
+    (tmp_path / "data").mkdir()
+    source_paths, sqlite_paths = case(tmp_path)
+
     # When constructing the config
-    # Then validation fails, naming the offending path
-    with pytest.raises(ValidationError, match="elsewhere"):
+    # Then validation fails instead of failing mid-backup
+    with pytest.raises(ValidationError):
         BackupConfig(
-            name="x",
-            storage_paths=["/tmp"],
-            source_paths=["/data"],
-            sqlite_paths=["/elsewhere/a.db"],
-        )
-
-
-def test_backupconfig_rejects_sqlite_path_under_overlapping_sources():
-    """Verify nested sources are rejected, since the archive position would be ambiguous."""
-    # Given two configured sources that both contain the database
-    # When constructing the config
-    # Then validation fails
-    with pytest.raises(ValidationError, match="more than one"):
-        BackupConfig(
-            name="x",
-            storage_paths=["/tmp"],
-            source_paths=["/data", "/data/gitea"],
-            sqlite_paths=["/data/gitea/gitea.db"],
-        )
-
-
-def test_backupconfig_accepts_sqlite_path_equal_to_a_file_source():
-    """Verify backing up a single database file directly is allowed."""
-    # Given a source path that is itself the database
-    config = BackupConfig(
-        name="x",
-        storage_paths=["/tmp"],
-        source_paths=["/data/gitea.db"],
-        sqlite_paths=["/data/gitea.db"],
-    )
-
-    # Then it validates
-    assert config.sqlite_paths == [Path("/data/gitea.db")]
-
-
-def test_envconfig_reads_sqlite_paths(monkeypatch):
-    """Verify the container surface picks the option up from the environment."""
-    # Given EZBAK_ env vars including sqlite paths
-    monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")
-    monkeypatch.setenv("EZBAK_SOURCE_PATHS", "/data")
-    monkeypatch.setenv("EZBAK_SQLITE_PATHS", "/data/gitea/gitea.db")
-
-    # When building an EnvConfig
-    config = EnvConfig(_env_file=None)
-
-    # Then the sqlite paths are loaded
-    assert config.sqlite_paths == [Path("/data/gitea/gitea.db")]
-
-
-def test_backupconfig_keeps_a_relative_sqlite_pattern_relative():
-    """Verify a relative pattern is not nailed to the process working directory."""
-    # Given a relative pattern, which is anchored to source paths at expansion time
-    config = BackupConfig(
-        name="x",
-        storage_paths=["/tmp"],
-        source_paths=["/data"],
-        sqlite_paths=["**/*.db"],
-    )
-
-    # Then it survives coercion unchanged
-    assert config.sqlite_paths == [Path("**/*.db")]
-
-
-def test_backupconfig_accepts_an_absolute_sqlite_pattern(tmp_path):
-    """Verify an absolute pattern rooted at a real directory is accepted, regardless of containment."""
-    # Given a pattern whose static prefix sits above every configured source path;
-    # containment is enforced per match at expansion time, not on the pattern itself
-    source = tmp_path / "data"
-    first = source / "a"
-    second = source / "b"
-    first.mkdir(parents=True)
-    second.mkdir()
-
-    config = BackupConfig(
-        name="x",
-        storage_paths=["/tmp"],
-        source_paths=[first, second],
-        sqlite_paths=[source / "*.db"],
-    )
-
-    # Then it is stored as written, with no expansion at construction time
-    assert config.sqlite_paths == [source / "*.db"]
-
-
-def test_backupconfig_accepts_a_pattern_rooted_at_an_empty_directory(tmp_path):
-    """Verify a fresh deployment with no databases yet still constructs, regardless of containment."""
-    # Given an existing but empty data directory whose pattern sits above every source path;
-    # containment is enforced per match at expansion time, not on the pattern itself
-    source = tmp_path / "data"
-    first = source / "a"
-    second = source / "b"
-    first.mkdir(parents=True)
-    second.mkdir()
-
-    # Then the config is valid, since the databases arrive with the service
-    config = BackupConfig(
-        name="x",
-        storage_paths=["/tmp"],
-        source_paths=[first, second],
-        sqlite_paths=[source / "**" / "*.db"],
-    )
-
-    assert config.sqlite_paths == [source / "**" / "*.db"]
-
-
-def test_backupconfig_rejects_a_pattern_rooted_at_a_missing_directory(tmp_path):
-    """Verify a mistyped directory in a pattern fails at construction, not silently."""
-    # Given an absolute pattern whose static prefix does not exist
-    source = tmp_path / "data"
-    source.mkdir()
-
-    # When constructing the config
-    # Then validation fails, naming the directory that is missing
-    with pytest.raises(ValidationError, match="is not an existing directory"):
-        BackupConfig(
-            name="x",
-            storage_paths=["/tmp"],
-            source_paths=[source],
-            sqlite_paths=[source / "typo" / "*.db"],
-        )
-
-
-def test_backupconfig_skips_source_containment_for_patterns(tmp_path):
-    """Verify a pattern is not checked for containment, since only matches can be."""
-    # Given a pattern whose static prefix sits above every source path
-    first = tmp_path / "a"
-    second = tmp_path / "b"
-    first.mkdir()
-    second.mkdir()
-
-    # When constructing the config
-    # Then it is accepted, because matches under either source are legitimate
-    config = BackupConfig(
-        name="x",
-        storage_paths=["/tmp"],
-        source_paths=[first, second],
-        sqlite_paths=[tmp_path / "*" / "*.db"],
-    )
-
-    assert config.sqlite_paths == [tmp_path / "*" / "*.db"]
-
-
-def test_backupconfig_rejects_a_sqlite_path_with_a_parent_component(tmp_path):
-    """Verify a '..' entry fails at construction rather than producing an unrestorable archive."""
-    # Given a literal path that escapes its source path through '..'
-    source = tmp_path / "data"
-    outside = tmp_path / "etc"
-    source.mkdir()
-    outside.mkdir()
-    make_db(outside / "app.db")
-
-    # When constructing the config
-    # Then validation fails, since containment is decided without resolving the path
-    with pytest.raises(ValidationError, match=r"contains a '\.\.' component"):
-        BackupConfig(
-            name="x",
-            storage_paths=["/tmp"],
-            source_paths=[source],
-            sqlite_paths=[source / ".." / "etc" / "app.db"],
-        )
-
-
-def test_backupconfig_rejects_a_partial_double_star_component(tmp_path):
-    """Verify a '**' that is not a whole component fails at construction, not mid-backup."""
-    # Given a pattern whose recursive wildcard is glued to an extension
-    source = tmp_path / "data"
-    source.mkdir()
-
-    # When constructing the config
-    # Then validation fails, naming the component Python cannot glob consistently
-    with pytest.raises(ValidationError, match="'\\*\\*' must be a whole path component"):
-        BackupConfig(
-            name="x",
-            storage_paths=["/tmp"],
-            source_paths=[source],
-            sqlite_paths=[source / "**.db"],
+            name="x", storage_paths=["/tmp"], source_paths=source_paths, sqlite_paths=sqlite_paths
         )

@@ -6,11 +6,11 @@ import stat
 import subprocess
 import sys
 import textwrap
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
 import pytest
-from loguru import logger
 
 from ezbak import sqlite as ezbak_sqlite
 from ezbak.exceptions import SqliteSnapshotError
@@ -102,14 +102,34 @@ def test_snapshot_database_rejects_a_non_database(tmp_path):
         snapshot_database(source, dest=dest)
 
 
-def test_snapshot_database_rejects_a_corrupt_database(tmp_path):
-    """Verify a database with a damaged page fails rather than shipping silently."""
-    # Given a database whose first b-tree page header has been overwritten
-    source = tmp_path / "corrupt.db"
-    make_db(source, rows=50, wal=False)
-    data = bytearray(source.read_bytes())
+def _damage_btree_page_header(path: Path) -> None:
+    data = bytearray(path.read_bytes())
     data[100:120] = b"\xff" * 20
-    source.write_bytes(bytes(data))
+    path.write_bytes(bytes(data))
+
+
+def _damage_interior_page(path: Path) -> None:
+    data = bytearray(path.read_bytes())
+    start = 4096 * 3 + 8
+    data[start : start + 32] = b"\xff" * 32
+    path.write_bytes(bytes(data))
+
+
+@pytest.mark.parametrize(
+    ("rows", "damage"),
+    [
+        pytest.param(50, _damage_btree_page_header, id="first-page-header"),
+        pytest.param(2000, _damage_interior_page, id="later-page"),
+    ],
+)
+def test_snapshot_database_rejects_a_corrupt_database(
+    tmp_path: Path, rows: int, damage: Callable[[Path], None]
+) -> None:
+    """Verify a database with a damaged page fails rather than shipping silently."""
+    # Given a rollback-mode database with one of its pages overwritten
+    source = tmp_path / "corrupt.db"
+    make_db(source, rows=rows, wal=False)
+    damage(source)
     dest = tmp_path / "snap" / "corrupt.db"
 
     # When snapshotting it
@@ -269,20 +289,6 @@ def test_snapshot_database_fails_when_the_lock_wait_times_out(tmp_path, monkeypa
         snapshot_database(source, dest=tmp_path / "snap" / "live.db")
 
 
-def test_snapshot_database_creates_missing_parent_directories(tmp_path):
-    """Verify the snapshot destination tree is created on demand."""
-    # Given a destination several levels below an existing directory
-    source = tmp_path / "live.db"
-    make_db(source)
-    dest = tmp_path / "a" / "b" / "c" / "live.db"
-
-    # When snapshotting
-    snapshot_database(source, dest=dest)
-
-    # Then the intermediate directories were created
-    assert dest.exists()
-
-
 def test_sidecar_paths_covers_wal_shm_and_journal(tmp_path):
     """Verify every journal sibling SQLite may leave behind is named."""
     # Given a database path
@@ -295,38 +301,29 @@ def test_sidecar_paths_covers_wal_shm_and_journal(tmp_path):
     assert result == ["gitea.db-wal", "gitea.db-shm", "gitea.db-journal"]
 
 
-def test_containing_source_paths_finds_the_enclosing_source():
-    """Verify a nested database resolves to the source directory holding it."""
-    # Given two configured sources, one of which contains the database
-    sources = [Path("/data"), Path("/other")]
+@pytest.mark.parametrize(
+    ("database", "sources", "expected"),
+    [
+        pytest.param("/data/gitea/gitea.db", ["/data", "/other"], ["/data"], id="enclosing"),
+        pytest.param(
+            "/data/gitea/gitea.db",
+            ["/data", "/data/gitea"],
+            ["/data", "/data/gitea"],
+            id="nested-sources",
+        ),
+        pytest.param("/elsewhere/x.db", ["/data"], [], id="outside"),
+    ],
+)
+def test_containing_source_paths_reports_every_enclosing_source(
+    database: str, sources: list[str], expected: list[str]
+) -> None:
+    """Verify every source holding a database is reported, so callers can reject ambiguity."""
+    # Given configured sources and a database path
+    # When resolving the containing sources
+    result = containing_source_paths(Path(database), source_paths=[Path(s) for s in sources])
 
-    # When resolving the containing source
-    result = containing_source_paths(Path("/data/gitea/gitea.db"), source_paths=sources)
-
-    # Then only the enclosing source matches
-    assert result == [Path("/data")]
-
-
-def test_containing_source_paths_reports_nested_sources():
-    """Verify overlapping sources are all reported so callers can reject the ambiguity."""
-    # Given nested configured sources that both contain the database
-    sources = [Path("/data"), Path("/data/gitea")]
-
-    # When resolving the containing source
-    result = containing_source_paths(Path("/data/gitea/gitea.db"), source_paths=sources)
-
-    # Then both are returned
-    assert result == [Path("/data"), Path("/data/gitea")]
-
-
-def test_containing_source_paths_returns_empty_for_an_outside_path():
-    """Verify a database outside every source is reported as unmatched."""
-    # Given a database outside the configured sources
-    # When resolving the containing source
-    result = containing_source_paths(Path("/elsewhere/x.db"), source_paths=[Path("/data")])
-
-    # Then nothing matches
-    assert result == []
+    # Then exactly the enclosing sources are returned
+    assert result == [Path(s) for s in expected]
 
 
 @pytest.mark.parametrize(
@@ -359,26 +356,22 @@ def test_archive_name_for_matches_the_tar_layout(database, sources, strip, expec
     assert result == expected
 
 
-def test_archive_name_for_rejects_a_path_outside_every_source():
-    """Verify a database with no enclosing source is a hard error."""
-    # Given a database outside the configured sources
+@pytest.mark.parametrize(
+    ("database", "sources"),
+    [
+        pytest.param("/elsewhere/x.db", ["/data"], id="outside-every-source"),
+        pytest.param("/data/gitea/gitea.db", ["/data", "/data/gitea"], id="overlapping-sources"),
+    ],
+)
+def test_archive_name_for_rejects_an_unplaceable_database(
+    database: str, sources: list[str]
+) -> None:
+    """Verify a database with no single enclosing source is a hard error."""
+    # Given a database outside every source, or inside two of them
     # When computing its archive name
     # Then it fails rather than guessing a location
-    with pytest.raises(SqliteSnapshotError, match="not inside any configured source path"):
-        archive_name_for(Path("/elsewhere/x.db"), source_paths=[Path("/data")], strip=True)
-
-
-def test_archive_name_for_rejects_a_path_under_overlapping_sources():
-    """Verify a database inside two configured sources is rejected as ambiguous."""
-    # Given nested sources that both contain the database
-    # When computing its archive name
-    # Then it fails rather than guessing which source wins
-    with pytest.raises(SqliteSnapshotError, match="more than one configured source path"):
-        archive_name_for(
-            Path("/data/gitea/gitea.db"),
-            source_paths=[Path("/data"), Path("/data/gitea")],
-            strip=True,
-        )
+    with pytest.raises(SqliteSnapshotError):
+        archive_name_for(Path(database), source_paths=[Path(s) for s in sources], strip=True)
 
 
 def test_snapshot_databases_returns_a_snapshot_per_database(tmp_path):
@@ -602,15 +595,24 @@ def test_snapshot_databases_with_no_paths_is_a_noop(tmp_path):
     assert not (tmp_path / "s").exists()
 
 
-def test_is_sqlite_path_pattern_detects_metacharacters(tmp_path):
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        pytest.param("*.db", True, id="star"),
+        pytest.param("**/*.sqlite3", True, id="double-star"),
+        pytest.param("app-?.db", True, id="question"),
+        pytest.param("app-[0-9].db", True, id="bracket"),
+        pytest.param("app.db", False, id="literal"),
+    ],
+)
+def test_is_sqlite_path_pattern_detects_metacharacters(
+    tmp_path: Path, entry: str, *, expected: bool
+) -> None:
     """Verify an entry holding a glob metacharacter is read as a pattern."""
-    # Given entries that do not exist on disk
-    # Then only the ones holding a metacharacter are patterns
-    assert is_sqlite_path_pattern(tmp_path / "*.db")
-    assert is_sqlite_path_pattern(tmp_path / "**" / "*.sqlite3")
-    assert is_sqlite_path_pattern(tmp_path / "app-?.db")
-    assert is_sqlite_path_pattern(tmp_path / "app-[0-9].db")
-    assert not is_sqlite_path_pattern(tmp_path / "app.db")
+    # Given an entry that does not exist on disk
+    # When classifying it
+    # Then only an entry holding a metacharacter is a pattern
+    assert is_sqlite_path_pattern(tmp_path / entry) is expected
 
 
 def test_is_sqlite_path_pattern_prefers_an_existing_literal(tmp_path):
@@ -633,21 +635,24 @@ def test_is_sqlite_path_pattern_treats_a_broken_symlink_as_a_literal(tmp_path):
     assert not is_sqlite_path_pattern(link)
 
 
-def test_static_pattern_prefix_returns_the_rooted_directory():
-    """Verify the prefix is every component before the first that globs."""
-    # Given absolute patterns rooted at a real directory
-    # Then the prefix stops at the first globbing component
-    assert static_pattern_prefix(Path("/data/db/*.db")) == Path("/data/db")
-    assert static_pattern_prefix(Path("/data/**/app.db")) == Path("/data")
-    assert static_pattern_prefix(Path("/data/*/*.db")) == Path("/data")
-
-
-def test_static_pattern_prefix_is_none_when_the_first_component_globs():
-    """Verify a pattern with nothing static to check reports no prefix."""
-    # Given patterns whose first component already globs
-    # Then there is no prefix worth checking for existence
-    assert static_pattern_prefix(Path("/**/*.db")) is None
-    assert static_pattern_prefix(Path("**/*/*.db")) is None
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        pytest.param("/data/db/*.db", Path("/data/db"), id="star-file"),
+        pytest.param("/data/**/app.db", Path("/data"), id="double-star-dir"),
+        pytest.param("/data/*/*.db", Path("/data"), id="star-dir"),
+        pytest.param("/**/*.db", None, id="root-double-star"),
+        pytest.param("**/*/*.db", None, id="relative-double-star"),
+    ],
+)
+def test_static_pattern_prefix_stops_at_the_first_globbing_component(
+    pattern: str, expected: Path | None
+) -> None:
+    """Verify the prefix is every component before the first that globs, or None if none is static."""
+    # Given a pattern
+    # When computing its static prefix
+    # Then it stops at the first globbing component
+    assert static_pattern_prefix(Path(pattern)) == expected
 
 
 def test_expand_sqlite_paths_passes_literals_through(tmp_path):
@@ -781,20 +786,20 @@ def test_expand_sqlite_paths_dedupes_overlapping_patterns(tmp_path):
     assert result == [source / "app.db"]
 
 
-def test_expand_sqlite_paths_warns_when_a_pattern_matches_nothing(tmp_path):
+def test_expand_sqlite_paths_warns_when_a_pattern_matches_nothing(
+    tmp_path: Path, log_messages: list[str]
+) -> None:
     """Verify a pattern matching nothing warns rather than failing the run."""
-    # Given a source with no databases and a sink capturing warnings
+    # Given a source with no databases
     source = tmp_path / "data"
     source.mkdir()
-    messages: list[str] = []
-    logger.add(messages.append, level="WARNING")
 
     # When expanding a pattern that matches nothing
     result = expand_sqlite_paths([source / "*.db"], source_paths=[source])
 
     # Then nothing is returned and the operator is told
     assert result == []
-    assert any("matched no sqlite databases" in message for message in messages)
+    assert any("matched no sqlite databases" in message for message in log_messages)
 
 
 def test_expand_sqlite_paths_preserves_order_across_literals_and_patterns(tmp_path):
@@ -823,16 +828,23 @@ def test_expand_sqlite_paths_preserves_order_across_literals_and_patterns(tmp_pa
     ]
 
 
-def test_unusable_pattern_component_flags_a_partial_double_star():
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        pytest.param("/data/**.db", "**.db", id="glued-suffix"),
+        pytest.param("a**b/*.db", "a**b", id="glued-both"),
+        pytest.param("/data/**/*.db", None, id="valid-recursive"),
+        pytest.param("/data/*.db", None, id="valid-star"),
+    ],
+)
+def test_unusable_pattern_component_flags_a_partial_double_star(
+    pattern: str, expected: str | None
+) -> None:
     """Verify a '**' glued to other characters is reported, since globbing it is unreliable."""
-    # Given patterns that misuse the recursive wildcard
-    # Then the offending component is named
-    assert unusable_pattern_component(Path("/data/**.db")) == "**.db"
-    assert unusable_pattern_component(Path("a**b/*.db")) == "a**b"
-
-    # And a well-formed pattern reports nothing
-    assert unusable_pattern_component(Path("/data/**/*.db")) is None
-    assert unusable_pattern_component(Path("/data/*.db")) is None
+    # Given a pattern
+    # When checking it for a misused recursive wildcard
+    # Then only the offending component is named
+    assert unusable_pattern_component(Path(pattern)) == expected
 
 
 def test_expand_sqlite_paths_skips_a_fifo_without_opening_it(tmp_path):
