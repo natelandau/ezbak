@@ -112,6 +112,9 @@
         "error",
         # EZBak removes its staging directory through the TemporaryDirectory finalizer by design
         "ignore:Implicitly cleaning up <TemporaryDirectory:ResourceWarning",
+        # cappa enters every resolved argument that has __enter__, and on Python 3.11 and
+        # 3.12 a Path still has one. Remove once 3.12 is no longer supported.
+        "ignore:pathlib.Path.__enter__\\(\\) is deprecated:DeprecationWarning",
     ]
     # pytest-randomly is left out so `-p no:randomly` can turn off random order while debugging
     required_plugins = ["pytest-cov", "pytest-devtools", "pytest-mock", "time-machine"]
