@@ -111,6 +111,24 @@ after that, finds neither file, cannot create them, and fails:
 Failed to snapshot sqlite database '/data/gitea.db': attempt to write a readonly database
 ```
 
+## ezbak copies a database as its owner
+
+When ezbak runs as root, it copies each database in a separate process that runs
+as the user and group that own the database file. If root owns the file, the
+process runs as the owner of the directory that holds it. That process can read
+and create only the files that this user can. A symlink that the service puts in
+the path of its database cannot make ezbak read a file that the service cannot
+read. ezbak copies a database as root only when root owns both the file and its
+directory.
+
+The user that ezbak copies as must be able to read the database and create files
+in its directory. The service that writes the database already has this access.
+
+To change to that user, a root container must have the `CHOWN`, `SETUID`, and
+`SETGID` capabilities. Docker and Nomad give these capabilities by default. If a
+Kubernetes pod drops all capabilities, add these three back to the container of
+ezbak. Without them, the backup fails with an error that names the capabilities.
+
 ## Match databases with a pattern
 
 A literal path works only when you know every filename in advance. A service can
@@ -327,7 +345,7 @@ holds the last committed data. The live database and its journal stay as they
 are, and the service recovers them when it starts again.
 
 ```text
-INFO | '/data/app.db' has an unfinished transaction; rolling it back on a private copy
+INFO | Rolled back an unfinished transaction of '/data/app.db' in its snapshot
 ```
 
 ezbak does not roll back a journal that names a super-journal. SQLite writes

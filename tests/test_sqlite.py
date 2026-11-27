@@ -28,17 +28,29 @@ from ezbak.sqlite import (
     static_pattern_prefix,
     unusable_pattern_component,
 )
-from tests.helpers import make_db, row_count
+from tests.helpers import make_db, only_as_root, row_count, skip_as_root
 
 # Header magic of a SQLite rollback journal, from the file format.
 ROLLBACK_JOURNAL_MAGIC = bytes.fromhex("d9d505f920a163d7")
 
-# root bypasses the permission bits these tests rely on, so a directory stripped of write
-# permission stays writable and the case under test cannot be reproduced.
-skip_as_root = pytest.mark.skipif(
-    hasattr(os, "geteuid") and os.geteuid() == 0,
-    reason="root ignores permission bits",
-)
+# A user that owns nothing on the host, for root-only tests that drop privileges.
+NOBODY_UID = 65534
+
+
+@pytest.fixture
+def others_can_traverse_tmp_path(tmp_path):
+    """Open `tmp_path` and every parent to traversal, as a service's data path is.
+
+    pytest creates its temporary root as 0700, which would stop a dropped worker before it
+    reaches the permission a test means to exercise. The original modes are restored after
+    the test, since the parents are shared with every other test and the host.
+    """
+    original_modes = {path: path.stat().st_mode for path in (tmp_path, *tmp_path.parents)}
+    for path, mode in original_modes.items():
+        path.chmod(mode | 0o111)
+    yield
+    for path, mode in original_modes.items():
+        path.chmod(stat.S_IMODE(mode))
 
 
 @pytest.fixture
@@ -171,19 +183,7 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
     source = tmp_path / "data" / "hot.db"
     make_db(source, rows=200, wal=False)
 
-    script = textwrap.dedent(f"""
-        import os, sqlite3
-        conn = sqlite3.connect({str(source)!r})
-        # A tiny cache forces modified pages into the database file before any commit.
-        conn.execute("PRAGMA cache_size=1")
-        conn.execute("BEGIN IMMEDIATE")
-        conn.execute("UPDATE t SET v = 'clobbered'")
-        conn.executemany("INSERT INTO t (v) VALUES (?)", [("clobbered",)] * 2000)
-        # Abandon the process without commit or rollback, leaving the journal behind.
-        os._exit(1)
-    """)
-    subprocess.run([sys.executable, "-c", script], check=False)
-    assert source.with_name("hot.db-journal").exists(), "expected a hot journal on disk"
+    _crash_mid_transaction(source)
     live_files = {path.name: path.read_bytes() for path in source.parent.iterdir()}
 
     dest = tmp_path / "snap" / "hot.db"
@@ -371,6 +371,208 @@ def test_snapshot_database_copies_normally_when_the_hot_journal_is_recovered_fir
 
     # Then the snapshot holds the database
     assert row_count(tmp_path / "snap" / "app.db") == 3
+
+
+def _crash_mid_transaction(source: Path) -> None:
+    """Kill a writer mid-transaction, leaving uncommitted pages in `source` and a hot journal.
+
+    Args:
+        source (Path): An existing DELETE-mode database made by `make_db`.
+    """
+    script = textwrap.dedent(f"""
+        import os, sqlite3
+        conn = sqlite3.connect({str(source)!r})
+        # A tiny cache forces modified pages into the database file before any commit.
+        conn.execute("PRAGMA cache_size=1")
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE t SET v = 'clobbered'")
+        conn.executemany("INSERT INTO t (v) VALUES (?)", [("clobbered",)] * 2000)
+        # Abandon the process without commit or rollback, leaving the journal behind.
+        os._exit(1)
+    """)
+    subprocess.run([sys.executable, "-c", script], check=False)
+    assert source.with_name(source.name + "-journal").exists(), "expected a hot journal on disk"
+
+
+def test_snapshot_database_refuses_a_path_through_a_symlinked_directory(tmp_path):
+    """Verify a directory swapped for a symlink cannot redirect the snapshot elsewhere.
+
+    The service can replace a directory above its database at any moment, so the snapshot
+    itself refuses such a path, not only the earlier scan for configured databases.
+    """
+    # Given a database reached through a symlinked directory
+    real = tmp_path / "elsewhere"
+    make_db(real / "app.db", rows=3, wal=False)
+    (tmp_path / "data").symlink_to(real)
+
+    # When snapshotting it
+    # Then the snapshot is refused
+    with pytest.raises(SqliteSnapshotError, match="symlink"):
+        snapshot_database(tmp_path / "data" / "app.db", dest=tmp_path / "snap" / "app.db")
+
+
+@pytest.fixture
+def snapshot_through_worker(monkeypatch):
+    """Send every snapshot through the owner worker, running as the test's own user.
+
+    The worker path is otherwise taken only by root for a database another user owns, so
+    this exercises it whatever user runs the suite.
+    """
+    owner = ezbak_sqlite._FileOwner(uid=os.getuid(), gid=os.getgid())
+    monkeypatch.setattr(ezbak_sqlite, "_owner_to_snapshot_as", lambda _: owner)
+
+
+@pytest.mark.parametrize(
+    "journal", [pytest.param(False, id="clean"), pytest.param(True, id="hot-journal")]
+)
+def test_snapshot_database_copies_through_the_owner_worker(
+    tmp_path, snapshot_through_worker, journal
+):
+    """Verify a snapshot through the owner worker holds the committed rows."""
+    # Given a database copied through the owner worker
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=200, wal=False)
+    if journal:
+        _crash_mid_transaction(source)
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    snapshot_database(source, dest=dest)
+
+    # Then the snapshot holds only the committed rows
+    assert row_count(dest) == 200
+    with closing(sqlite3.connect(dest)) as conn:
+        assert conn.execute("SELECT count(*) FROM t WHERE v = 'clobbered'").fetchone()[0] == 0
+
+
+def test_snapshot_database_copies_a_relative_path_through_the_owner_worker(
+    tmp_path, monkeypatch, snapshot_through_worker
+):
+    """Verify a relative database path names the same file inside the worker as outside it."""
+    # Given a database named relative to the working directory, copied through the worker
+    make_db(tmp_path / "data" / "app.db", rows=3, wal=False)
+    monkeypatch.chdir(tmp_path)
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    snapshot_database(Path("data") / "app.db", dest=dest)
+
+    # Then the snapshot holds that database
+    assert row_count(dest) == 3
+
+
+def test_snapshot_database_reports_a_failure_inside_the_owner_worker(
+    tmp_path, snapshot_through_worker
+):
+    """Verify a failure inside the worker fails the snapshot with the worker's reason."""
+    # Given a database copied through the owner worker, whose journal names a super-journal
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    _write_hot_journal(source, super_journal=tmp_path / "victim.txt")
+
+    # When snapshotting it
+    # Then the snapshot fails with the worker's reason
+    with pytest.raises(SqliteSnapshotError, match="super-journal"):
+        snapshot_database(source, dest=tmp_path / "snap" / "app.db")
+
+
+def _stat_owned_by(uid: int) -> os.stat_result:
+    """Build stat metadata owned by `uid`, with matching group, for owner-choice tests.
+
+    Args:
+        uid (int): The owner, also used as the group.
+
+    Returns:
+        os.stat_result: Metadata whose only meaningful fields are the owner and group.
+    """
+    return os.stat_result((0o100644, 0, 0, 1, uid, uid, 0, 0, 0, 0))
+
+
+@pytest.mark.parametrize(
+    ("euid", "database_uid", "directory_uid", "expected_uid"),
+    [
+        pytest.param(1000, 1000, 1000, None, id="not-root"),
+        pytest.param(0, 1000, 1000, 1000, id="service-owns-both"),
+        pytest.param(0, 1000, 0, 1000, id="service-owns-database"),
+        pytest.param(0, 0, 1000, 1000, id="root-database-in-service-directory"),
+        pytest.param(0, 0, 0, None, id="root-owns-both"),
+    ],
+)
+def test_snapshot_runs_as_a_user_who_controls_the_database(
+    monkeypatch, euid, database_uid, directory_uid, expected_uid
+):
+    """Verify a root snapshot drops to whoever controls the database or its directory.
+
+    A root-owned database in a directory the service owns is still the service's to tamper
+    with, so only a database where root owns both is copied as root.
+    """
+    # Given ezbak's user and the owners of a database and its directory
+    monkeypatch.setattr(os, "geteuid", lambda: euid)
+    source_stat = ezbak_sqlite._DatabaseStat(
+        database=_stat_owned_by(database_uid), directory=_stat_owned_by(directory_uid)
+    )
+
+    # When choosing the user to snapshot as
+    owner = ezbak_sqlite._owner_to_snapshot_as(source_stat)
+
+    # Then the copy runs as the expected user, or in this process
+    assert (owner.uid if owner else None) == expected_uid
+
+
+@pytest.mark.parametrize("planted", ["symlink", "hardlink"])
+def test_snapshot_database_refuses_worker_output_that_is_not_its_own_file(
+    tmp_path, monkeypatch, snapshot_through_worker, planted
+):
+    """Verify the worker's output is refused when it is a link to another file.
+
+    The worker's user owns its work directory, so it can replace the output with a link to a
+    file only root can read. Moving that into ezbak's staging would archive the file.
+    """
+    # Given a worker whose output is a link to another file
+    source = tmp_path / "data" / "app.db"
+    make_db(source, rows=3, wal=False)
+    other = tmp_path / "other.db"
+    make_db(other, rows=9, wal=False)
+
+    def _plant_link(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        worker_dest = Path(command[-1])
+        if planted == "symlink":
+            worker_dest.symlink_to(other)
+        else:
+            worker_dest.hardlink_to(other)
+        return subprocess.CompletedProcess(command, returncode=0, stdout="copied", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _plant_link)
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    # Then the output is refused and nothing is left in staging
+    with pytest.raises(SqliteSnapshotError, match="one link"):
+        snapshot_database(source, dest=dest)
+    assert not dest.exists()
+    assert row_count(other) == 9
+
+
+@only_as_root
+@pytest.mark.usefixtures("others_can_traverse_tmp_path")
+def test_snapshot_worker_cannot_read_what_the_owner_cannot(tmp_path):
+    """Verify a path redirected after the owner lookup reaches only what the owner can read.
+
+    The service can swap a directory for a symlink between the lookup and the worker's open.
+    The worker then opens the redirected path with the service's own privileges.
+    """
+    # Given a root-only database, and a worker for an unprivileged owner whose path leads to it
+    secret = tmp_path / "secret" / "root.db"
+    make_db(secret, rows=3, wal=False)
+    secret.parent.chmod(0o700)
+    owner = ezbak_sqlite._FileOwner(uid=NOBODY_UID, gid=NOBODY_UID)
+    dest = tmp_path / "snap" / "root.db"
+    dest.parent.mkdir()
+
+    # When the worker copies it
+    # Then the copy fails on the owner's permissions
+    with pytest.raises(SqliteSnapshotError, match="unable to open database file"):
+        ezbak_sqlite._copy_live_database_as(owner, source=secret, dest=dest)
 
 
 def test_snapshot_database_preserves_the_source_permissions(tmp_path):

@@ -7,10 +7,13 @@ API instead, which is safe against a concurrent writer and folds in any WAL or r
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import sqlite3
 import stat
+import subprocess  # ruff:ignore[suspicious-subprocess-import]
+import sys
 import time
 from contextlib import closing
 from dataclasses import dataclass
@@ -20,7 +23,8 @@ from urllib.parse import quote
 
 from loguru import logger
 
-from ezbak.exceptions import SqliteSnapshotError
+from ezbak.exceptions import ConfigurationError, SqliteSnapshotError
+from ezbak.sources import open_source
 
 # Longest a snapshot waits on another process's write lock. `Connection.backup()` retries
 # SQLITE_BUSY forever on its own, so without a bound one long write transaction wedges a
@@ -501,7 +505,7 @@ def _verify(snapshot: Path, *, source: Path) -> None:
         raise SqliteSnapshotError(msg)
 
 
-def _copy_live_database(source: Path, *, dest: Path) -> None:
+def _copy_live_database(source: Path, *, dest: Path) -> bool:
     """Copy a live database without ever opening it read-write.
 
     A read-write open replays a hot rollback journal in place, and the service that owns the
@@ -513,6 +517,9 @@ def _copy_live_database(source: Path, *, dest: Path) -> None:
         source (Path): The live database.
         dest (Path): The destination file, overwritten if present.
 
+    Returns:
+        bool: True if an unfinished transaction was rolled back in the copy.
+
     Raises:
         sqlite3.Error: If the database cannot be read for any reason other than a hot journal.
         FileNotFoundError: If the database vanishes while its hot journal is still present.
@@ -523,7 +530,6 @@ def _copy_live_database(source: Path, *, dest: Path) -> None:
         # Errors raised by the sqlite3 module itself, not by SQLite, carry no error code.
         if getattr(e, "sqlite_errorcode", None) != sqlite3.SQLITE_READONLY_ROLLBACK:
             raise
-        logger.info(f"'{source}' has an unfinished transaction; rolling it back on a private copy")
         try:
             _copy_rolling_back_hot_journal(source, dest=dest)
         except FileNotFoundError:
@@ -531,6 +537,247 @@ def _copy_live_database(source: Path, *, dest: Path) -> None:
                 raise
             # The service recovered the journal after the read-only open refused it.
             _copy_read_only(source, dest=dest)
+            return False
+        return True
+
+    return False
+
+
+@dataclass(frozen=True)
+class _FileOwner:
+    """The user and group a snapshot worker runs as."""
+
+    uid: int
+    gid: int
+
+
+@dataclass(frozen=True)
+class _DatabaseStat:
+    """Metadata of a database and of the directory that holds it, read without symlinks."""
+
+    database: os.stat_result
+    directory: os.stat_result
+
+
+def _stat_without_symlinks(source: Path) -> _DatabaseStat:
+    """Stat a database, and its directory, reached without following a symlink in the path.
+
+    Use this for any decision about the database's owner or permissions, so a symlink the
+    service plants in the path cannot substitute another file's metadata.
+
+    Args:
+        source (Path): The live database.
+
+    Returns:
+        _DatabaseStat: The metadata of the database file and of its directory.
+
+    Raises:
+        SqliteSnapshotError: If the path contains a symlink or cannot be opened.
+    """
+    try:
+        with open_source(source.absolute()) as handle:
+            return _DatabaseStat(database=os.fstat(handle.fd), directory=os.fstat(handle.parent_fd))
+    except ConfigurationError as e:
+        msg = f"Failed to snapshot sqlite database '{source}': {e}"
+        raise SqliteSnapshotError(msg) from e
+
+
+def _owner_to_snapshot_as(source_stat: _DatabaseStat) -> _FileOwner | None:
+    """Choose the user a snapshot runs as, so ezbak never reaches further than the service.
+
+    Running as root, every file SQLite opens or creates beside the database, and every path
+    the service redirects with a symlink, would be reached with root's privileges. Copying as
+    a user who controls the database limits all of that to files that user can already reach.
+    The database's owner is preferred because it can read the file. A root-owned database in a
+    directory another user owns is copied as the directory's owner, who controls the journals
+    and the path. Only a database where root owns both is copied as root.
+
+    Args:
+        source_stat (_DatabaseStat): The database's metadata, from `_stat_without_symlinks`.
+
+    Returns:
+        _FileOwner | None: The user to run a worker as, or None to copy in this process.
+    """
+    if os.geteuid() != 0:
+        return None
+    for owned in (source_stat.database, source_stat.directory):
+        if owned.st_uid != 0:
+            return _FileOwner(uid=owned.st_uid, gid=owned.st_gid)
+    return None
+
+
+# Runs the worker with -I so neither the environment nor the working directory can change
+# which code the worker imports.
+_SNAPSHOT_WORKER_CODE = "from ezbak.sqlite import run_snapshot_worker; run_snapshot_worker()"
+_WORKER_ROLLED_BACK = "rolled-back"
+_WORKER_COPIED = "copied"
+_OWNER_CAPABILITIES_HINT = (
+    "copying a database as its owner needs the CHOWN, SETUID, and SETGID capabilities"
+)
+
+
+def _drop_privileges_to(owner: _FileOwner) -> None:
+    """Switch this process to `owner` so every later file access has only that user's rights.
+
+    Args:
+        owner (_FileOwner): The user and group to switch to.
+
+    Raises:
+        SqliteSnapshotError: If the process lacks the capabilities to switch users.
+    """
+    # A worker already running as the owner has nothing to drop, and without root the
+    # setgroups call below would fail.
+    if (os.geteuid(), os.getegid()) == (owner.uid, owner.gid):
+        return
+    try:
+        os.setgroups([])
+        os.setgid(owner.gid)
+        os.setuid(owner.uid)
+    except PermissionError as e:
+        msg = f"Cannot switch to uid {owner.uid}, gid {owner.gid}: {e}; {_OWNER_CAPABILITIES_HINT}"
+        raise SqliteSnapshotError(msg) from e
+
+
+def run_snapshot_worker() -> None:
+    """Copy one live database as its owner, inside a worker process `snapshot_database` starts.
+
+    Not for direct use. Arguments arrive in `sys.argv`: owner uid, owner gid, source, dest.
+    Privileges are dropped before any file is opened. The outcome is reported on stdout and
+    any failure on stderr with exit status 1.
+    """
+    uid, gid, source, dest = sys.argv[1:]
+    owner = _FileOwner(uid=int(uid), gid=int(gid))
+    try:
+        _drop_privileges_to(owner)
+        rolled_back = _copy_live_database(Path(source), dest=Path(dest))
+    except (sqlite3.Error, OSError, SqliteSnapshotError) as e:
+        sys.stderr.write(f"{e}\n")
+        sys.exit(1)
+    sys.stdout.write(_WORKER_ROLLED_BACK if rolled_back else _WORKER_COPIED)
+
+
+def _take_worker_output(worker_dest: Path, *, dest: Path, owner: _FileOwner, source: Path) -> None:
+    """Move the worker's snapshot into ezbak's staging, refusing anything but its own file.
+
+    The worker's user controls the entries in its directory, so the output is opened without
+    following a symlink and checked through that descriptor before root moves it. A file that
+    user does not own, or that has another link, is not the worker's output: it could be a hard
+    link to a file only root can read.
+
+    Args:
+        worker_dest (Path): The worker's output, inside its directory.
+        dest (Path): The destination in ezbak's staging, overwritten if present.
+        owner (_FileOwner): The user the worker ran as.
+        source (Path): The live database, named in any error.
+
+    Raises:
+        SqliteSnapshotError: If the output is not a regular file that the worker's user owns
+            with one link, or is replaced while it is moved.
+        OSError: If the move into staging fails for a reason other than crossing filesystems.
+    """
+    expected = (
+        f"Expected the snapshot worker for '{source}' to leave a regular file owned by uid "
+        f"{owner.uid} with one link at '{worker_dest}'"
+    )
+    try:
+        fd = os.open(worker_dest, flags=os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        msg = f"{expected}: {e}"
+        raise SqliteSnapshotError(msg) from e
+
+    with os.fdopen(fd, mode="rb") as output:
+        output_stat = os.fstat(output.fileno())
+        if (
+            not stat.S_ISREG(output_stat.st_mode)
+            or output_stat.st_uid != owner.uid
+            or output_stat.st_nlink != 1
+        ):
+            raise SqliteSnapshotError(expected)
+
+        try:
+            worker_dest.replace(dest)
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise
+            # Another filesystem: copy from the descriptor already checked, never by path.
+            dest.unlink(missing_ok=True)
+            with dest.open("xb") as dest_file:
+                shutil.copyfileobj(fsrc=output, fdst=dest_file)
+            return
+
+    moved = dest.lstat()
+    if (moved.st_dev, moved.st_ino) != (output_stat.st_dev, output_stat.st_ino):
+        # The entry was swapped between the check and the move. What arrived came from the
+        # worker's own directory, so removing it from staging touches nothing outside.
+        if stat.S_ISDIR(moved.st_mode):
+            shutil.rmtree(dest)
+        else:
+            dest.unlink()
+        raise SqliteSnapshotError(expected)
+
+
+def _copy_live_database_as(owner: _FileOwner, *, source: Path, dest: Path) -> bool:
+    """Copy a live database in a worker process that runs as the database's owner.
+
+    The worker writes into a directory its user owns, outside ezbak's staging, and the result
+    is moved into staging only after the worker exits.
+
+    Args:
+        owner (_FileOwner): The user and group to run the worker as.
+        source (Path): The live database.
+        dest (Path): The destination file, overwritten if present.
+
+    Returns:
+        bool: True if an unfinished transaction was rolled back in the copy.
+
+    Raises:
+        SqliteSnapshotError: If the worker fails or leaves something other than a regular file.
+    """
+    with TemporaryDirectory(prefix="ezbak-sqlite-") as tmp:
+        # The worker's directory sits inside one root owns and only lets others traverse, so
+        # the worker's user can change what is inside its directory but cannot rename or
+        # replace the directory itself while root reads from it.
+        Path(tmp).chmod(0o711)
+        workdir = Path(tmp) / "work"
+        workdir.mkdir(mode=0o700)
+        try:
+            os.chown(workdir, uid=owner.uid, gid=owner.gid)
+        except PermissionError as e:
+            msg = (
+                f"Cannot give the snapshot worker for '{source}' a directory owned by uid "
+                f"{owner.uid}: {e}; {_OWNER_CAPABILITIES_HINT}"
+            )
+            raise SqliteSnapshotError(msg) from e
+        worker_dest = workdir / dest.name
+        result = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true]
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                _SNAPSHOT_WORKER_CODE,
+                str(owner.uid),
+                str(owner.gid),
+                # The worker runs from "/", so a relative path would name another file there.
+                str(source.absolute()),
+                str(worker_dest),
+            ],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            env={},
+            cwd="/",
+            check=False,
+        )
+        if result.returncode != 0:
+            msg = (
+                f"Failed to snapshot sqlite database '{source}': {result.stderr.strip()} "
+                f"(copied as uid {owner.uid})"
+            )
+            raise SqliteSnapshotError(msg)
+
+        _take_worker_output(worker_dest, dest=dest, owner=owner, source=source)
+
+    return result.stdout == _WORKER_ROLLED_BACK
 
 
 def snapshot_database(source: Path, *, dest: Path) -> None:
@@ -538,7 +785,8 @@ def snapshot_database(source: Path, *, dest: Path) -> None:
 
     Use this instead of copying the file when a service may hold the database open. The copy is
     taken through SQLite's online-backup API, so it is safe against a concurrent writer, and any
-    WAL or hot rollback journal is folded into the result.
+    WAL or hot rollback journal is folded into the result. When ezbak runs as root, the copy
+    runs as the database's owner.
 
     Args:
         source (Path): The live database to snapshot.
@@ -548,12 +796,20 @@ def snapshot_database(source: Path, *, dest: Path) -> None:
         SqliteSnapshotError: If the database cannot be copied or the copy fails verification.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    source_stat = _stat_without_symlinks(source)
+    owner = _owner_to_snapshot_as(source_stat)
 
     try:
-        _copy_live_database(source, dest=dest)
+        if owner is None:
+            rolled_back = _copy_live_database(source, dest=dest)
+        else:
+            rolled_back = _copy_live_database_as(owner, source=source, dest=dest)
     except (sqlite3.Error, OSError) as e:
         msg = f"Failed to snapshot sqlite database '{source}': {e}"
         raise SqliteSnapshotError(msg) from e
+
+    if rolled_back:
+        logger.info(f"Rolled back an unfinished transaction of '{source}' in its snapshot")
 
     _verify(dest, source=source)
 
@@ -562,7 +818,7 @@ def snapshot_database(source: Path, *, dest: Path) -> None:
     # database does not restore world-readable. Done after verification, which needs to open
     # the snapshot for writing.
     try:
-        dest.chmod(stat.S_IMODE(source.stat().st_mode))
+        dest.chmod(stat.S_IMODE(source_stat.database.st_mode))
     except OSError as e:
         logger.warning(f"Could not copy permissions of '{source}' onto its snapshot: {e}")
 

@@ -1,6 +1,7 @@
 """Shared test helpers."""
 
 import io
+import os
 import sqlite3
 import subprocess
 import sys
@@ -10,10 +11,21 @@ from collections.abc import Iterable
 from contextlib import closing
 from pathlib import Path
 
+import pytest
 from botocore.exceptions import ClientError
 
 from ezbak.core import EZBak
 from ezbak.storage.s3 import S3Backend
+
+_RUNNING_AS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
+# root bypasses the permission bits these tests rely on, so a file or directory stripped of a
+# permission stays usable and the case under test cannot be reproduced.
+skip_as_root = pytest.mark.skipif(_RUNNING_AS_ROOT, reason="root ignores permission bits")
+
+# Dropping to another user needs root. These run only when the suite runs as root, such as
+# inside the container.
+only_as_root = pytest.mark.skipif(not _RUNNING_AS_ROOT, reason="dropping privileges needs root")
 
 # A small real backup archive whose contents restore to `src/` with nested files
 FIXTURE_ARCHIVE = Path(__file__).parent / "fixtures" / "archive.tgz"

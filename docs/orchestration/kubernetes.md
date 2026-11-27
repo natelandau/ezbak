@@ -171,6 +171,11 @@ the app, and its `preStop` hook captures the final state. All three share the
     read a WAL database. See [SQLite
     databases](../concepts/sqlite.md#mount-the-source-read-write).
 
+    If the backup sidecar runs as root and drops all capabilities, add `CHOWN`,
+    `SETUID`, and `SETGID` under `securityContext.capabilities.add`. ezbak needs
+    them to copy each database as its owner. See [ezbak copies a database as its
+    owner](../concepts/sqlite.md#ezbak-copies-a-database-as-its-owner).
+
 !!! warning "A shutdown backup runs inside the grace period"
 
     The manifest above already takes a final backup with the `preStop` hook.
