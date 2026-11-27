@@ -3,7 +3,7 @@
 import os
 import sqlite3
 import stat
-import subprocess  # ruff:ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import textwrap
 from contextlib import closing
@@ -145,7 +145,6 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
     source = tmp_path / "hot.db"
     make_db(source, rows=200, wal=False)
 
-    # ruff:ignore[hardcoded-sql-expression]
     script = textwrap.dedent(f"""
         import os, sqlite3
         conn = sqlite3.connect({str(source)!r})
@@ -154,9 +153,7 @@ def test_snapshot_database_recovers_a_hot_journal(tmp_path):
         # Abandon the process without commit or rollback, leaving the journal behind.
         os._exit(1)
     """)
-    subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true]
-        [sys.executable, "-c", script], check=False
-    )
+    subprocess.run([sys.executable, "-c", script], check=False)
     assert source.with_name("hot.db-journal").exists(), "expected a hot journal on disk"
 
     dest = tmp_path / "snap" / "hot.db"

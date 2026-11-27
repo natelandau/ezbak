@@ -455,7 +455,7 @@ def test_build_config_maps_region_and_endpoint(monkeypatch):
             "https://minio.example.com",
             "create",
             "--source",
-            "/tmp",  # ruff:ignore[hardcoded-temp-file]
+            "/tmp",
         ],
     )
     config = build_config(cli)
@@ -673,9 +673,9 @@ def test_build_config_maps_restore_date():
     """Verify --restore-date is mapped onto restore_date in the built config."""
     # Given a restore command carrying a date
     cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), restore_date="20250102"),  # ruff:ignore[hardcoded-temp-file]
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), restore_date="20250102"),
         name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=[Path("/tmp")],
     )
 
     # When building the config
@@ -689,9 +689,9 @@ def test_build_config_maps_skip_if_no_backup():
     """Verify --skip-if-no-backup is mapped onto skip_if_no_backup in the built config."""
     # Given a restore command with --skip-if-no-backup set
     cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_no_backup=True),  # ruff:ignore[hardcoded-temp-file]
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_no_backup=True),
         name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=[Path("/tmp")],
     )
 
     # When building the config
@@ -705,9 +705,9 @@ def test_build_config_restore_skip_if_populated():
     """Verify --skip-if-populated maps onto the config field."""
     # Given a restore command with --skip-if-populated set
     cli = EZBakCLI(
-        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_populated=True),  # ruff:ignore[hardcoded-temp-file]
+        command=RestoreCommand(restore_path=Path("/tmp/restore"), skip_if_populated=True),
         name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=[Path("/tmp")],
     )
 
     # When building the config
@@ -723,7 +723,7 @@ def test_prune_flags_map_to_keep_fields():
     cli = EZBakCLI(
         command=PruneCommand(keep_last=3, keep_daily=4),
         name="test",
-        storage_paths=[Path("/tmp")],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=[Path("/tmp")],
     )
 
     # When building the config

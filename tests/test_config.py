@@ -22,7 +22,7 @@ def test_backupconfig_requires_name():
     # When constructing the config
     # Then validation fails
     with pytest.raises(ValidationError):
-        BackupConfig(storage_paths=["/tmp"])  # ruff:ignore[hardcoded-temp-file]
+        BackupConfig(storage_paths=["/tmp"])
 
 
 def test_backupconfig_does_not_read_env(monkeypatch):
@@ -31,7 +31,7 @@ def test_backupconfig_does_not_read_env(monkeypatch):
     monkeypatch.setenv("EZBAK_NAME", "from-env")
 
     # When building a plain BackupConfig with an explicit name
-    config = BackupConfig(name="explicit", storage_paths=["/tmp"])  # ruff:ignore[hardcoded-temp-file]
+    config = BackupConfig(name="explicit", storage_paths=["/tmp"])
 
     # Then the env var is not consulted
     assert config.name == "explicit"
@@ -41,7 +41,7 @@ def test_envconfig_reads_env(monkeypatch):
     """Verify EnvConfig loads EZBAK_-prefixed environment variables."""
     # Given EZBAK_ env vars
     monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # ruff:ignore[hardcoded-temp-file]
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")
 
     # When building an EnvConfig
     config = EnvConfig()
@@ -68,7 +68,7 @@ def test_envconfig_reads_restore_date(monkeypatch):
     """Verify EnvConfig loads EZBAK_RESTORE_DATE into restore_date."""
     # Given the env var set alongside the required fields
     monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # ruff:ignore[hardcoded-temp-file]
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")
     monkeypatch.setenv("EZBAK_RESTORE_DATE", "20250102")
 
     # When building an EnvConfig
@@ -122,25 +122,25 @@ def test_envconfig_reads_region_and_endpoint(monkeypatch):
 def test_coerce_path_list_skips_blank_segments():
     """Verify blank comma segments do not inject a phantom cwd path."""
     # Given a comma list with an empty middle segment
-    result = coerce_path_list("/tmp/a,,/tmp/b")  # ruff:ignore[hardcoded-temp-file]
+    result = coerce_path_list("/tmp/a,,/tmp/b")
 
     # Then only the two real paths are returned, no cwd entry
-    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # ruff:ignore[hardcoded-temp-file]
+    assert result == [Path("/tmp/a"), Path("/tmp/b")]
 
 
 def test_coerce_path_list_strips_whitespace_around_entries():
     """Verify padded comma entries resolve to the real path, not a cwd-relative one."""
     # Given a comma list with spaces around each entry (e.g. "/tmp/a, /tmp/b")
-    result = coerce_path_list("/tmp/a, /tmp/b")  # ruff:ignore[hardcoded-temp-file]
+    result = coerce_path_list("/tmp/a, /tmp/b")
 
     # Then each entry is stripped to an absolute path, not Path(" /tmp/b") under cwd
-    assert result == [Path("/tmp/a"), Path("/tmp/b")]  # ruff:ignore[hardcoded-temp-file]
+    assert result == [Path("/tmp/a"), Path("/tmp/b")]
 
 
 def test_retention_policy_derivation_keep_last():
     """Verify keep_last yields an active retention policy."""
     # Given a config with keep_last
-    config = BackupConfig(name="x", storage_paths=["/tmp"], keep_last=5)  # ruff:ignore[hardcoded-temp-file]
+    config = BackupConfig(name="x", storage_paths=["/tmp"], keep_last=5)
 
     # When reading the derived policy
     policy = config.retention_policy
@@ -170,7 +170,7 @@ def test_negative_keep_rule_rejected(field):
     # When constructing it
     # Then validation fails rather than accepting the negative count
     with pytest.raises(ValidationError):
-        BackupConfig(name="x", storage_paths=["/tmp"], **negative_rule)  # ruff:ignore[hardcoded-temp-file]
+        BackupConfig(name="x", storage_paths=["/tmp"], **negative_rule)
 
 
 @pytest.mark.parametrize("log_level", [None, "loud"])
@@ -180,13 +180,13 @@ def test_unusable_log_level_rejected(log_level):
     # When constructing it
     # Then validation fails
     with pytest.raises(ValidationError):
-        BackupConfig(name="x", storage_paths=["/tmp"], log_level=log_level)  # ruff:ignore[hardcoded-temp-file]
+        BackupConfig(name="x", storage_paths=["/tmp"], log_level=log_level)
 
 
 def test_use_checksums_defaults_true():
     """Verify use_checksums defaults to True."""
     # Given a minimal config with no explicit use_checksums
-    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # ruff:ignore[hardcoded-temp-file]
+    config = BackupConfig(name="test", storage_paths=["/tmp/x"])
 
     # Then it defaults to using checksum sidecars
     assert config.use_checksums is True
@@ -196,7 +196,7 @@ def test_compression_level_defaults_to_six():
     """Verify the default gzip level is 6, the speed/size sweet spot."""
     # Given a minimal config with no explicit compression_level
     # When constructing the config
-    config = BackupConfig(name="test", storage_paths=["/tmp/x"])  # ruff:ignore[hardcoded-temp-file]
+    config = BackupConfig(name="test", storage_paths=["/tmp/x"])
 
     # Then it defaults to gzip level 6
     assert config.compression_level == 6
@@ -219,7 +219,7 @@ def test_restore_populated_ignore_filenames():
 def test_backupconfig_sqlite_paths_defaults_to_empty():
     """Verify the option is inert when unset."""
     # Given a config with no sqlite paths
-    config = BackupConfig(name="x", storage_paths=["/tmp"], source_paths=["/data"])  # ruff:ignore[hardcoded-temp-file]
+    config = BackupConfig(name="x", storage_paths=["/tmp"], source_paths=["/data"])
 
     # Then the list is empty
     assert config.sqlite_paths == []
@@ -230,7 +230,7 @@ def test_backupconfig_sqlite_paths_accepts_a_comma_separated_string():
     # Given a comma-separated value like an env var supplies
     config = BackupConfig(
         name="x",
-        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=["/tmp"],
         source_paths=["/data"],
         sqlite_paths="/data/a.db,/data/b.db",
     )
@@ -247,7 +247,7 @@ def test_backupconfig_rejects_sqlite_path_outside_sources():
     with pytest.raises(ValidationError, match="elsewhere"):
         BackupConfig(
             name="x",
-            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            storage_paths=["/tmp"],
             source_paths=["/data"],
             sqlite_paths=["/elsewhere/a.db"],
         )
@@ -261,7 +261,7 @@ def test_backupconfig_rejects_sqlite_path_under_overlapping_sources():
     with pytest.raises(ValidationError, match="more than one"):
         BackupConfig(
             name="x",
-            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            storage_paths=["/tmp"],
             source_paths=["/data", "/data/gitea"],
             sqlite_paths=["/data/gitea/gitea.db"],
         )
@@ -272,7 +272,7 @@ def test_backupconfig_accepts_sqlite_path_equal_to_a_file_source():
     # Given a source path that is itself the database
     config = BackupConfig(
         name="x",
-        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=["/tmp"],
         source_paths=["/data/gitea.db"],
         sqlite_paths=["/data/gitea.db"],
     )
@@ -285,7 +285,7 @@ def test_envconfig_reads_sqlite_paths(monkeypatch):
     """Verify the container surface picks the option up from the environment."""
     # Given EZBAK_ env vars including sqlite paths
     monkeypatch.setenv("EZBAK_NAME", "from-env")
-    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")  # ruff:ignore[hardcoded-temp-file]
+    monkeypatch.setenv("EZBAK_STORAGE_PATHS", "/tmp")
     monkeypatch.setenv("EZBAK_SOURCE_PATHS", "/data")
     monkeypatch.setenv("EZBAK_SQLITE_PATHS", "/data/gitea/gitea.db")
 
@@ -301,7 +301,7 @@ def test_backupconfig_keeps_a_relative_sqlite_pattern_relative():
     # Given a relative pattern, which is anchored to source paths at expansion time
     config = BackupConfig(
         name="x",
-        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=["/tmp"],
         source_paths=["/data"],
         sqlite_paths=["**/*.db"],
     )
@@ -322,7 +322,7 @@ def test_backupconfig_accepts_an_absolute_sqlite_pattern(tmp_path):
 
     config = BackupConfig(
         name="x",
-        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=["/tmp"],
         source_paths=[first, second],
         sqlite_paths=[source / "*.db"],
     )
@@ -344,7 +344,7 @@ def test_backupconfig_accepts_a_pattern_rooted_at_an_empty_directory(tmp_path):
     # Then the config is valid, since the databases arrive with the service
     config = BackupConfig(
         name="x",
-        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=["/tmp"],
         source_paths=[first, second],
         sqlite_paths=[source / "**" / "*.db"],
     )
@@ -363,7 +363,7 @@ def test_backupconfig_rejects_a_pattern_rooted_at_a_missing_directory(tmp_path):
     with pytest.raises(ValidationError, match="is not an existing directory"):
         BackupConfig(
             name="x",
-            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            storage_paths=["/tmp"],
             source_paths=[source],
             sqlite_paths=[source / "typo" / "*.db"],
         )
@@ -381,7 +381,7 @@ def test_backupconfig_skips_source_containment_for_patterns(tmp_path):
     # Then it is accepted, because matches under either source are legitimate
     config = BackupConfig(
         name="x",
-        storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+        storage_paths=["/tmp"],
         source_paths=[first, second],
         sqlite_paths=[tmp_path / "*" / "*.db"],
     )
@@ -403,7 +403,7 @@ def test_backupconfig_rejects_a_sqlite_path_with_a_parent_component(tmp_path):
     with pytest.raises(ValidationError, match=r"contains a '\.\.' component"):
         BackupConfig(
             name="x",
-            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            storage_paths=["/tmp"],
             source_paths=[source],
             sqlite_paths=[source / ".." / "etc" / "app.db"],
         )
@@ -420,7 +420,7 @@ def test_backupconfig_rejects_a_partial_double_star_component(tmp_path):
     with pytest.raises(ValidationError, match="'\\*\\*' must be a whole path component"):
         BackupConfig(
             name="x",
-            storage_paths=["/tmp"],  # ruff:ignore[hardcoded-temp-file]
+            storage_paths=["/tmp"],
             source_paths=[source],
             sqlite_paths=[source / "**.db"],
         )

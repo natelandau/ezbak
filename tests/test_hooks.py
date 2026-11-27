@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess  # ruff:ignore[suspicious-subprocess-import]
+import subprocess
 
 import pytest
 from loguru import logger

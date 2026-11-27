@@ -1,7 +1,7 @@
 """Shared test helpers."""
 
 import sqlite3
-import subprocess  # ruff:ignore[suspicious-subprocess-import]
+import subprocess
 import sys
 import textwrap
 from contextlib import closing
@@ -39,7 +39,6 @@ def write_uncheckpointed(path: Path, value: str) -> None:
         value (str): The single value the database ends up holding.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    # ruff:ignore[hardcoded-sql-expression]
     script = textwrap.dedent(f"""
         import os, sqlite3
         conn = sqlite3.connect({str(path)!r})
@@ -50,9 +49,7 @@ def write_uncheckpointed(path: Path, value: str) -> None:
         conn.commit()
         os._exit(0)
     """)
-    subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true]
-        [sys.executable, "-c", script], check=True
-    )
+    subprocess.run([sys.executable, "-c", script], check=True)
 
 
 def values(path: Path) -> list[str]:

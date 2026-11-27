@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-# Runtime import (not TYPE_CHECKING-only): cappa resolves annotations via get_type_hints
-# at collection time, which needs Path in the module namespace.
-from pathlib import Path  # ruff:ignore[typing-only-standard-library-import]
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 import cappa

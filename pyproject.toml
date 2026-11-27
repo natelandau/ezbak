@@ -1,34 +1,44 @@
 [project]
     authors = [{ name = "Nate Landau", email = "github@natelandau.com" }]
     classifiers = [
+        "Development Status :: 5 - Production/Stable",
+        "Environment :: Console",
+        "Intended Audience :: System Administrators",
+        "Operating System :: POSIX",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: 3.14",
         "Programming Language :: Python :: 3.15",
+        "Topic :: System :: Archiving :: Backup",
+        "Typing :: Typed",
     ]
     dependencies = [
         "apscheduler>=3.11.3,<4.0.0",
         "boto3>=1.44.12,<2.0.0",
         "cappa>=0.33.0,<1.0.0",
-        "loguru>=0.8.0",
+        "loguru>=0.8.0,<1.0.0",
         "nclutils>=4.0.0,<5.0.0",
         "pydantic-settings>=2.16.3,<3.0.0",
         "pydantic>=2.14.4,<3.0.0",
-        "rich>=15.0.0",
+        "rich>=15.0.0,<16.0.0",
         "whenever>=0.11.0,<1.0.0",
     ]
-    description = "A simple tool to backup and restore data as tgz files."
+    description = "Back up and restore files and directories as tar.gz archives on local disks and S3, with retention policies."
+    keywords = ["archive", "backup", "docker", "restore", "s3"]
     license = "MIT"
     license-files = ["LICENSE"]
     name = "ezbak"
     readme = "README.md"
-    requires-python = ">=3.11, <3.16"
+    requires-python = ">=3.11"
     version = "1.5.1"
 
     [project.urls]
-        Homepage   = "https://github.com/natelandau/ezbak"
-        Repository = "https://github.com/natelandau/ezbak"
+        Changelog     = "https://github.com/natelandau/ezbak/blob/main/CHANGELOG.md"
+        Documentation = "https://natelandau.github.io/ezbak/"
+        Homepage      = "https://github.com/natelandau/ezbak"
+        Issues        = "https://github.com/natelandau/ezbak/issues"
+        Repository    = "https://github.com/natelandau/ezbak"
 
     [project.scripts]
         ezbak = "ezbak.cli:main"
@@ -48,14 +58,12 @@
         "pytest-randomly>=5.1.0",
         "pytest-sugar>=1.1.1",
         "pytest>=9.2.0",
-        "rich>=15.0.0",
         "ruff>=0.17.6",
         "time-machine>=3.6.0",
         "ty>=0.0.112",
         "typos>=1.52.2",
-        "yamllint>=1.38.0",
         "zensical>=0.1.3",
-]
+    ]
 
 [build-system]
     build-backend = "uv_build"
@@ -113,77 +121,56 @@
     capsys_strip_tmp_path = true
     set_columns           = true
 
-[tool.ruff] # https://github.com/charliermarsh/ruff
-    exclude        = [".cache", ".dev", ".git", ".venv", "_build", "build", "dist", "tmp"]
-    fix            = true
-    line-length    = 100
-    output-format  = "grouped"
-    src            = ["src", "tests"]
-    target-version = "py311"
+[tool.ruff] # https://docs.astral.sh/ruff/settings/
+    fix           = true
+    line-length   = 100
+    output-format = "grouped"
+    src           = ["src", "tests"]
 
     [tool.ruff.lint]
         ignore = [
-            "function-call-in-default-argument",  # function-call-in-default-argument
-            "line-contains-todo",                 # Line contains TODO, consider resolving the issue
-            "line-too-long",                      # line-too-long
-            "missing-copyright-notice",           # Missing copyright notice at top of file
-            "missing-return-type-special-method", # missing return type annotation for special method `__init__`
-            "missing-todo-author",                # Missing author in TODO
-            "missing-todo-link",                  # Missing issue link on the line following this TODO
-            "missing-trailing-comma",             # Trailing comma missing"
-            "multi-line-summary-second-line",     # multi-line-summary-second-line
-            "mutable-argument-default",           # mutable-argument-default
-            "non-pep604-annotation-union",        # non-pep604-annotation
-            "undocumented-public-init",           # undocumented-public-init
+            "line-contains-todo",
+            "line-too-long",                  # the formatter owns line length
+            "missing-copyright-notice",
+            "missing-todo-author",
+            "missing-todo-link",
+            "missing-trailing-comma",         # conflicts with the formatter
+            "multi-line-summary-second-line", # conflicts with multi-line-summary-first-line
+            "undocumented-public-init",       # the class docstring documents construction
         ]
-        per-file-ignores = { "tests/*.py" = [
-            "assert",
-            "blanket-type-ignore",
-            "builtin-argument-shadowing",
-            "builtin-attribute-shadowing",
-            "call-datetime-without-tzinfo",                     #datetime called without a `tzinfo` argument
-            "commented-out-code",
-            "hardcoded-password-func-arg",                      # Possible hardcoded password
-            "import-private-name",
-            "magic-value-comparison",
-            "missing-return-type-private-function",
-            "missing-return-type-static-method",
-            "missing-return-type-undocumented-public-function",
-            "missing-type-function-argument",
-            "missing-type-kwargs",
-            "no-self-use",
-            "private-member-access",
-            "too-many-arguments",
-            "too-many-positional-arguments",
-            "true-false-comparison",
-            "undefined-local-with-import-star",
-            "undocumented-param",
-            "undocumented-public-method",
-            "unused-function-argument",
-            "unused-lambda-argument",
-            "unused-method-argument",
-
-        ], "duties.py" = [
-            "missing-type-function-argument",
-        ] }
         preview = true
         select = ["ALL"]
-        unfixable = [
-            "commented-out-code", # Commented out code
-            "unused-import",      # unused-import
-            "unused-variable",    # unused-variable
-        ]
-        [tool.ruff.lint.mccabe]
-            max-complexity = 10
+        unfixable = ["commented-out-code", "unused-import", "unused-variable"]
+
+        [tool.ruff.lint.flake8-type-checking]
+            # cappa reads command annotations at runtime, so their imports must stay at runtime
+            runtime-evaluated-decorators = ["cappa.base.command"]
+
+        [tool.ruff.lint.per-file-ignores]
+            "tests/*.py" = [
+                "assert",
+                "commented-out-code",
+                "hardcoded-password-func-arg",
+                "hardcoded-sql-expression",
+                "hardcoded-temp-file",
+                "import-private-name",
+                "magic-value-comparison",
+                "missing-return-type-private-function",
+                "missing-return-type-public-function",
+                "missing-type-function-argument",
+                "private-member-access",
+                "subprocess-without-shell-equals-true",
+                "suspicious-subprocess-import",
+                "unused-function-argument",
+                # pytest passes fixtures as arguments, so test signatures grow with fixtures
+                "no-self-use",
+                "too-many-arguments",
+                "too-many-positional-arguments",
+                "unused-method-argument",
+            ]
 
         [tool.ruff.lint.pydocstyle]
             convention = "google"
 
         [tool.ruff.lint.pylint]
             max-args = 6
-
-    [tool.ruff.format]
-        indent-style              = "space"
-        line-ending               = "auto"
-        quote-style               = "double"
-        skip-magic-trailing-comma = false

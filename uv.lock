@@ -1,6 +1,6 @@
 version = 1
 revision = 5
-requires-python = ">=3.11, <3.16"
+requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13'",
     "python_full_version == '3.12.*'",
@@ -700,12 +700,10 @@ dev = [
     { name = "pytest-mock" },
     { name = "pytest-randomly" },
     { name = "pytest-sugar" },
-    { name = "rich" },
     { name = "ruff" },
     { name = "time-machine" },
     { name = "ty" },
     { name = "typos" },
-    { name = "yamllint" },
     { name = "zensical" },
 ]
 
@@ -714,11 +712,11 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.11.3,<4.0.0" },
     { name = "boto3", specifier = ">=1.44.12,<2.0.0" },
     { name = "cappa", specifier = ">=0.33.0,<1.0.0" },
-    { name = "loguru", specifier = ">=0.8.0" },
+    { name = "loguru", specifier = ">=0.8.0,<1.0.0" },
     { name = "nclutils", specifier = ">=4.0.0,<5.0.0" },
     { name = "pydantic", specifier = ">=2.14.4,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.16.3,<3.0.0" },
-    { name = "rich", specifier = ">=15.0.0" },
+    { name = "rich", specifier = ">=15.0.0,<16.0.0" },
     { name = "whenever", specifier = ">=0.11.0,<1.0.0" },
 ]
 
@@ -737,12 +735,10 @@ dev = [
     { name = "pytest-mock", specifier = ">=3.17.0" },
     { name = "pytest-randomly", specifier = ">=5.1.0" },
     { name = "pytest-sugar", specifier = ">=1.1.1" },
-    { name = "rich", specifier = ">=15.0.0" },
     { name = "ruff", specifier = ">=0.17.6" },
     { name = "time-machine", specifier = ">=3.6.0" },
     { name = "ty", specifier = ">=0.0.112" },
     { name = "typos", specifier = ">=1.52.2" },
-    { name = "yamllint", specifier = ">=1.38.0" },
     { name = "zensical", specifier = ">=0.1.3" },
 ]
 
@@ -2147,19 +2143,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/19/70/80f3b7c10d2630aa66414bf23d210386700aa390547278c789afa994fd7e/xmltodict-1.0.4.tar.gz", hash = "sha256:6d94c9f834dd9e44514162799d344d815a3a4faec913717a9ecbfa5be1bb8e61", size = 26124, upload-time = "2026-02-22T02:21:22.074Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/34/98a2f52245f4d47be93b580dae5f9861ef58977d73a79eb47c58f1ad1f3a/xmltodict-1.0.4-py3-none-any.whl", hash = "sha256:a4a00d300b0e1c59fc2bfccb53d7b2e88c32f200df138a0dd2229f842497026a", size = 13580, upload-time = "2026-02-22T02:21:21.039Z" },
-]
-
-[[package]]
-name = "yamllint"
-version = "1.38.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pathspec" },
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/28/a0/8fc2d68e132cf918f18273fdc8a1b8432b60d75ac12fdae4b0ef5c9d2e8d/yamllint-1.38.0.tar.gz", hash = "sha256:09e5f29531daab93366bb061e76019d5e91691ef0a40328f04c927387d1d364d", size = 142446, upload-time = "2026-01-13T07:47:53.276Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/92/aed08e68de6e6a3d7c2328ce7388072cd6affc26e2917197430b646aed02/yamllint-1.38.0-py3-none-any.whl", hash = "sha256:fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220", size = 68940, upload-time = "2026-01-13T07:47:51.343Z" },
 ]
 
 [[package]]
