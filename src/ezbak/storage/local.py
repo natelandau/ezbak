@@ -9,7 +9,7 @@ from loguru import logger
 from nclutils.fs import find_files
 
 from ezbak.backup import Backup, StorageLocation
-from ezbak.checksums import is_sidecar, sidecar_name
+from ezbak.checksums import sidecar_name
 from ezbak.constants import (
     BACKUP_EXTENSION,
     COPY_CHUNK_SIZE,
@@ -126,10 +126,8 @@ class LocalBackend(StorageBackend):
             found_files = find_files(
                 path=storage_path, globs=[f"{self.settings.name}-*.{BACKUP_EXTENSION}"]
             )
-            # The `.tgz` glob already excludes `.sha256` sidecars, but filter
-            # explicitly through the shared definition so the exclusion cannot
-            # regress if the glob is ever loosened.
-            found_files = [f for f in found_files if not is_sidecar(f.name)]
+            backup_names = set(self._backup_names([f.name for f in found_files]))
+            found_files = [f for f in found_files if f.name in backup_names]
             location = self._build_storage_location(
                 storage_path=storage_path,
                 backups=[

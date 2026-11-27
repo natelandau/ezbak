@@ -63,15 +63,12 @@ class S3Backend(StorageBackend):
             msg = f"S3 index failed for bucket '{self.settings.aws_s3_bucket_name}': {e}"
             raise StorageReadError(msg) from e
 
-        # The prefix listing returns sidecars too; drop them so a .sha256 is never
-        # parsed as a spurious Backup and counted against retention.
-        found_backups = self._exclude_sidecars(found_backups)
-
         if self.settings.aws_s3_bucket_prefix:
             found_backups = [
                 x.replace(f"{self.settings.aws_s3_bucket_prefix.rstrip('/')}/", "")
                 for x in found_backups
             ]
+        found_backups = self._backup_names(found_backups)
 
         location = self._build_storage_location(
             storage_path=self.settings.aws_s3_bucket_prefix,

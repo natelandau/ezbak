@@ -52,17 +52,22 @@ def test_ezbak_create_backup_writes_archive(filesystem):
     assert len(app.list_backups()) == 1
 
 
-def test_index_excludes_names_sharing_a_prefix(tmp_path):
-    """Verify a backup set only matches names followed by the '-' separator."""
-    # Given a 'gitea' backup and an unrelated 'giteasave' backup with a later timestamp
+@pytest.mark.parametrize(
+    "foreign_name",
+    ["giteasave-20260710T082850.tgz", "gitea-manual.tgz"],
+    ids=["shares-name-prefix", "no-timestamp"],
+)
+def test_index_skips_files_that_are_not_backups_of_the_set(tmp_path, foreign_name):
+    """Verify a file that is not one of the set's backups never becomes a backup or breaks indexing."""
+    # Given a 'gitea' backup beside a foreign archive in the same storage location
     shutil.copy2(fixture_archive_path, tmp_path / "gitea-20260709T131941.tgz")
-    shutil.copy2(fixture_archive_path, tmp_path / "giteasave-20260710T082850.tgz")
+    shutil.copy2(fixture_archive_path, tmp_path / foreign_name)
     app = ezbak(name="gitea", source_paths=[tmp_path], storage_paths=[tmp_path])
 
     # When listing backups and selecting the latest
     names = {b.name for b in app.list_backups()}
 
-    # Then the 'giteasave' archive is not treated as a 'gitea' backup
+    # Then only the real backup is indexed and selected
     assert names == {"gitea-20260709T131941.tgz"}
     latest = app.get_latest_backup()
     assert latest is not None
