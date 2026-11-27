@@ -26,3 +26,4 @@ docs/superpowers/
 .env.secrets
 .dev
 .agent/
+skills-lock.json
