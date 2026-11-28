@@ -38,7 +38,12 @@ _DIR_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | _CLOEXEC
 _SEARCH_ONLY = getattr(os, "O_PATH", 0) or getattr(os, "O_SEARCH", 0) or os.O_RDONLY
 _TRAVERSE_OPEN_FLAGS = _SEARCH_ONLY | os.O_DIRECTORY | os.O_NOFOLLOW | _CLOEXEC
 # Errors an open with O_NOFOLLOW reports when the entry was replaced after it was lstat'd.
-_REPLACED_ERRNOS = frozenset({errno.ELOOP, errno.ENOTDIR, errno.ENOENT})
+# Opening a socket fails with ENXIO on Linux and EOPNOTSUPP on macOS.
+_REPLACED_ERRNOS = frozenset(
+    {errno.ELOOP, errno.ENOTDIR, errno.ENOENT, errno.ENXIO, errno.EOPNOTSUPP}
+)
+# Warning logged, followed by the path, for each FIFO, socket, or device node left out
+SKIPPED_SPECIAL_FILE_WARNING = "Skip backup of special file"
 
 
 @dataclass(frozen=True)
@@ -167,15 +172,19 @@ def open_source(path: Path) -> Generator[SourceHandle]:
         )
 
 
-def _add_from_descriptor(tar: tarfile.TarFile, *, fd: int, arcname: str) -> tarfile.TarInfo | None:
+def _add_from_descriptor(
+    tar: tarfile.TarFile, *, fd: int, path: Path, arcname: str
+) -> tarfile.TarInfo | None:
     """Add the inode behind `fd` as one member, with metadata and data from that descriptor.
 
     Returns:
         tarfile.TarInfo | None: The member added, or None if it was skipped.
     """
     tarinfo = tar.gettarinfo(arcname=arcname, fileobj=cast("IO[bytes]", _DescriptorFile(fd)))
-    if tarinfo is None or tarinfo.ischr() or tarinfo.isblk():
-        logger.warning(f"Skip backup of special file: {arcname}")
+    # Recheck the opened inode: the entry may have been swapped for a special file after the
+    # walk listed it, and restore cannot extract one.
+    if tarinfo is None or not (tarinfo.isreg() or tarinfo.islnk() or tarinfo.isdir()):
+        logger.warning(f"{SKIPPED_SPECIAL_FILE_WARNING}: {path}")
         return None
     logger.trace("Add to tar: {}", arcname)
     if tarinfo.isreg():
@@ -186,15 +195,16 @@ def _add_from_descriptor(tar: tarfile.TarFile, *, fd: int, arcname: str) -> tarf
     return tarinfo
 
 
-def add_regular_file(tar: tarfile.TarFile, *, fd: int, arcname: str) -> None:
+def add_regular_file(tar: tarfile.TarFile, *, fd: int, path: Path, arcname: str) -> None:
     """Add an open regular file to the archive, reading metadata and data from its descriptor.
 
     Args:
         tar (tarfile.TarFile): The open archive.
         fd (int): Descriptor of the regular file.
+        path (Path): The file's path, used in logs.
         arcname (str): The member name in the archive.
     """
-    _add_from_descriptor(tar, fd=fd, arcname=arcname)
+    _add_from_descriptor(tar, fd=fd, path=path, arcname=arcname)
 
 
 def add_directory_contents(
@@ -235,13 +245,6 @@ def add_directory_contents(
         )
 
 
-def _is_archivable_type(entry: os.DirEntry[str]) -> bool:
-    if entry.is_dir(follow_symlinks=False) or entry.is_file(follow_symlinks=False):
-        return True
-    # Opening a device node can have side effects, and a socket has nothing to archive.
-    return stat.S_ISFIFO(entry.stat(follow_symlinks=False).st_mode)
-
-
 def _open_entry(
     *,
     dir_fd: int,
@@ -258,8 +261,10 @@ def _open_entry(
     if entry.is_symlink():
         logger.warning(f"Skip backup of symlink: {path}")
         return None
-    if not _is_archivable_type(entry):
-        logger.warning(f"Skip backup of special file: {path}")
+    # Skip FIFOs, sockets, and device nodes before opening them: opening a device can have
+    # side effects, and a restore's "data" extraction filter rejects every special file.
+    if not (entry.is_dir(follow_symlinks=False) or entry.is_file(follow_symlinks=False)):
+        logger.warning(f"{SKIPPED_SPECIAL_FILE_WARNING}: {path}")
         return None
     if entry.is_dir(follow_symlinks=False):
         return os.open(entry.name, _DIR_OPEN_FLAGS, dir_fd=dir_fd)
@@ -290,7 +295,7 @@ def _add_entry(
         return
 
     try:
-        added = _add_from_descriptor(tar, fd=fd, arcname=arcname)
+        added = _add_from_descriptor(tar, fd=fd, path=path, arcname=arcname)
         if added is not None and added.isdir():
             add_directory_contents(
                 tar, dir_fd=fd, dir_path=path, arcname_prefix=arcname, keep_file=keep_file
