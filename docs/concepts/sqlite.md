@@ -335,6 +335,21 @@ cannot wedge a cron sidecar.
 Failed to snapshot sqlite database '/data/app.db': Timed out after 300s waiting to copy '/data/app.db': another process is holding a write lock
 ```
 
+### A slow integrity check times out
+
+`PRAGMA quick_check` reads each page of the snapshot. It also calculates each
+generated column for each row, and the schema of the service sets the cost of that
+calculation. ezbak stops the check and fails the run when the check takes more
+than five minutes plus one second for each 10 MiB of the snapshot. A 1 GiB
+database thus gets about seven minutes. The check does not test `CHECK`
+constraints, because they are rules of the service and not signs of a damaged
+copy. If a generated column calls a function that the service defines in its
+own code, the check uses a substitute function in its place.
+
+```text
+Snapshot of '/data/app.db' did not finish its integrity check within 300s
+```
+
 ### An interrupted write is rolled back in the snapshot only
 
 If a service stops during a write transaction in rollback-journal mode, the

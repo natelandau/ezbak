@@ -74,10 +74,14 @@ class _DescriptorFile:
         return self._fd
 
 
+# Text in the error raised for a source path that contains a symlink.
+SOURCE_PATH_SYMLINK_REFUSED: str = "ezbak does not follow symlinks in a source path"
+
+
 def _symlink_error(source: Path, component: Path) -> ConfigurationError:
     msg = (
         f"Source path {source} contains a symlink at {component}. "
-        "ezbak does not follow symlinks in a source path; configure the real path instead"
+        f"{SOURCE_PATH_SYMLINK_REFUSED}; configure the real path instead"
     )
     return ConfigurationError(msg)
 

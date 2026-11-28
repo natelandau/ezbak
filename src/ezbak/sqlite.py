@@ -32,6 +32,30 @@ from ezbak.sources import open_source
 # scheduled backup indefinitely; failing the run surfaces the problem instead.
 SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS: float = 300.0
 
+# Text in the errors a snapshot raises, for callers and tests that recognize a failure by it.
+SQLITE_WRITE_LOCK_HELD: str = "another process is holding a write lock"
+SQLITE_SUPER_JOURNAL_REFUSED: str = "it names a super-journal"
+SQLITE_HOT_JOURNAL_CHANGED: str = "or its hot journal changed while ezbak copied them"
+SQLITE_WORKER_OUTPUT_REJECTED: str = "to leave a regular file it owns with one link"
+
+# How long a snapshot's integrity check may run. The check evaluates expressions the service's
+# schema defines, such as virtual generated columns, for every row, so a tiny database can make
+# it run for hours. Failing the run releases the scheduler and fires the failure ping instead.
+# The limit is this many seconds plus one second per `SQLITE_VERIFY_READ_BYTES_PER_SECOND` of
+# snapshot, so a large database on slow storage still has time to read every page.
+SQLITE_VERIFY_TIMEOUT_SECONDS: float = 300.0
+SQLITE_VERIFY_READ_BYTES_PER_SECOND: int = 10 * 1024 * 1024
+
+SQLITE_VERIFY_TIMED_OUT: str = "did not finish its integrity check"
+
+# SQLite virtual machine instructions between deadline checks during verification. One row of a
+# slow generated column is a handful of instructions but can take seconds, so a longer interval
+# lets the check run far past its deadline. This one costs a few percent on the per-row loops.
+_VERIFY_PROGRESS_INTERVAL: int = 100
+
+# Errors SQLite work can raise. CPython raises SQLITE_NOMEM as `MemoryError`, not `sqlite3.Error`.
+_SQLITE_FAILURES: tuple[type[Exception], ...] = (sqlite3.Error, OSError, MemoryError)
+
 
 def _copy_read_only(source: Path, *, dest: Path) -> None:
     """Copy `source` to `dest` through the online-backup API over a read-only connection.
@@ -54,7 +78,7 @@ def _copy_read_only(source: Path, *, dest: Path) -> None:
         if time.monotonic() >= deadline:
             msg = (
                 f"Timed out after {SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS:.0f}s waiting to copy "
-                f"'{source}': another process is holding a write lock"
+                f"'{source}': {SQLITE_WRITE_LOCK_HELD}"
             )
             raise TimeoutError(msg)
 
@@ -148,7 +172,7 @@ def _copy_rolling_back_hot_journal(source: Path, *, dest: Path) -> None:
         _copy_regular_file(journal, dest=staged_journal)
         if _names_super_journal(staged_journal):
             msg = (
-                f"Refusing to roll back the journal of '{source}': it names a super-journal "
+                f"Refusing to roll back the journal of '{source}': {SQLITE_SUPER_JOURNAL_REFUSED} "
                 "from a multi-database transaction, which ezbak does not recover. Start the "
                 "service once to recover it"
             )
@@ -157,7 +181,7 @@ def _copy_rolling_back_hot_journal(source: Path, *, dest: Path) -> None:
         _copy_regular_file(source, dest=staged)
         if (_file_identity(source), _file_identity(journal)) != identity_before_copy:
             msg = (
-                f"'{source}' or its hot journal changed while ezbak copied them; expected both "
+                f"'{source}' {SQLITE_HOT_JOURNAL_CHANGED}; expected both "
                 "to stay unchanged until the copy finished"
             )
             raise SqliteSnapshotError(msg)
@@ -480,24 +504,104 @@ def archive_name_for(path: Path, *, source_paths: list[Path], strip: bool) -> st
     return relative if strip or not source.name else f"{source.name}/{relative}"
 
 
+def _describe(error: BaseException) -> str:
+    """Describe an error for a message, including one that carries no text of its own.
+
+    CPython raises SQLite's out-of-memory condition as a bare `MemoryError`, whose text is empty.
+
+    Args:
+        error (BaseException): The error to describe.
+
+    Returns:
+        str: The error's text, or its type name when the text is empty.
+    """
+    return str(error) or type(error).__name__
+
+
+# Start of the error SQLite raises when the schema calls a function the connection lacks.
+_UNKNOWN_FUNCTION_PREFIX: str = "unknown function: "
+
+
+def _stand_in_function(*_: object) -> int:
+    """Return a non-NULL value in place of a function only the service's own code defines.
+
+    Returns:
+        int: Always 0, which satisfies a NOT NULL generated column.
+    """
+    return 0
+
+
+def _quick_check_standing_in_for_service_functions(conn: sqlite3.Connection) -> tuple[str] | None:
+    """Run `PRAGMA quick_check`, standing in for functions the service registers at runtime.
+
+    A generated column can call a function that only the service's process defines. The check
+    evaluates every generated column, so without a stand-in such a database could never be
+    verified. The value a column computes says nothing about whether the copy is torn.
+
+    Args:
+        conn (sqlite3.Connection): An open connection to the snapshot.
+
+    Returns:
+        tuple[str] | None: The first row the check returns.
+
+    Raises:
+        sqlite3.OperationalError: If the check fails for any reason other than a missing
+            function, or a stand-in does not resolve one.
+    """
+    stood_in: set[str] = set()
+    while True:
+        try:
+            return conn.execute("PRAGMA quick_check").fetchone()
+        except sqlite3.OperationalError as e:
+            message = str(e)
+            name = message.removeprefix(_UNKNOWN_FUNCTION_PREFIX).removesuffix("()")
+            if not message.startswith(_UNKNOWN_FUNCTION_PREFIX) or name in stood_in:
+                raise
+            stood_in.add(name)
+            # narg -1 accepts any number of arguments. Generated columns accept only
+            # deterministic functions. These arguments are positional-only from Python 3.13.
+            conn.create_function(name, -1, _stand_in_function, deterministic=True)
+
+
 def _verify(snapshot: Path, *, source: Path) -> None:
     """Confirm a snapshot opens and its pages are coherent.
 
     `quick_check` skips the index cross-checks of a full `integrity_check`, so it costs roughly
-    one sequential read of a file that was just written and is still in page cache.
+    one sequential read of a file that was just written and is still in page cache, plus any
+    per-row expressions the schema defines. A time limit that grows with the snapshot's size
+    bounds both.
 
     Args:
         snapshot (Path): The freshly written snapshot to check.
         source (Path): The live database it came from, named in any error.
 
     Raises:
-        SqliteSnapshotError: If the snapshot cannot be opened or fails the check.
+        SqliteSnapshotError: If the snapshot cannot be opened, fails the check, or the check
+            runs out of time.
     """
     try:
+        limit_seconds = (
+            SQLITE_VERIFY_TIMEOUT_SECONDS
+            + snapshot.stat().st_size / SQLITE_VERIFY_READ_BYTES_PER_SECOND
+        )
+    except OSError as e:
+        msg = f"Snapshot of '{source}' could not be verified: {e}"
+        raise SqliteSnapshotError(msg) from e
+    deadline = time.monotonic() + limit_seconds
+    try:
         with closing(sqlite3.connect(snapshot)) as conn:
-            result = conn.execute("PRAGMA quick_check").fetchone()
-    except (sqlite3.Error, OSError) as e:
-        msg = f"Snapshot of '{source}' could not be reopened for verification: {e}"
+            # CHECK constraints are the service's own rules over its rows, not a sign of a torn
+            # copy, and evaluating them costs whatever the schema makes them cost.
+            conn.execute("PRAGMA ignore_check_constraints=ON")
+            conn.set_progress_handler(
+                lambda: int(time.monotonic() >= deadline), n=_VERIFY_PROGRESS_INTERVAL
+            )
+            result = _quick_check_standing_in_for_service_functions(conn)
+    except _SQLITE_FAILURES as e:
+        if getattr(e, "sqlite_errorcode", None) == sqlite3.SQLITE_INTERRUPT:
+            msg = f"Snapshot of '{source}' {SQLITE_VERIFY_TIMED_OUT} within {limit_seconds:.0f}s"
+        else:
+            msg = f"Snapshot of '{source}' could not be verified: {_describe(e)}"
         raise SqliteSnapshotError(msg) from e
 
     if not result or result[0] != "ok":
@@ -651,8 +755,8 @@ def run_snapshot_worker() -> None:
     try:
         _drop_privileges_to(owner)
         rolled_back = _copy_live_database(Path(source), dest=Path(dest))
-    except (sqlite3.Error, OSError, SqliteSnapshotError) as e:
-        sys.stderr.write(f"{e}\n")
+    except (*_SQLITE_FAILURES, SqliteSnapshotError) as e:
+        sys.stderr.write(f"{_describe(e)}\n")
         sys.exit(1)
     sys.stdout.write(_WORKER_ROLLED_BACK if rolled_back else _WORKER_COPIED)
 
@@ -677,8 +781,8 @@ def _take_worker_output(worker_dest: Path, *, dest: Path, owner: _FileOwner, sou
         OSError: If the move into staging fails for a reason other than crossing filesystems.
     """
     expected = (
-        f"Expected the snapshot worker for '{source}' to leave a regular file owned by uid "
-        f"{owner.uid} with one link at '{worker_dest}'"
+        f"Expected the snapshot worker for '{source}' (uid {owner.uid}) "
+        f"{SQLITE_WORKER_OUTPUT_REJECTED} at '{worker_dest}'"
     )
     try:
         fd = os.open(worker_dest, flags=NO_FOLLOW_READ_FLAGS)
@@ -805,8 +909,8 @@ def snapshot_database(source: Path, *, dest: Path) -> None:
             rolled_back = _copy_live_database(source, dest=dest)
         else:
             rolled_back = _copy_live_database_as(owner, source=source, dest=dest)
-    except (sqlite3.Error, OSError) as e:
-        msg = f"Failed to snapshot sqlite database '{source}': {e}"
+    except _SQLITE_FAILURES as e:
+        msg = f"Failed to snapshot sqlite database '{source}': {_describe(e)}"
         raise SqliteSnapshotError(msg) from e
 
     if rolled_back:
