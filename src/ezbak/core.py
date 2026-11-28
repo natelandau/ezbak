@@ -194,6 +194,28 @@ class _FsyncTarFile(tarfile.TarFile):
                     unsynced = 0
 
 
+def _data_filter_skipping_special_files(
+    member: tarfile.TarInfo, dest_path: str
+) -> tarfile.TarInfo | None:
+    """Apply the "data" extraction filter, leaving out special files instead of failing.
+
+    An archive can hold a FIFO or device node, which the "data" filter refuses outright.
+    Skipping the member keeps one file that holds no data from failing the whole restore.
+
+    Args:
+        member (tarfile.TarInfo): The archive member about to be extracted.
+        dest_path (str): The extraction destination.
+
+    Returns:
+        tarfile.TarInfo | None: The filtered member, or None to skip a special file.
+    """
+    try:
+        return tarfile.data_filter(member, dest_path)
+    except tarfile.SpecialFileError:
+        logger.warning(f"Skip restore of special file: {member.name}")
+        return None
+
+
 def _extract_all(*, archive: tarfile.TarFile, staging: Path) -> None:
     """Extract every member into staging, so a broken archive fails as a TarError or OSError.
 
@@ -209,7 +231,10 @@ def _extract_all(*, archive: tarfile.TarFile, staging: Path) -> None:
         tarfile.ExtractError: If a hard link member names a target the archive lacks.
     """
     try:
-        archive.extractall(path=staging, filter="data")
+        # The filter wraps tarfile.data_filter, which ruff only recognizes as the "data" literal
+        archive.extractall(  # ruff:ignore[tarfile-unsafe-members]
+            path=staging, filter=_data_filter_skipping_special_files
+        )
     except KeyError as e:
         # str() of a KeyError is the repr of its argument, so read the argument directly.
         detail = e.args[0] if e.args else e
@@ -852,7 +877,7 @@ class EZBak:
         if passes_filters(
             path=path, include_pattern=include_pattern, exclude_pattern=exclude_pattern
         ):
-            add_regular_file(tar, fd=source.fd, arcname=path.name)
+            add_regular_file(tar, fd=source.fd, path=path, arcname=path.name)
 
     def _backend_for_type(self, storage_type: StorageType) -> StorageBackend:
         """Return the backend for a storage type, or fail with a clear message.

@@ -4,8 +4,8 @@ icon: lucide/filter
 
 # Including and excluding files
 
-By default ezbak backs up every regular file, directory, and named pipe under
-your source paths. Two regular expressions narrow that selection. A small set of
+By default ezbak backs up every regular file and directory under your source
+paths. Two regular expressions narrow that selection. A small set of
 noise files is always skipped, and ezbak never follows a symlink.
 
 ## Always-excluded files
@@ -25,8 +25,9 @@ you never need to restore them.
 !!! note "Symlinks are skipped"
 
     ezbak does not follow a symbolic link. It logs a warning for each one and
-    skips it, so a backup never escapes the source tree through a link. Device
-    files and sockets are skipped with a warning too. A source path that
+    skips it, so a backup never escapes the source tree through a link. Named
+    pipes, sockets, and device files are skipped with a warning too, because a
+    restore cannot recreate them. A source path that
     contains a symlink fails the backup. See
     [Identity and sources](../reference/configuration.md#identity-and-sources).
 

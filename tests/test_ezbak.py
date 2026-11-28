@@ -1,8 +1,10 @@
 """Test ezbak."""
 
 import hashlib
+import io
 import os
 import shutil
+import socket
 import tarfile
 from collections.abc import Callable
 from datetime import datetime
@@ -19,6 +21,7 @@ from ezbak.checksums import format_sidecar, sidecar_name
 from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome
 from ezbak.core import EZBak
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
+from ezbak.sources import SKIPPED_SPECIAL_FILE_WARNING
 from ezbak.storage.local import LocalBackend
 from tests.helpers import (
     LEGACY_BACKUP_NAMES,
@@ -772,11 +775,10 @@ def test_create_backup_reaches_a_source_through_a_search_only_parent(tmp_path):
         assert "data/file.txt" in tar.getnames()
 
 
-def test_create_backup_keeps_fifos_and_hardlinks(filesystem):
-    """Verify the walk stores a FIFO as a FIFO and a second hard link as a link member."""
-    # Given a source holding a FIFO and two hard links to one file
+def test_create_backup_stores_second_hardlink_as_link(filesystem):
+    """Verify the walk stores a second hard link as a link member."""
+    # Given a source holding two hard links to one file
     src_dir, dest1, _ = filesystem
-    os.mkfifo(src_dir / "pipe")
     (src_dir / "dir1" / "foo.txt").write_text("shared")
     (src_dir / "zlink.txt").hardlink_to(src_dir / "dir1" / "foo.txt")
     app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest1])
@@ -784,13 +786,114 @@ def test_create_backup_keeps_fifos_and_hardlinks(filesystem):
     # When backing up
     backups = app.create_backup()
 
-    # Then each keeps its type, and the link restores the original content
+    # Then the second link is a link member pointing at the first
     assert backups[0].path is not None
     with tarfile.open(backups[0].path) as tar:
-        assert tar.getmember("src/pipe").isfifo()
         link = tar.getmember("src/zlink.txt")
         assert link.islnk()
         assert link.linkname == "src/dir1/foo.txt"
+
+
+def _make_fifo(name: str) -> None:
+    os.mkfifo(name)
+
+
+def _make_socket(name: str) -> None:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.bind(name)
+
+
+@pytest.mark.parametrize("make_special", [_make_fifo, _make_socket], ids=["fifo", "socket"])
+def test_backup_skips_special_files_so_restore_succeeds(
+    tmp_path, restore_dir, monkeypatch, make_special
+):
+    """Verify a FIFO or socket in a source is skipped with a warning and the backup restores."""
+    # Given a source holding a regular file and a special file
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "data.txt").write_text("payload")
+    # Create by relative name: an absolute tmp path can exceed the AF_UNIX path limit
+    monkeypatch.chdir(src_dir)
+    make_special("special")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    log_file = tmp_path / "ezbak.log"
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest], log_file=log_file)
+
+    # When backing up and restoring
+    backups = app.create_backup()
+    outcome = app.restore_backup(restore_dir)
+
+    # Then the backup warns about the skipped file, and the restore brings back only the data
+    assert len(backups) == 1
+    assert f"{SKIPPED_SPECIAL_FILE_WARNING}: {src_dir / 'special'}" in log_file.read_text()
+    assert outcome == RestoreOutcome.RESTORED
+    assert (restore_dir / "src" / "data.txt").read_text() == "payload"
+    assert not (restore_dir / "src" / "special").exists()
+
+
+@pytest.mark.parametrize("make_special", [_make_fifo, _make_socket], ids=["fifo", "socket"])
+def test_create_backup_skips_a_file_swapped_for_a_special_file_mid_walk(
+    tmp_path, monkeypatch, make_special
+):
+    """Verify a file replaced by a FIFO or socket after it is listed is left out of the archive."""
+    # Given a source file that is swapped for a special file just before it is opened
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "data.txt").write_text("payload")
+    victim = src_dir / "victim.txt"
+    victim.write_text("plain")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    # Create by relative name: an absolute tmp path can exceed the AF_UNIX path limit
+    monkeypatch.chdir(src_dir)
+    real_open = os.open
+
+    def swap_then_open(
+        path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        if path == victim.name and dir_fd is not None and victim.is_file():
+            victim.unlink()
+            make_special(victim.name)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+    app = ezbak(name="test", source_paths=[src_dir], storage_paths=[dest])
+
+    # When backing up
+    backups = app.create_backup()
+    monkeypatch.undo()
+
+    # Then the swapped entry is left out and the rest of the source is archived
+    assert not victim.is_file()
+    assert backups[0].path is not None
+    with tarfile.open(backups[0].path) as tar:
+        assert tar.getnames() == ["src/data.txt"]
+
+
+def test_restore_skips_a_fifo_member_in_a_stored_archive(tmp_path, restore_dir):
+    """Verify an archive that holds a FIFO member restores its files and leaves the FIFO out."""
+    # Given a stored archive holding a regular file and a FIFO member
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    archive = storage / "test-20250624T084727.tgz"
+    payload = b"payload"
+    with tarfile.open(archive, "w:gz") as tar:
+        data = tarfile.TarInfo("src/data.txt")
+        data.size = len(payload)
+        tar.addfile(data, io.BytesIO(payload))
+        pipe = tarfile.TarInfo("src/pipe")
+        pipe.type = tarfile.FIFOTYPE
+        tar.addfile(pipe)
+    app = ezbak(name="test", storage_paths=[storage])
+
+    # When restoring
+    outcome = app.restore_backup(restore_path=restore_dir)
+
+    # Then the file is restored and the FIFO is not
+    assert outcome == RestoreOutcome.RESTORED
+    assert (restore_dir / "src" / "data.txt").read_bytes() == payload
+    assert not (restore_dir / "src" / "pipe").exists()
 
 
 @pytest.mark.parametrize(
