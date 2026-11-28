@@ -15,7 +15,13 @@ import pytest
 
 from ezbak import sqlite as ezbak_sqlite
 from ezbak.exceptions import SqliteSnapshotError
+from ezbak.sources import SOURCE_PATH_SYMLINK_REFUSED
 from ezbak.sqlite import (
+    SQLITE_HOT_JOURNAL_CHANGED,
+    SQLITE_SUPER_JOURNAL_REFUSED,
+    SQLITE_VERIFY_TIMED_OUT,
+    SQLITE_WORKER_OUTPUT_REJECTED,
+    SQLITE_WRITE_LOCK_HELD,
     archive_name_for,
     containing_source_paths,
     expand_sqlite_paths,
@@ -132,8 +138,8 @@ def _damage_interior_page(path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("rows", "damage"),
-    [
+    argnames=("rows", "damage"),
+    argvalues=[
         pytest.param(50, _damage_btree_page_header, id="first-page-header"),
         pytest.param(2000, _damage_interior_page, id="later-page"),
     ],
@@ -304,7 +310,7 @@ def test_snapshot_database_refuses_a_journal_that_names_a_super_journal(tmp_path
 
     # When snapshotting it
     # Then the snapshot is refused and the named file survives
-    with pytest.raises(SqliteSnapshotError, match="super-journal"):
+    with pytest.raises(SqliteSnapshotError, match=SQLITE_SUPER_JOURNAL_REFUSED):
         snapshot_database(source, dest=tmp_path / "snap" / "app.db")
     assert victim.read_text() == "keep"
 
@@ -342,11 +348,11 @@ def test_snapshot_database_refuses_a_hot_journal_pair_that_changes_mid_copy(tmp_
         with source.open("ab") as live:
             live.write(b"\x00" * 4096)
 
-    monkeypatch.setattr(ezbak_sqlite, "_copy_regular_file", copy_then_write)
+    monkeypatch.setattr(target=ezbak_sqlite, name="_copy_regular_file", value=copy_then_write)
 
     # When snapshotting it
     # Then the snapshot is refused
-    with pytest.raises(SqliteSnapshotError, match="changed while ezbak copied"):
+    with pytest.raises(SqliteSnapshotError, match=SQLITE_HOT_JOURNAL_CHANGED):
         snapshot_database(source, dest=tmp_path / "snap" / "app.db")
 
 
@@ -364,7 +370,7 @@ def test_snapshot_database_copies_normally_when_the_hot_journal_is_recovered_fir
         source.with_name("app.db-journal").unlink(missing_ok=True)
         copy_regular_file(path, dest=dest)
 
-    monkeypatch.setattr(ezbak_sqlite, "_copy_regular_file", recover_then_copy)
+    monkeypatch.setattr(target=ezbak_sqlite, name="_copy_regular_file", value=recover_then_copy)
 
     # When snapshotting it
     snapshot_database(source, dest=tmp_path / "snap" / "app.db")
@@ -407,7 +413,7 @@ def test_snapshot_database_refuses_a_path_through_a_symlinked_directory(tmp_path
 
     # When snapshotting it
     # Then the snapshot is refused
-    with pytest.raises(SqliteSnapshotError, match="symlink"):
+    with pytest.raises(SqliteSnapshotError, match=SOURCE_PATH_SYMLINK_REFUSED):
         snapshot_database(tmp_path / "data" / "app.db", dest=tmp_path / "snap" / "app.db")
 
 
@@ -419,11 +425,12 @@ def snapshot_through_worker(monkeypatch):
     this exercises it whatever user runs the suite.
     """
     owner = ezbak_sqlite._FileOwner(uid=os.getuid(), gid=os.getgid())
-    monkeypatch.setattr(ezbak_sqlite, "_owner_to_snapshot_as", lambda _: owner)
+    monkeypatch.setattr(target=ezbak_sqlite, name="_owner_to_snapshot_as", value=lambda _: owner)
 
 
 @pytest.mark.parametrize(
-    "journal", [pytest.param(False, id="clean"), pytest.param(True, id="hot-journal")]
+    argnames="journal",
+    argvalues=[pytest.param(False, id="clean"), pytest.param(True, id="hot-journal")],
 )
 def test_snapshot_database_copies_through_the_owner_worker(
     tmp_path, snapshot_through_worker, journal
@@ -472,7 +479,7 @@ def test_snapshot_database_reports_a_failure_inside_the_owner_worker(
 
     # When snapshotting it
     # Then the snapshot fails with the worker's reason
-    with pytest.raises(SqliteSnapshotError, match="super-journal"):
+    with pytest.raises(SqliteSnapshotError, match=SQLITE_SUPER_JOURNAL_REFUSED):
         snapshot_database(source, dest=tmp_path / "snap" / "app.db")
 
 
@@ -489,8 +496,8 @@ def _stat_owned_by(uid: int) -> os.stat_result:
 
 
 @pytest.mark.parametrize(
-    ("euid", "database_uid", "directory_uid", "expected_uid"),
-    [
+    argnames=("euid", "database_uid", "directory_uid", "expected_uid"),
+    argvalues=[
         pytest.param(1000, 1000, 1000, None, id="not-root"),
         pytest.param(0, 1000, 1000, 1000, id="service-owns-both"),
         pytest.param(0, 1000, 0, 1000, id="service-owns-database"),
@@ -507,7 +514,7 @@ def test_snapshot_runs_as_a_user_who_controls_the_database(
     with, so only a database where root owns both is copied as root.
     """
     # Given ezbak's user and the owners of a database and its directory
-    monkeypatch.setattr(os, "geteuid", lambda: euid)
+    monkeypatch.setattr(target=os, name="geteuid", value=lambda: euid)
     source_stat = ezbak_sqlite._DatabaseStat(
         database=_stat_owned_by(database_uid), directory=_stat_owned_by(directory_uid)
     )
@@ -519,7 +526,7 @@ def test_snapshot_runs_as_a_user_who_controls_the_database(
     assert (owner.uid if owner else None) == expected_uid
 
 
-@pytest.mark.parametrize("planted", ["symlink", "hardlink"])
+@pytest.mark.parametrize(argnames="planted", argvalues=["symlink", "hardlink"])
 def test_snapshot_database_refuses_worker_output_that_is_not_its_own_file(
     tmp_path, monkeypatch, snapshot_through_worker, planted
 ):
@@ -542,12 +549,12 @@ def test_snapshot_database_refuses_worker_output_that_is_not_its_own_file(
             worker_dest.hardlink_to(other)
         return subprocess.CompletedProcess(command, returncode=0, stdout="copied", stderr="")
 
-    monkeypatch.setattr(subprocess, "run", _plant_link)
+    monkeypatch.setattr(target=subprocess, name="run", value=_plant_link)
     dest = tmp_path / "snap" / "app.db"
 
     # When snapshotting it
     # Then the output is refused and nothing is left in staging
-    with pytest.raises(SqliteSnapshotError, match="one link"):
+    with pytest.raises(SqliteSnapshotError, match=SQLITE_WORKER_OUTPUT_REJECTED):
         snapshot_database(source, dest=dest)
     assert not dest.exists()
     assert row_count(other) == 9
@@ -603,12 +610,141 @@ def test_snapshot_database_fails_when_the_lock_wait_times_out(tmp_path, monkeypa
     # Given a database and a lock wait that has already expired
     source = tmp_path / "live.db"
     make_db(source, rows=3)
-    monkeypatch.setattr(ezbak_sqlite, "SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS", -1.0)
+    monkeypatch.setattr(target=ezbak_sqlite, name="SQLITE_BACKUP_LOCK_TIMEOUT_SECONDS", value=-1.0)
 
     # When snapshotting it
     # Then the wait is abandoned and reported as a snapshot failure
-    with pytest.raises(SqliteSnapshotError, match="holding a write lock"):
+    with pytest.raises(SqliteSnapshotError, match=SQLITE_WRITE_LOCK_HELD):
         snapshot_database(source, dest=tmp_path / "snap" / "live.db")
+
+
+# Takes milliseconds per evaluation, so a few hundred rows hold an integrity check for seconds.
+_SLOW_EXPRESSION: str = "length(replace(printf('%.*c', 2000000, 'x'), 'x', 'yy'))"
+
+
+def _make_slow_to_check_db(path: Path, *, column: str, rows: int) -> None:
+    """Build a small database whose integrity check evaluates `_SLOW_EXPRESSION` on every row."""
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute(f"CREATE TABLE t(a INTEGER, {column})")
+        # Skips the CHECK cost while inserting. A NOT NULL generated column is still evaluated.
+        conn.execute("PRAGMA ignore_check_constraints=ON")
+        conn.executemany("INSERT INTO t(a) VALUES (?)", [(i,) for i in range(rows)])
+        conn.commit()
+
+
+def test_snapshot_database_skips_check_constraints_when_verifying(tmp_path, monkeypatch):
+    """Verify a schema's CHECK constraints cannot hold up verification.
+
+    They are the service's own row rules, and evaluating them costs whatever the schema makes
+    them cost, so a slow one must not fail or stall the backup.
+    """
+    # Given a database whose CHECK constraint takes seconds to evaluate across its rows
+    source = tmp_path / "checked.db"
+    _make_slow_to_check_db(source, column=f"b INTEGER CHECK({_SLOW_EXPRESSION} > 0)", rows=200)
+    monkeypatch.setattr(target=ezbak_sqlite, name="SQLITE_VERIFY_TIMEOUT_SECONDS", value=0.5)
+    dest = tmp_path / "snap" / "checked.db"
+
+    # When snapshotting it
+    snapshot_database(source, dest=dest)
+
+    # Then verification finishes inside the deadline and the snapshot holds every row
+    assert row_count(dest) == 200
+
+
+def test_snapshot_database_verifies_columns_that_call_service_functions(tmp_path):
+    """Verify a generated column calling a function only the service defines can be backed up.
+
+    The service registers such a function in its own process, so ezbak's connection lacks it,
+    and every integrity check of the database would otherwise fail.
+    """
+    # Given a database whose generated columns call functions the service registered itself
+    source = tmp_path / "app.db"
+    with closing(sqlite3.connect(source)) as conn:
+        conn.create_function("slugify", 1, str.lower, deterministic=True)
+        conn.create_function("score", 2, max, deterministic=True)
+        conn.execute(
+            "CREATE TABLE t(id INTEGER, v TEXT,"
+            " slug TEXT GENERATED ALWAYS AS (slugify(v)) VIRTUAL NOT NULL,"
+            " rank INTEGER GENERATED ALWAYS AS (score(id, 1)) VIRTUAL)"
+        )
+        conn.executemany("INSERT INTO t(id, v) VALUES (?, ?)", [(1, "A"), (2, "B")])
+        conn.commit()
+    dest = tmp_path / "snap" / "app.db"
+
+    # When snapshotting it
+    snapshot_database(source, dest=dest)
+
+    # Then the snapshot passes verification and holds every row
+    assert row_count(dest) == 2
+
+
+@pytest.mark.parametrize(
+    argnames=("base_seconds", "bytes_per_second", "times_out"),
+    argvalues=[
+        pytest.param(0.05, 10**12, True, id="past-the-limit"),
+        # An 8 KiB snapshot at 1 KiB/s earns about 8s, longer than the check takes.
+        pytest.param(0.0, 1024, False, id="limit-grows-with-size"),
+    ],
+)
+def test_snapshot_database_bounds_verification_time(
+    tmp_path, monkeypatch, base_seconds: float, bytes_per_second: int, *, times_out: bool
+):
+    """Verify the integrity check stops at a limit that grows with the snapshot's size.
+
+    A stalled check holds the run lock, so every later scheduled backup would be dropped. A
+    large database needs longer to read every page, so its limit is longer too.
+    """
+    # Given a database whose generated column takes a fraction of a second to check
+    source = tmp_path / "generated.db"
+    _make_slow_to_check_db(
+        source,
+        column=f"g INTEGER GENERATED ALWAYS AS ({_SLOW_EXPRESSION}) VIRTUAL NOT NULL",
+        # NOT NULL evaluates the expression on insert too, so a few rows keep the setup cheap.
+        rows=20,
+    )
+    monkeypatch.setattr(
+        target=ezbak_sqlite, name="SQLITE_VERIFY_TIMEOUT_SECONDS", value=base_seconds
+    )
+    monkeypatch.setattr(
+        target=ezbak_sqlite, name="SQLITE_VERIFY_READ_BYTES_PER_SECOND", value=bytes_per_second
+    )
+    dest = tmp_path / "snap" / "generated.db"
+
+    # When snapshotting it
+    # Then the check either fails naming the source, or finishes within the size allowance
+    if times_out:
+        with pytest.raises(SqliteSnapshotError, match=rf"generated\.db.*{SQLITE_VERIFY_TIMED_OUT}"):
+            snapshot_database(source, dest=dest)
+    else:
+        snapshot_database(source, dest=dest)
+        assert row_count(dest) == 20
+
+
+@pytest.mark.parametrize(argnames="stage", argvalues=["copy", "verify"])
+def test_snapshot_database_reports_sqlite_out_of_memory(tmp_path, monkeypatch, stage):
+    """Verify SQLite running out of memory fails the snapshot rather than escaping as MemoryError.
+
+    CPython raises SQLITE_NOMEM as `MemoryError`, which is not a `sqlite3.Error`.
+    """
+    # Given a database, and SQLite out of memory when the given stage opens a connection
+    source = tmp_path / "live.db"
+    make_db(source, rows=3)
+    dest = tmp_path / "snap" / "live.db"
+    real_connect = sqlite3.connect
+
+    def connect_out_of_memory(database: str | Path, *, uri: bool = False) -> sqlite3.Connection:
+        # The copy opens the source by URI; verification reopens the snapshot once it exists.
+        is_verify = Path(database) == dest and dest.exists()
+        if (stage == "copy" and uri) or (stage == "verify" and is_verify):
+            raise MemoryError
+        return real_connect(database, uri=uri)
+
+    monkeypatch.setattr(target=sqlite3, name="connect", value=connect_out_of_memory)
+
+    # When snapshotting it
+    # Then the failure is a snapshot error naming the source
+    with pytest.raises(SqliteSnapshotError, match=r"live\.db.*MemoryError"):
+        snapshot_database(source, dest=dest)
 
 
 def test_sidecar_paths_covers_wal_shm_and_journal(tmp_path):
@@ -624,8 +760,8 @@ def test_sidecar_paths_covers_wal_shm_and_journal(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("database", "sources", "expected"),
-    [
+    argnames=("database", "sources", "expected"),
+    argvalues=[
         pytest.param("/data/gitea/gitea.db", ["/data", "/other"], ["/data"], id="enclosing"),
         pytest.param(
             "/data/gitea/gitea.db",
@@ -649,8 +785,8 @@ def test_containing_source_paths_reports_every_enclosing_source(
 
 
 @pytest.mark.parametrize(
-    ("database", "sources", "strip", "expected"),
-    [
+    argnames=("database", "sources", "strip", "expected"),
+    argvalues=[
         pytest.param("/data/gitea/gitea.db", ["/data"], True, "gitea/gitea.db", id="nested-strip"),
         pytest.param(
             "/data/gitea/gitea.db", ["/data"], False, "data/gitea/gitea.db", id="nested-no-strip"
@@ -679,8 +815,8 @@ def test_archive_name_for_matches_the_tar_layout(database, sources, strip, expec
 
 
 @pytest.mark.parametrize(
-    ("database", "sources"),
-    [
+    argnames=("database", "sources"),
+    argvalues=[
         pytest.param("/elsewhere/x.db", ["/data"], id="outside-every-source"),
         pytest.param("/data/gitea/gitea.db", ["/data", "/data/gitea"], id="overlapping-sources"),
     ],
@@ -761,8 +897,8 @@ def test_snapshot_databases_skips_a_symlinked_path(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("link", "database"),
-    [
+    argnames=("link", "database"),
+    argvalues=[
         ("data/current", "data/current/app.db"),
         ("data", "data/app.db"),
     ],
@@ -794,8 +930,8 @@ def test_snapshot_databases_skips_a_database_behind_a_symlinked_directory(tmp_pa
 
 
 @pytest.mark.parametrize(
-    ("content", "expected"),
-    [
+    argnames=("content", "expected"),
+    argvalues=[
         pytest.param(b"SQLite format 3\x00rest of the header", True, id="database"),
         pytest.param(b"SQLite format 2\x00rest of the header", False, id="wrong-version"),
         pytest.param(b"just a text file", False, id="text"),
@@ -822,8 +958,8 @@ def test_is_sqlite_database_rejects_an_unreadable_file(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("suffix", "header", "expected"),
-    [
+    argnames=("suffix", "header", "expected"),
+    argvalues=[
         pytest.param("-wal", b"\x37\x7f\x06\x82", True, id="wal-big-endian-checksums"),
         pytest.param("-wal", b"\x37\x7f\x06\x83", True, id="wal-little-endian-checksums"),
         pytest.param("-wal", b"not a wal file", False, id="wal-lookalike"),
@@ -904,8 +1040,8 @@ def test_snapshot_databases_with_no_paths_is_a_noop(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("entry", "expected"),
-    [
+    argnames=("entry", "expected"),
+    argvalues=[
         pytest.param("*.db", True, id="star"),
         pytest.param("**/*.sqlite3", True, id="double-star"),
         pytest.param("app-?.db", True, id="question"),
@@ -944,8 +1080,8 @@ def test_is_sqlite_path_pattern_treats_a_broken_symlink_as_a_literal(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("pattern", "expected"),
-    [
+    argnames=("pattern", "expected"),
+    argvalues=[
         pytest.param("/data/db/*.db", Path("/data/db"), id="star-file"),
         pytest.param("/data/**/app.db", Path("/data"), id="double-star-dir"),
         pytest.param("/data/*/*.db", Path("/data"), id="star-dir"),
@@ -1137,8 +1273,8 @@ def test_expand_sqlite_paths_preserves_order_across_literals_and_patterns(tmp_pa
 
 
 @pytest.mark.parametrize(
-    ("pattern", "expected"),
-    [
+    argnames=("pattern", "expected"),
+    argvalues=[
         pytest.param("/data/**.db", "**.db", id="glued-suffix"),
         pytest.param("a**b/*.db", "a**b", id="glued-both"),
         pytest.param("/data/**/*.db", None, id="valid-recursive"),

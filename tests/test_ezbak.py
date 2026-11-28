@@ -21,7 +21,7 @@ from ezbak.checksums import format_sidecar, sidecar_name
 from ezbak.constants import DEFAULT_DATE_FORMAT, RestoreOutcome
 from ezbak.core import EZBak
 from ezbak.exceptions import ConfigurationError, RestoreFailedError
-from ezbak.sources import SKIPPED_SPECIAL_FILE_WARNING
+from ezbak.sources import SKIPPED_SPECIAL_FILE_WARNING, SOURCE_PATH_SYMLINK_REFUSED
 from ezbak.storage.local import LocalBackend
 from tests.helpers import (
     LEGACY_BACKUP_NAMES,
@@ -677,7 +677,7 @@ def test_create_backup_refuses_a_source_path_swapped_for_a_symlink(tmp_path, swa
     _swap_for_symlink(source if swapped == "source" else source.parent, outside)
 
     # Then the backup is refused, nothing is archived, and nothing outside is deleted
-    with pytest.raises(ConfigurationError, match="symlink"):
+    with pytest.raises(ConfigurationError, match=SOURCE_PATH_SYMLINK_REFUSED):
         app.create_backup()
     assert not list(storage.iterdir())
     assert all(marker.read_text() == "secret" for marker in markers)
